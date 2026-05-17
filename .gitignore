@@ -7,3 +7,7 @@ __pycache__/
 
 # Claude Code
 .claude/
+
+# Build artifacts
+dist/
+build/

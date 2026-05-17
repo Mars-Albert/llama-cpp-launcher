@@ -1,6 +1,14 @@
 import sys
 import os
 
+
+def _get_work_dir():
+    """Return the directory containing the exe in frozen mode, otherwise the script directory."""
+    if getattr(sys, 'frozen', False):
+        return os.path.dirname(sys.executable)
+    return os.path.dirname(os.path.abspath(__file__))
+
+
 from PyQt6.QtWidgets import QApplication
 from ui.main_window import MainWindow
 from core.defaults import get_default_params, get_chat_templates, fetch_help_text
@@ -18,7 +26,7 @@ def main():
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
     window = MainWindow(
-        work_dir=os.path.dirname(os.path.abspath(__file__)),
+        work_dir=_get_work_dir(),
         defaults=defaults,
         chat_templates=get_chat_templates(help_text=help_text),
     )
