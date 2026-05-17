@@ -45,6 +45,16 @@
 
 ---
 
+## 📥 下载
+
+从 [GitHub Releases](https://github.com/Mars-Albert/llama-cpp-launcher/releases/latest) 下载 `LlamaCppLauncher.exe`，双击即可运行 — 无需安装 Python。
+
+> ⚠️ Windows SmartScreen 可能会警告未签名的可执行文件。点击"更多信息" → "仍要运行"即可。
+
+**前提条件：** `llama-server` 必须已安装并添加到系统 PATH 环境变量。从 [ggml-org/llama.cpp](https://github.com/ggml-org/llama.cpp) 下载。
+
+---
+
 ## ✨ 功能详解
 
 ### 🎭 双模式设计
@@ -151,7 +161,7 @@
 
 ```bash
 # 克隆仓库
-git clone https://github.com/your-username/llama-cpp-launcher.git
+git clone https://github.com/Mars-Albert/llama-cpp-launcher.git
 cd llama-cpp-launcher
 
 # 创建虚拟环境并安装依赖
@@ -187,17 +197,19 @@ python main.py
 llama-cpp-launcher/
 ├── main.py                  # 应用程序入口
 ├── run.bat                  # Windows 启动脚本
+├── build_config.py          # 构建配置（名称、版本）
+├── llama_cpp_launcher.spec  # PyInstaller 构建配置
+├── requirements.txt         # Python 依赖
 ├── core/
 │   ├── config.py            # 配置与预设管理
 │   ├── defaults.py          # 默认参数定义与 CLI 解析
 │   ├── i18n.py              # 国际化（中文/英文）
 │   └── runner.py            # llama-server 进程管理
-├── ui/
-│   ├── main_window.py       # 主窗口
-│   ├── basic_panel.py       # 基础模式面板
-│   ├── advanced_panel.py    # 高级模式面板（100+ 参数）
-│   └── model_browser.py     # GGUF 模型文件浏览器
-└── requirements.txt         # Python 依赖
+└── ui/
+    ├── main_window.py       # 主窗口
+    ├── basic_panel.py       # 基础模式面板
+    ├── advanced_panel.py    # 高级模式面板（100+ 参数）
+    └── model_browser.py     # GGUF 模型文件浏览器
 ```
 
 ---

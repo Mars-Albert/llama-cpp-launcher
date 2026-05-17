@@ -45,6 +45,16 @@ Unlike Ollama, LM Studio, and similar tools that **bundle a specific version of 
 
 ---
 
+## 📥 Download
+
+Download `LlamaCppLauncher.exe` from [GitHub Releases](https://github.com/Mars-Albert/llama-cpp-launcher/releases/latest) and double-click to run — no Python installation required.
+
+> ⚠️ Windows SmartScreen may warn about the unsigned executable. Click "More info" → "Run anyway" to proceed.
+
+**Prerequisites:** `llama-server` must be installed and added to your system PATH. Download from [ggml-org/llama.cpp](https://github.com/ggml-org/llama.cpp).
+
+---
+
 ## ✨ Features
 
 ### 🎭 Two Modes
@@ -151,7 +161,7 @@ The info panel **updates live** — GPU offload layers appear during loading, bu
 
 ```bash
 # Clone the repository
-git clone https://github.com/your-username/llama-cpp-launcher.git
+git clone https://github.com/Mars-Albert/llama-cpp-launcher.git
 cd llama-cpp-launcher
 
 # Create virtual environment and install dependencies
@@ -187,17 +197,19 @@ python main.py
 llama-cpp-launcher/
 ├── main.py                  # Application entry point
 ├── run.bat                  # Windows launcher script
+├── build_config.py          # Build configuration (name, version)
+├── llama_cpp_launcher.spec  # PyInstaller build spec
+├── requirements.txt         # Python dependencies
 ├── core/
 │   ├── config.py            # Configuration & preset management
 │   ├── defaults.py          # Default parameter definitions & CLI parsing
 │   ├── i18n.py              # Internationalization (Chinese/English)
 │   └── runner.py            # llama-server process management
-├── ui/
-│   ├── main_window.py       # Main application window
-│   ├── basic_panel.py       # Basic mode panel
-│   ├── advanced_panel.py    # Advanced mode panel (100+ parameters)
-│   └── model_browser.py     # GGUF model file browser
-└── requirements.txt         # Python dependencies
+└── ui/
+    ├── main_window.py       # Main application window
+    ├── basic_panel.py       # Basic mode panel
+    ├── advanced_panel.py    # Advanced mode panel (100+ parameters)
+    └── model_browser.py     # GGUF model file browser
 ```
 
 ---
