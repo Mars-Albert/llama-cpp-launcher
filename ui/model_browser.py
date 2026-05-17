@@ -60,6 +60,7 @@ class ModelBrowser(QWidget):
         self.loras = []
         self._scanner_thread = None
         self.init_ui()
+        self.model_selected.connect(self.auto_select_mmproj)
         self.scan_models()
 
     def init_ui(self):

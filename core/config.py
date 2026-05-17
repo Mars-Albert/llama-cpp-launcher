@@ -13,7 +13,8 @@ logger = logging.getLogger(__name__)
 
 def _sanitize_preset_name(name: str) -> str:
     """Remove path separators and traversal sequences to prevent path traversal."""
-    return re.sub(r'[/\\:\x00]', '_', name).strip('. ')
+    result = re.sub(r'[/\\:\x00]', '_', name).strip('. ')
+    return result if result else "unnamed"
 
 
 CONFIG_DIR = Path.home() / ".llama-cpp-launcher"
@@ -130,9 +131,13 @@ class ConfigManager:
     def list_presets(self):
         presets = []
         for f in PRESETS_DIR.glob("*.json"):
+            try:
+                created = datetime.fromtimestamp(f.stat().st_mtime).isoformat()
+            except (FileNotFoundError, OSError):
+                continue
             presets.append({
                 "name": f.stem,
-                "created": datetime.fromtimestamp(f.stat().st_mtime).isoformat() if f.exists() else "",
+                "created": created,
                 "path": str(f),
             })
         return sorted(presets, key=lambda x: x["name"])

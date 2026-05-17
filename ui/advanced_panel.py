@@ -605,8 +605,8 @@ class AdvancedPanel(QWidget):
         self.adv_op_offload.setChecked(True)
         self._add_form_row(form, "算子卸载 (--op-offload):", self.adv_op_offload)
 
-        draft_section_lbl = QLabel(f"<b>{t('--- 草稿模型 (Speculative Decoding) ---')}</b>")
-        self._section_labels.append(("--- 草稿模型 (Speculative Decoding) ---", draft_section_lbl))
+        draft_section_lbl = QLabel(f"<b>{t('--- 草稿模型 (投机解码) ---')}</b>")
+        self._section_labels.append(("--- 草稿模型 (投机解码) ---", draft_section_lbl))
         form.addRow(draft_section_lbl)
 
         draft_model_row, self.adv_draft_model = self._make_file_row("file", "GGUF Files (*.gguf)")
@@ -671,11 +671,11 @@ class AdvancedPanel(QWidget):
         self.adv_spec_draft_p_split.setRange(0.0, 1.0)
         self.adv_spec_draft_p_split.setSingleStep(0.05)
         self.adv_spec_draft_p_split.setValue(0.10)
-        self._add_form_row(form, "推测拆分概率 (--spec-draft-p-split):", self.adv_spec_draft_p_split)
+        self._add_form_row(form, "投机拆分概率 (--spec-draft-p-split):", self.adv_spec_draft_p_split)
 
         self.adv_spec_type = QComboBox()
         self.adv_spec_type.addItems(["none", "draft-simple", "draft-eagle3", "draft-mtp", "ngram-simple", "ngram-map-k", "ngram-map-k4v", "ngram-mod", "ngram-cache"])
-        self._add_form_row(form, "推测类型 (--spec-type):", self.adv_spec_type)
+        self._add_form_row(form, "投机类型 (--spec-type):", self.adv_spec_type)
 
         self.adv_spec_ngram_n = QSpinBox()
         self.adv_spec_ngram_n.setRange(1, 128)
@@ -1317,8 +1317,8 @@ class AdvancedPanel(QWidget):
                 self.adv_ngl.setEditText(val)
             try:
                 self.adv_ngl_spin.setValue(int(val))
-            except ValueError:
-                pass
+            except (ValueError, TypeError):
+                self.adv_ngl_spin.setValue(0)
             self.adv_ngl_spin.blockSignals(False)
         if "device" in values:
             self.adv_device.setText(values["device"])

@@ -398,14 +398,14 @@ _EN = {
     "草稿Token数 (--draft-max):": "Draft Tokens (--draft-max):",
     "草稿最小Token (--draft-min):": "Draft Min Tokens (--draft-min):",
     "草稿最小概率 (--draft-p-min):": "Draft Min Prob (--draft-p-min):",
-    "推测类型 (--spec-type):": "Speculative Type (--spec-type):",
+    "投机类型 (--spec-type):": "Speculative Type (--spec-type):",
     "Ngram大小N (--spec-ngram-size-n):": "Ngram Size N (--spec-ngram-size-n):",
     "Ngram大小M (--spec-ngram-size-m):": "Ngram Size M (--spec-ngram-size-m):",
     "Ngram最小命中 (--spec-ngram-min-hits):": "Ngram Min Hits (--spec-ngram-min-hits):",
     "草稿Token数 (--spec-draft-n-max):": "Draft Tokens (--spec-draft-n-max):",
     "草稿最小Token (--spec-draft-n-min):": "Draft Min Tokens (--spec-draft-n-min):",
     "草稿最小概率 (--spec-draft-p-min):": "Draft Min Prob (--spec-draft-p-min):",
-    "推测拆分概率 (--spec-draft-p-split):": "Spec Draft Split Prob (--spec-draft-p-split):",
+    "投机拆分概率 (--spec-draft-p-split):": "Spec Draft Split Prob (--spec-draft-p-split):",
     "Ngram大小N (--spec-ngram-simple-size-n):": "Ngram Size N (--spec-ngram-simple-size-n):",
     "Ngram大小M (--spec-ngram-simple-size-m):": "Ngram Size M (--spec-ngram-simple-size-m):",
     "Ngram最小命中 (--spec-ngram-simple-min-hits):": "Ngram Min Hits (--spec-ngram-simple-min-hits):",
@@ -482,7 +482,7 @@ _EN = {
     "额外参数:": "Extra Args:",
 
     # Section headers (bold labels)
-    "--- 草稿模型 (Speculative Decoding) ---": "--- Draft Model (Speculative Decoding) ---",
+    "--- 草稿模型 (投机解码) ---": "--- Draft Model (投机解码) ---",
 
     # === basic_panel.py ===
     "🧠 模型设置": "🧠 Model",
@@ -503,6 +503,8 @@ _EN = {
     "并行:": "Parallel:",
     "推理:": "Reason:",
     "分割模式:": "Split:",
+    "投机类型:": "Spec Type:",
+    "草稿Token:": "Draft Tokens:",
 
     # === model_browser.py ===
     "📦 模型文件": "📦 Models",
@@ -619,14 +621,14 @@ _EN = {
     "草稿Token数 (--draft-max):": "Draft Tokens (--draft-max):",
     "草稿最小Token (--draft-min):": "Draft Min Tokens (--draft-min):",
     "草稿最小概率 (--draft-p-min):": "Draft Min Prob (--draft-p-min):",
-    "推测类型 (--spec-type):": "Speculative Type (--spec-type):",
+    "投机类型 (--spec-type):": "Speculative Type (--spec-type):",
     "Ngram大小N (--spec-ngram-size-n):": "Ngram Size N (--spec-ngram-size-n):",
     "Ngram大小M (--spec-ngram-size-m):": "Ngram Size M (--spec-ngram-size-m):",
     "Ngram最小命中 (--spec-ngram-min-hits):": "Ngram Min Hits (--spec-ngram-min-hits):",
     "草稿Token数 (--spec-draft-n-max):": "Draft Tokens (--spec-draft-n-max):",
     "草稿最小Token (--spec-draft-n-min):": "Draft Min Tokens (--spec-draft-n-min):",
     "草稿最小概率 (--spec-draft-p-min):": "Draft Min Prob (--spec-draft-p-min):",
-    "推测拆分概率 (--spec-draft-p-split):": "Spec Draft Split Prob (--spec-draft-p-split):",
+    "投机拆分概率 (--spec-draft-p-split):": "Spec Draft Split Prob (--spec-draft-p-split):",
     "Ngram大小N (--spec-ngram-simple-size-n):": "Ngram Size N (--spec-ngram-simple-size-n):",
     "Ngram大小M (--spec-ngram-simple-size-m):": "Ngram Size M (--spec-ngram-simple-size-m):",
     "Ngram最小命中 (--spec-ngram-simple-min-hits):": "Ngram Min Hits (--spec-ngram-simple-min-hits):",
@@ -692,7 +694,7 @@ _EN = {
     "反向提示词 (--reverse-prompt):": "Reverse Prompt (--reverse-prompt):",
     "SPM填充 (--spm-infill):": "SPM Infill (--spm-infill):",
     "额外参数:": "Extra Args:",
-    "--- 草稿模型 (Speculative Decoding) ---": "--- Draft Model (Speculative Decoding) ---",
+    "--- 草稿模型 (投机解码) ---": "--- Draft Model (投机解码) ---",
     "额外参数，每行一个": "Extra args, one per line",
     # config.py logger messages
     "保存设置失败: {e}": "Failed to save settings: {e}",

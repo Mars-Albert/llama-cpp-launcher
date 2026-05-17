@@ -209,7 +209,7 @@ _VALUE_FLAG_MAP = {
     "batch_size": (["-b", "--batch-size"], int),
     "ubatch_size": (["-ub", "--ubatch-size"], int),
     "keep": (["--keep"], int),
-    "defrag_thold": (["-dt", "--defrag-thold"], int),  # DEPRECATED
+    "defrag_thold": (["-dt", "--defrag-thold"], float),  # DEPRECATED
     "flash_attn": (["-fa", "--flash-attn"], str),  # [on|off|auto]
     "rope_scaling": (["--rope-scaling"], str),
     "rope_scale": (["--rope-scale"], float),
@@ -405,10 +405,10 @@ def _extract_default_from_text(text, flags):
 
 
 def _parse_bool(text):
-    t = text.strip().lower()
-    if t in ("true", "enabled", "on", "1"):
+    lower_text = text.strip().lower()
+    if lower_text in ("true", "enabled", "on", "1"):
         return True
-    if t in ("false", "disabled", "off", "0"):
+    if lower_text in ("false", "disabled", "off", "0"):
         return False
     return None
 
@@ -543,8 +543,8 @@ def get_chat_templates(server_path="llama-server", help_text=None):
             stripped = line.strip()
             if not stripped:
                 break
-            for t in stripped.split(", "):
-                t = t.strip().rstrip(",")
-                if t and t[0].isalpha():
-                    templates.append(t)
+            for name in stripped.split(", "):
+                name = name.strip().rstrip(",")
+                if name and name[0].isalpha():
+                    templates.append(name)
     return templates if templates else []

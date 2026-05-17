@@ -9,7 +9,7 @@ from pathlib import Path
 from datetime import datetime
 
 from PyQt6.QtWidgets import (
-    QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QSplitter,
+    QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QSplitter,
     QPushButton, QLabel, QPlainTextEdit, QComboBox, QInputDialog,
     QMessageBox, QFileDialog, QStatusBar,
     QCheckBox, QGroupBox, QTabWidget, QTextEdit
@@ -530,6 +530,7 @@ class MainWindow(QMainWindow):
         self.log_output.setReadOnly(True)
         self.log_output.setFont(QFont("Consolas", 10))
         self.log_output.setStyleSheet("background: #121212; color: #cdd6f4; border: none; padding: 4px;")
+        self.log_output.document().setMaximumBlockCount(5000)
 
         log_tab = QWidget()
         log_tab_layout = QVBoxLayout(log_tab)
@@ -660,6 +661,8 @@ class MainWindow(QMainWindow):
         self._apply_params_to_current()
 
     def _is_default(self, key, v):
+        if key not in v:
+            return True
         return v.get(key) == self.defaults.get(key)
 
     def _build_args_from_params(self):
@@ -1207,7 +1210,7 @@ class MainWindow(QMainWindow):
         extra = v.get("extra_args", "").strip()
         if extra:
             try:
-                return shlex.split(extra, posix=(os.name != 'nt'))
+                return shlex.split(extra)
             except ValueError:
                 return extra.split()
         return []
@@ -1360,17 +1363,8 @@ class MainWindow(QMainWindow):
         QMessageBox.critical(self, t("错误"), msg)
         self.statusBar().showMessage(t("❌ 启动失败: {msg}", msg=msg[:80]))
 
-    _MAX_LOG_LINES = 5000
-
     def _append_log(self, text):
         self.log_output.appendPlainText(text.rstrip())
-        doc = self.log_output.document()
-        if doc.blockCount() > self._MAX_LOG_LINES:
-            cursor = self.log_output.textCursor()
-            cursor.movePosition(cursor.MoveOperation.Start)
-            cursor.movePosition(cursor.MoveOperation.Down, cursor.MoveMode.KeepAnchor,
-                                doc.blockCount() - self._MAX_LOG_LINES)
-            cursor.removeSelectedText()
         if self.chk_auto_scroll.isChecked():
             self.log_output.verticalScrollBar().setValue(
                 self.log_output.verticalScrollBar().maximum()
@@ -1585,7 +1579,7 @@ class MainWindow(QMainWindow):
         if info.get("repack"):
             items.append((t("📦 Repack（权重重打包优化）"), info.get("repack")))
         if info.get("speculative_decoding"):
-            items.append((t("🚀 推测解码（Speculative Decoding）"), info.get("speculative_decoding")))
+            items.append((t("🚀 投机解码（Speculative Decoding）"), info.get("speculative_decoding")))
         if items:
             categories.append((t("系统配置"), items))
 
@@ -1635,8 +1629,11 @@ class MainWindow(QMainWindow):
     def _export_log(self):
         path, _ = QFileDialog.getSaveFileName(self, t("导出日志"), "", "Text Files (*.txt)")
         if path:
-            with open(path, "w", encoding="utf-8") as f:
-                f.write(self.log_output.toPlainText())
+            try:
+                with open(path, "w", encoding="utf-8") as f:
+                    f.write(self.log_output.toPlainText())
+            except (OSError, IOError) as e:
+                QMessageBox.warning(self, t("错误"), str(e))
 
     def _update_timer(self):
         if self.start_time:
@@ -1737,6 +1734,9 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event):
         if self.runner.is_running:
             self.runner.stop(blocking=True)
+        if hasattr(self, '_version_worker') and self._version_worker is not None:
+            self._version_worker.quit()
+            self._version_worker.wait(2000)
         event.accept()
 
     def _create_menu_bar(self):
@@ -1840,9 +1840,10 @@ class MainWindow(QMainWindow):
 
     def _create_model_info_group(self):
         group = QGroupBox(t("📊 模型信息"))
-        layout = QVBoxLayout(group)
-        layout.setContentsMargins(6, 20, 6, 6)
-        layout.setSpacing(4)
+        layout = QGridLayout(group)
+        layout.setContentsMargins(10, 20, 10, 8)
+        layout.setSpacing(6)
+        layout.setColumnStretch(1, 1)
 
         self.model_info_labels = {}
         self._model_info_label_widgets = {}
@@ -1853,18 +1854,16 @@ class MainWindow(QMainWindow):
             ("model_params", "🔢 模型参数量"),
             ("quant_type", "📐 量化类型"),
         ]
-        for key, label_text in info_items:
-            row = QHBoxLayout()
+        for row_idx, (key, label_text) in enumerate(info_items):
             lbl = QLabel(t(label_text))
             self._model_info_label_widgets[key] = (lbl, label_text)
-            lbl.setStyleSheet("color: #7aa2f7; font-weight: bold; font-size: 12px; min-width: 100px;")
-            row.addWidget(lbl)
+            lbl.setStyleSheet("color: #7aa2f7; font-weight: bold; font-size: 12px;")
+            layout.addWidget(lbl, row_idx, 0)
+
             val = QLabel("—")
-            val.setStyleSheet("color: #a9b1d6; font-size: 12px;")
+            val.setStyleSheet("color: #3b4261; font-size: 12px;")
             val.setWordWrap(True)
-            row.addWidget(val)
-            row.addStretch()
-            layout.addLayout(row)
+            layout.addWidget(val, row_idx, 1)
             self.model_info_labels[key] = val
 
         return group

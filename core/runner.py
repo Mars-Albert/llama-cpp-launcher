@@ -41,13 +41,14 @@ class ServerRunner(QObject):
         if work_dir:
             self.process.setWorkingDirectory(work_dir)
         self._log_buffer = ""
+        self._is_running = True
+        self._is_ready = False
+        self._was_stopped_intentionally = False
         self.process.start()
         if self.process.state() == QProcess.ProcessState.NotRunning:
+            self._is_running = False
             self.error_occurred.emit(t("启动 llama-server 失败。请确保它在系统 PATH 中。"))
         else:
-            self._is_running = True
-            self._is_ready = False
-            self._was_stopped_intentionally = False
             self.state_changed.emit("starting")
 
     def stop(self, blocking=False):
@@ -61,6 +62,9 @@ class ServerRunner(QObject):
             if not self.process.waitForFinished(3000):
                 self.process.kill()
                 self.process.waitForFinished(1000)
+                if self.process.state() != QProcess.ProcessState.NotRunning:
+                    self.process.terminate()
+                    self.process.waitForFinished(1000)
             self._kill_timer.stop()
             self._is_running = False
             self._is_stopping = False
@@ -70,6 +74,13 @@ class ServerRunner(QObject):
     def _force_kill(self):
         if self.process.state() != QProcess.ProcessState.NotRunning:
             self.process.kill()
+            if not self.process.waitForFinished(2000):
+                self.process.terminate()
+                self.process.waitForFinished(1000)
+                if self.process.state() != QProcess.ProcessState.NotRunning:
+                    self._is_running = False
+                    self._is_stopping = False
+                    self.state_changed.emit("stopped")
 
     def _check_ready(self, text):
         if not self._is_ready and not self._is_stopping:

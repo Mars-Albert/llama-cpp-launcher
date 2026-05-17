@@ -61,7 +61,7 @@ Download `LlamaCppLauncher.exe` from [GitHub Releases](https://github.com/Mars-A
 
 | Basic Mode | Advanced Mode |
 |---|---|
-| Sliders for temp, top-p, top-k, min-p, repeat penalty | 7 tabs: Model, Context, Sampling, GPU, Server, Chat/Reasoning, Advanced |
+| Sliders for temp, top-p, min-p, repeat penalty + top-k spinbox | 7 tabs: Model, Context, Sampling, GPU/Performance, Server, Chat/Reasoning, Advanced |
 | Quick context size buttons (4K → 262K) | Every `llama-server` CLI parameter exposed |
 | GPU layers: auto / all / manual | LoRA adapters, control vectors, grammar, JSON schema |
 | Get a model running in seconds | Fine-tune every detail |
@@ -76,19 +76,19 @@ Download `LlamaCppLauncher.exe` from [GitHub Releases](https://github.com/Mars-A
 
 ### 📊 Real-time Log Parsing
 
-Monitors `llama-server` stdout/stderr in real-time and extracts **40+ data points** into a structured summary panel across 9 categories. **Compatible with both old and new llama.cpp log formats** (v9174+ `srv`-prefixed format). No more scrolling through walls of terminal text.
+Monitors `llama-server` stdout/stderr in real-time and extracts **40+ data points** into a structured summary panel across 8 categories. **Compatible with both old and new llama.cpp log formats** (v9174+ `srv`-prefixed format). No more scrolling through walls of terminal text.
 
 **What it captures:**
 
 | Category | Details |
 |---|---|
-| 🖥️ **GPU** | Device name, compute capability, total VRAM, per-GPU free memory |
+| 🖥️ **Hardware** | GPU device name, compute capability, total VRAM, per-GPU free memory, CPU name/RAM |
 | 📦 **Model** | File name, model name, quant type, file size, GGUF version |
 | 🏗️ **Architecture** | Params, arch, layers, embed dim, FFN dim, vocab size/type, tensor precision distribution |
 | ⚙️ **Runtime** | Train ctx, runtime ctx, batch, ubatch, sliding window, RoPE freq, slots, thinking mode |
 | 💾 **VRAM** | GPU offload layers, model VRAM, CPU buffer, projected VRAM, KV cache, compute buffer, prompt cache |
 | ⚡ **Performance** | Flash Attention, KV unified, graph nodes, graph splits |
-| 🔧 **System** | CPU name/RAM, thread config, OpenMP, Repack |
+| 🔧 **System** | Thread config, OpenMP, Repack |
 | 👁️ **Vision** | Encoder status, mmproj file, vision model size, image resolution, min image tokens |
 
 The info panel **updates live** — GPU offload layers appear during loading, buffer sizes populate during initialization, status flips to "ready" when the server starts listening.
@@ -97,7 +97,7 @@ The info panel **updates live** — GPU offload layers appear during loading, bu
 
 - Save/load/delete named presets
 - Import/export presets as JSON files for sharing
-- Auto-loads last-used preset on startup
+- Preset names validated to prevent injection
 - Overwrite confirmation dialog
 
 ### 🚀 Server Lifecycle
@@ -130,7 +130,7 @@ The info panel **updates live** — GPU offload layers appear during loading, bu
 
 ### 🧮 Model Info Estimation
 
-- Estimates quantization type from filename patterns (Q4_K_M, IQ4_XS, etc.)
+- Estimates quantization type from filename patterns (Q4_K, IQ4, Q8_0, F16, etc.)
 - Estimates parameter count from file size and quant type
 - Displays model info panel before launch
 
@@ -227,7 +227,6 @@ llama-cpp-launcher/
 | Lightweight (~6000 lines) | ✅ | ❌ | ❌ |
 | Preset management | ✅ | ❌ | ❌ |
 | Undo support | ✅ | ❌ | ❌ |
-| Chinese/English i18n | ✅ | ❌ | ❌ |
 
 ---
 

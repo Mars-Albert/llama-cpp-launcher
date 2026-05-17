@@ -46,14 +46,16 @@ class BasicPanel(QWidget):
             self.port_spin.setValue(d["port"])
         if "flash_attn" in d:
             self.flash_attn_combo.setCurrentText(str(d["flash_attn"]))
-        if "jinja" in d:
-            self.chk_jinja.setChecked(bool(d["jinja"]))
         if "webui" in d:
             self.chk_webui.setChecked(bool(d["webui"]))
         if "reasoning" in d:
             self.reasoning_combo.setCurrentText(str(d["reasoning"]))
         if "split_mode" in d:
             self.split_mode_combo.setCurrentText(str(d["split_mode"]))
+        if "spec_type" in d:
+            self.spec_type_combo.setCurrentText(str(d["spec_type"]))
+        if "draft_max" in d:
+            self.draft_max_spin.setValue(d["draft_max"])
 
     def _setup_ui(self):
         layout = QVBoxLayout(self)
@@ -231,6 +233,10 @@ class BasicPanel(QWidget):
         self.parallel_spin.setValue(1)
         self.parallel_spin.setFixedWidth(60)
         layout.addWidget(self.parallel_spin)
+        layout.addSpacing(12)
+        self.chk_webui = QCheckBox("WebUI")
+        self.chk_webui.setChecked(True)
+        layout.addWidget(self.chk_webui)
         layout.addStretch()
         return self._server_group
 
@@ -245,13 +251,6 @@ class BasicPanel(QWidget):
         self.flash_attn_combo.setFixedWidth(78)
         layout.addWidget(QLabel("FlashAttn:"))
         layout.addWidget(self.flash_attn_combo)
-        layout.addSpacing(12)
-        self.chk_jinja = QCheckBox("Jinja")
-        self.chk_jinja.setChecked(True)
-        layout.addWidget(self.chk_jinja)
-        self.chk_webui = QCheckBox("WebUI")
-        self.chk_webui.setChecked(True)
-        layout.addWidget(self.chk_webui)
         layout.addSpacing(12)
         self.reasoning_combo = QComboBox()
         self.reasoning_combo.addItems(["auto", "on", "off"])
@@ -268,6 +267,22 @@ class BasicPanel(QWidget):
         self._lbl_split_mode = QLabel(t("分割模式:"))
         layout.addWidget(self._lbl_split_mode)
         layout.addWidget(self.split_mode_combo)
+        layout.addSpacing(12)
+        self.spec_type_combo = QComboBox()
+        self.spec_type_combo.addItems(["none", "draft-simple", "draft-eagle3", "draft-mtp", "ngram-simple", "ngram-map-k", "ngram-map-k4v", "ngram-mod", "ngram-cache"])
+        self.spec_type_combo.setCurrentText("none")
+        self.spec_type_combo.setFixedWidth(140)
+        self._lbl_spec_type = QLabel(t("投机类型:"))
+        layout.addWidget(self._lbl_spec_type)
+        layout.addWidget(self.spec_type_combo)
+        layout.addSpacing(12)
+        self.draft_max_spin = QSpinBox()
+        self.draft_max_spin.setRange(1, 256)
+        self.draft_max_spin.setValue(16)
+        self.draft_max_spin.setFixedWidth(60)
+        self._lbl_draft_max = QLabel(t("草稿Token:"))
+        layout.addWidget(self._lbl_draft_max)
+        layout.addWidget(self.draft_max_spin)
         layout.addStretch()
         return self._toggles_group
 
@@ -318,10 +333,11 @@ class BasicPanel(QWidget):
             "port": self.port_spin.value(),
             "parallel": self.parallel_spin.value(),
             "flash_attn": self.flash_attn_combo.currentText(),
-            "jinja": self.chk_jinja.isChecked(),
             "webui": self.chk_webui.isChecked(),
             "reasoning": self.reasoning_combo.currentText(),
             "split_mode": self.split_mode_combo.currentText(),
+            "spec_type": self.spec_type_combo.currentText(),
+            "draft_max": self.draft_max_spin.value(),
         }
 
     def set_values(self, values):
@@ -341,6 +357,10 @@ class BasicPanel(QWidget):
         if "n_gpu_layers" in values:
             self.ngl_spin.blockSignals(True)
             self.ngl_combo.setCurrentText(str(values["n_gpu_layers"]))
+            try:
+                self.ngl_spin.setValue(int(values["n_gpu_layers"]))
+            except (ValueError, TypeError):
+                self.ngl_spin.setValue(0)
             self.ngl_spin.blockSignals(False)
         if "ctx_size" in values:
             self.ctx_spin.setValue(values["ctx_size"])
@@ -366,14 +386,16 @@ class BasicPanel(QWidget):
             self.parallel_spin.setValue(values["parallel"])
         if "flash_attn" in values:
             self.flash_attn_combo.setCurrentText(str(values["flash_attn"]))
-        if "jinja" in values:
-            self.chk_jinja.setChecked(values["jinja"])
         if "webui" in values:
             self.chk_webui.setChecked(values["webui"])
         if "reasoning" in values:
             self.reasoning_combo.setCurrentText(str(values["reasoning"]))
         if "split_mode" in values:
             self.split_mode_combo.setCurrentText(str(values["split_mode"]))
+        if "spec_type" in values:
+            self.spec_type_combo.setCurrentText(str(values["spec_type"]))
+        if "draft_max" in values:
+            self.draft_max_spin.setValue(values["draft_max"])
 
     def reset(self):
         self.set_values(dict(self._defaults))
@@ -396,3 +418,5 @@ class BasicPanel(QWidget):
         self._toggles_group.setTitle(t("⚡ 快捷开关"))
         self._lbl_reasoning.setText(t("推理:"))
         self._lbl_split_mode.setText(t("分割模式:"))
+        self._lbl_spec_type.setText(t("投机类型:"))
+        self._lbl_draft_max.setText(t("草稿Token:"))
