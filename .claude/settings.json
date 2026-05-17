@@ -1,0 +1,6 @@
+{
+  "statusLine": {
+    "type": "command",
+    "command": "python G:/Programs/llama-cpp-launcher/.claude/statusline-command.py"
+  }
+}
