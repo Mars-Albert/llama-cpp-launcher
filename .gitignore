@@ -12,5 +12,3 @@ CLAUDE.md
 # Build artifacts
 dist/
 build/
-build_config.py
-llama_cpp_launcher.spec
