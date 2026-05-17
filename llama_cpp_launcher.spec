@@ -1,5 +1,9 @@
 # -*- mode: python ; coding: utf-8 -*-
 import os
+import sys
+
+# Add current directory to path so we can import build_config
+sys.path.insert(0, os.path.abspath('.'))
 import build_config
 
 a = Analysis(
