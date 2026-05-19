@@ -39,6 +39,22 @@ Unlike Ollama, LM Studio, and similar tools that **bundle a specific version of 
 
 ---
 
+## 🆚 Comparison
+
+| Feature | Llama CPP Launcher | Ollama | LM Studio |
+|---------|:---:|:---:|:---:|
+| Bring your own llama.cpp | ✅ | ❌ | ❌ |
+| Use latest llama.cpp same day | ✅ | ❌ | ❌ |
+| Custom compiled backends | ✅ | ❌ | ❌ |
+| Full CLI parameter access | ✅ | ❌ | Partial |
+| Visible command line | ✅ | ❌ | ❌ |
+| No telemetry | ✅ | ❌ | ❌ |
+| Lightweight (~6000 lines) | ✅ | ❌ | ❌ |
+| Preset management | ✅ | ❌ | ❌ |
+| Undo support | ✅ | ❌ | ❌ |
+
+---
+
 ## 📸 Screenshot
 
 ![Llama CPP Launcher Screenshot](en.png)
@@ -211,22 +227,6 @@ llama-cpp-launcher/
     ├── advanced_panel.py    # Advanced mode panel (100+ parameters)
     └── model_browser.py     # GGUF model file browser
 ```
-
----
-
-## 🆚 Comparison
-
-| Feature | Llama CPP Launcher | Ollama | LM Studio |
-|---------|:---:|:---:|:---:|
-| Bring your own llama.cpp | ✅ | ❌ | ❌ |
-| Use latest llama.cpp same day | ✅ | ❌ | ❌ |
-| Custom compiled backends | ✅ | ❌ | ❌ |
-| Full CLI parameter access | ✅ | ❌ | Partial |
-| Visible command line | ✅ | ❌ | ❌ |
-| No telemetry | ✅ | ❌ | ❌ |
-| Lightweight (~6000 lines) | ✅ | ❌ | ❌ |
-| Preset management | ✅ | ❌ | ❌ |
-| Undo support | ✅ | ❌ | ❌ |
 
 ---
 

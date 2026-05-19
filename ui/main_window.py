@@ -549,8 +549,8 @@ class MainWindow(QMainWindow):
         log_toolbar.addWidget(self.btn_clear_log)
         log_toolbar.addWidget(self.btn_export_log)
         log_toolbar.addWidget(self.chk_auto_scroll)
-        log_tab_layout.addLayout(log_toolbar)
         log_tab_layout.addWidget(self.log_output)
+        log_tab_layout.addLayout(log_toolbar)
 
         self.info_display = QTextEdit()
         self.info_display.setReadOnly(True)

@@ -567,10 +567,10 @@ class AdvancedPanel(QWidget):
         self.adv_fit.setCurrentText("on")
         self._add_form_row(form, "适配内存 (--fit):", self.adv_fit)
 
-        self.adv_fit_target = QSpinBox()
-        self.adv_fit_target.setRange(0, 32768)
-        self.adv_fit_target.setValue(1024)
-        self._add_form_row(form, "适配目标MB (--fit-target):", self.adv_fit_target)
+        self.adv_fit_target = QLineEdit()
+        self.adv_fit_target.setText("1024")
+        self.adv_fit_target.setPlaceholderText("1024, 2048, ...")
+        self._add_form_row(form, "适配目标MiB (--fit-target):", self.adv_fit_target)
 
         self.adv_fit_ctx = QSpinBox()
         self.adv_fit_ctx.setRange(256, 999999)
@@ -1081,7 +1081,7 @@ class AdvancedPanel(QWidget):
         v["no_host"] = self.adv_no_host.isChecked()
         v["repack"] = self.adv_repack.isChecked()
         v["fit"] = self.adv_fit.currentText()
-        v["fit_target"] = self.adv_fit_target.value()
+        v["fit_target"] = self.adv_fit_target.text()
         v["fit_ctx"] = self.adv_fit_ctx.value()
         v["check_tensors"] = self.adv_check_tensors.isChecked()
         v["n_cpu_moe"] = self.adv_n_cpu_moe.value()
@@ -1349,7 +1349,7 @@ class AdvancedPanel(QWidget):
         if "fit" in values:
             self.adv_fit.setCurrentText(values["fit"])
         if "fit_target" in values:
-            self.adv_fit_target.setValue(values["fit_target"])
+            self.adv_fit_target.setText(str(values["fit_target"]))
         if "fit_ctx" in values:
             self.adv_fit_ctx.setValue(values["fit_ctx"])
         if "check_tensors" in values:

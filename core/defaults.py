@@ -51,7 +51,7 @@ _FALLBACK_DEFAULTS = {
     "main_gpu": 0,
     "n_gpu_layers": "auto",
     "fit": "on",
-    "fit_target": 1024,
+    "fit_target": "1024",
     "fit_ctx": 4096,
     "check_tensors": False,
     "op_offload": True,
@@ -228,7 +228,7 @@ _VALUE_FLAG_MAP = {
     "main_gpu": (["-mg", "--main-gpu"], int),
     "n_gpu_layers": (["-ngl", "--gpu-layers", "--n-gpu-layers"], str),  # N, 'auto', or 'all'
     "fit": (["-fit", "--fit"], str),
-    "fit_target": (["-fitt", "--fit-target"], int),
+    "fit_target": (["-fitt", "--fit-target"], str),
     "fit_ctx": (["-fitc", "--fit-ctx"], int),
     "n_cpu_moe": (["-ncmoe", "--n-cpu-moe"], int),
     "lora_scaled": (["--lora-scaled"], str),
