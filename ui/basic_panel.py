@@ -278,7 +278,7 @@ class BasicPanel(QWidget):
         layout.addSpacing(12)
         self.draft_max_spin = QSpinBox()
         self.draft_max_spin.setRange(1, 256)
-        self.draft_max_spin.setValue(16)
+        self.draft_max_spin.setValue(3)
         self.draft_max_spin.setFixedWidth(60)
         self._lbl_draft_max = QLabel(t("草稿Token:"))
         layout.addWidget(self._lbl_draft_max)

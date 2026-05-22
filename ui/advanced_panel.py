@@ -654,7 +654,7 @@ class AdvancedPanel(QWidget):
 
         self.adv_draft_max = QSpinBox()
         self.adv_draft_max.setRange(1, 256)
-        self.adv_draft_max.setValue(16)
+        self.adv_draft_max.setValue(3)
         self._add_form_row(form, "草稿Token数 (--spec-draft-n-max):", self.adv_draft_max)
 
         self.adv_draft_min = QSpinBox()
@@ -664,7 +664,7 @@ class AdvancedPanel(QWidget):
         self.adv_draft_p_min = QDoubleSpinBox()
         self.adv_draft_p_min.setRange(0.0, 1.0)
         self.adv_draft_p_min.setSingleStep(0.05)
-        self.adv_draft_p_min.setValue(0.75)
+        self.adv_draft_p_min.setValue(0.0)
         self._add_form_row(form, "草稿最小概率 (--spec-draft-p-min):", self.adv_draft_p_min)
 
         self.adv_spec_draft_p_split = QDoubleSpinBox()
