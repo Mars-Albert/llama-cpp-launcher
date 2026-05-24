@@ -12,3 +12,6 @@ CLAUDE.md
 # Build artifacts
 dist/
 build/
+
+# Reference docs
+gguf.md
