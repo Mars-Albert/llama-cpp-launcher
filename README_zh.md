@@ -150,6 +150,16 @@
 - 根据文件大小和量化类型估算参数量
 - 启动前即可预览模型规模
 
+### 🔬 GGUF 检查器
+
+- 深度解析 GGUF 二进制文件 — 读取文件头、元数据、张量信息，无需加载权重
+- **7 个标签页**：概览、统计、元数据、张量、分词器、文件名、诊断
+- 可视化统计图表：量化分布、逐层/模块分析、参数集中度
+- 文件名解析器：严格正则 + 启发式回退，兼容非标准命名
+- 启动器感知诊断：上下文大小检查、mmproj 不匹配、投机解码警告
+- 导出为 JSON、CSV 或 Markdown
+- 后台线程解析，内存缓存
+
 ### 🌐 国际化
 
 - 中文/英文界面实时切换，无需重启
@@ -221,11 +231,18 @@ llama-cpp-launcher/
 │   ├── defaults.py          # 默认参数定义与 CLI 解析
 │   ├── i18n.py              # 国际化（中文/英文）
 │   └── runner.py            # llama-server 进程管理
+├── gguf/
+│   ├── parser.py            # GGUF 二进制格式解析器
+│   ├── filename.py          # GGUF 文件名规范解析器
+│   ├── diagnostics.py       # 启动器感知诊断检查
+│   ├── ggml_types.py        # ggml 量化类型定义
+│   └── models.py            # GGUF 数据结构模型
 └── ui/
     ├── main_window.py       # 主窗口
     ├── basic_panel.py       # 基础模式面板
     ├── advanced_panel.py    # 高级模式面板（100+ 参数）
-    └── model_browser.py     # GGUF 模型文件浏览器
+    ├── model_browser.py     # GGUF 模型文件浏览器
+    └── gguf_inspector.py    # GGUF 检查器对话框（7 个标签页）
 ```
 
 ---

@@ -24,6 +24,7 @@ from core.i18n import t, get_language, set_language
 from ui.model_browser import ModelBrowser
 from ui.basic_panel import BasicPanel
 from ui.advanced_panel import AdvancedPanel
+from ui.gguf_inspector import GGUFInspectorDialog
 
 
 def _compile_log_patterns():
@@ -1831,6 +1832,7 @@ class MainWindow(QMainWindow):
             + t("💾 <b>预设系统</b> — 保存、加载、导入/导出参数预设，快速切换不同模型配置<br>")
             + t("📋 <b>命令预览</b> — 实时生成 llama-server 命令行，一键复制，方便脚本集成<br>")
             + t("📊 <b>运行监控</b> — 实时日志解析（兼容新旧 llama.cpp 格式）、硬件信息展示、运行时间统计<br>")
+            + t("🔬 <b>GGUF 检查器</b> — 深度解析 GGUF 文件结构：元数据、张量信息、量化分布、逐层分析、文件名校验、诊断检查<br>")
             + t("🌐 <b>国际化</b> — 支持中文/英文界面实时切换，无需重启<br><br>")
             + t("<b>技术栈：</b> PyQt6 · Python · llama.cpp<br>")
             + t("默认参数自动从 llama-server --help 动态获取，确保与您的版本完全匹配。")
@@ -1865,6 +1867,25 @@ class MainWindow(QMainWindow):
             val.setWordWrap(True)
             layout.addWidget(val, row_idx, 1)
             self.model_info_labels[key] = val
+
+        # GGUF Inspector button
+        btn_row = len(info_items)
+        self.btn_gguf_inspect = QPushButton(t("🔍 GGUF"))
+        self.btn_gguf_inspect.setToolTip(t("请先选择 .gguf 模型"))
+        self.btn_gguf_inspect.setEnabled(False)
+        self.btn_gguf_inspect.setStyleSheet(
+            "QPushButton { background: #3b82f6; color: white; border: none; "
+            "border-radius: 4px; padding: 4px 12px; font-size: 12px; font-weight: bold; } "
+            "QPushButton:hover { background: #2563eb; } "
+            "QPushButton:disabled { background: #94a3b8; color: #cbd5e1; }"
+        )
+        self.btn_gguf_inspect.clicked.connect(self._open_gguf_inspector)
+        btn_container = QWidget()
+        btn_layout = QHBoxLayout(btn_container)
+        btn_layout.setContentsMargins(0, 0, 0, 0)
+        btn_layout.addStretch()
+        btn_layout.addWidget(self.btn_gguf_inspect)
+        layout.addWidget(btn_container, btn_row, 0, 1, 2)
 
         return group
 
@@ -1912,6 +1933,14 @@ class MainWindow(QMainWindow):
         self.model_info_labels["model_params"].setText(model_params_str)
         self.model_info_labels["quant_type"].setText(quant_type_str)
 
+        # Enable/disable GGUF inspector button
+        has_model = bool(model_path and Path(model_path).exists())
+        self.btn_gguf_inspect.setEnabled(has_model)
+        if has_model:
+            self.btn_gguf_inspect.setToolTip(t("打开 GGUF 详情查看器"))
+        else:
+            self.btn_gguf_inspect.setToolTip(t("请先选择 .gguf 模型"))
+
     def _estimate_params(self, size_bytes):
         quant = self._guess_quant_type(self.params.get("model", ""))
         bits_map = {
@@ -1946,6 +1975,22 @@ class MainWindow(QMainWindow):
             if tag in name:
                 return label
         return t("未知")
+
+    def _open_gguf_inspector(self):
+        v = self._get_current_values()
+        model_path = v.get("model", "")
+        if not model_path or not Path(model_path).exists():
+            return
+
+        launcher_params = {
+            "ctx_size": int(v.get("ctx_size", 0) or 0),
+            "mmproj": v.get("mmproj", ""),
+            "spec_type": v.get("spec_type", ""),
+            "draft_tokens": int(v.get("draft_max", 0) or 0),
+            "flash_attn": v.get("flash_attn", False),
+        }
+        dlg = GGUFInspectorDialog(model_path, launcher_params, parent=self)
+        dlg.exec()
 
     def _check_server_version(self):
         self._version_worker = _VersionCheckWorker()
@@ -2023,6 +2068,11 @@ class MainWindow(QMainWindow):
         # Model info labels
         for key, (lbl, label_text) in self._model_info_label_widgets.items():
             lbl.setText(t(label_text))
+        self.btn_gguf_inspect.setText(t("🔍 GGUF"))
+        if self.btn_gguf_inspect.isEnabled():
+            self.btn_gguf_inspect.setToolTip(t("打开 GGUF 详情查看器"))
+        else:
+            self.btn_gguf_inspect.setToolTip(t("请先选择 .gguf 模型"))
 
         # Right panel
         self.mode_label.setText(t("模式:"))

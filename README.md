@@ -150,6 +150,16 @@ The info panel **updates live** — GPU offload layers appear during loading, bu
 - Estimates parameter count from file size and quant type
 - Displays model info panel before launch
 
+### 🔬 GGUF Inspector
+
+- Deep-parse GGUF binary files — headers, metadata, tensor info without loading weights
+- **7 tabbed views**: Overview, Statistics, Metadata, Tensors, Tokenizer, Filename, Diagnostics
+- Visual statistics with bar charts: quantization distribution, layer/module breakdown, parameter concentration
+- Filename parser with strict regex + heuristic fallback for non-conforming names
+- Launcher-aware diagnostics: context size checks, mmproj mismatch, speculative decoding warnings
+- Export to JSON, CSV, or Markdown
+- Background thread parsing with in-memory caching
+
 ### 🌐 Internationalization
 
 - Real-time Chinese/English interface switching — no restart required
@@ -221,11 +231,18 @@ llama-cpp-launcher/
 │   ├── defaults.py          # Default parameter definitions & CLI parsing
 │   ├── i18n.py              # Internationalization (Chinese/English)
 │   └── runner.py            # llama-server process management
+├── gguf/
+│   ├── parser.py            # GGUF binary format parser
+│   ├── filename.py          # GGUF filename convention parser
+│   ├── diagnostics.py       # Launcher-aware diagnostic checks
+│   ├── ggml_types.py        # ggml quantization type definitions
+│   └── models.py            # Dataclass models for GGUF data
 └── ui/
     ├── main_window.py       # Main application window
     ├── basic_panel.py       # Basic mode panel
     ├── advanced_panel.py    # Advanced mode panel (100+ parameters)
-    └── model_browser.py     # GGUF model file browser
+    ├── model_browser.py     # GGUF model file browser
+    └── gguf_inspector.py    # GGUF Inspector dialog (7 tabs)
 ```
 
 ---
