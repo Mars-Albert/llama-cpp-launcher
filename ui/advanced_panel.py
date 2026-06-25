@@ -7,6 +7,11 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt
 from core.i18n import t
+from core.constants import DEFAULT_HOST, DEFAULT_PORT, MAIN_GPU_MAX
+
+# Shared combo item lists
+CACHE_TYPE_ITEMS = ["f16", "bf16", "f32", "q8_0", "q4_0", "q4_1", "iq4_nl", "q5_0", "q5_1"]
+SPEC_TYPE_ITEMS = ["none", "draft-simple", "draft-eagle3", "draft-mtp", "ngram-simple", "ngram-map-k", "ngram-map-k4v", "ngram-mod", "ngram-cache"]
 
 
 class AdvancedPanel(QWidget):
@@ -258,12 +263,12 @@ class AdvancedPanel(QWidget):
         self._add_form_row(form, "统一KV (--kv-unified):", self.adv_kv_unified)
 
         self.adv_cache_type_k = QComboBox()
-        self.adv_cache_type_k.addItems(["f16", "bf16", "f32", "q8_0", "q4_0", "q4_1", "iq4_nl", "q5_0", "q5_1"])
+        self.adv_cache_type_k.addItems(CACHE_TYPE_ITEMS)
         self.adv_cache_type_k.setCurrentText("f16")
         self._add_form_row(form, "KV Cache K类型 (--cache-type-k):", self.adv_cache_type_k)
 
         self.adv_cache_type_v = QComboBox()
-        self.adv_cache_type_v.addItems(["f16", "bf16", "f32", "q8_0", "q4_0", "q4_1", "iq4_nl", "q5_0", "q5_1"])
+        self.adv_cache_type_v.addItems(CACHE_TYPE_ITEMS)
         self.adv_cache_type_v.setCurrentText("f16")
         self._add_form_row(form, "KV Cache V类型 (--cache-type-v):", self.adv_cache_type_v)
 
@@ -519,7 +524,7 @@ class AdvancedPanel(QWidget):
         self._add_form_row(form, "张量分割 (--tensor-split):", self.adv_tensor_split)
 
         self.adv_main_gpu = QSpinBox()
-        self.adv_main_gpu.setRange(0, 15)
+        self.adv_main_gpu.setRange(0, MAIN_GPU_MAX)
         self.adv_main_gpu.setValue(0)
         self._add_form_row(form, "主GPU (--main-gpu):", self.adv_main_gpu)
 
@@ -643,12 +648,12 @@ class AdvancedPanel(QWidget):
         self._add_form_row(form, "草稿CPU MoE层数 (--n-cpu-moe-draft):", self.adv_n_cpu_moe_draft)
 
         self.adv_cache_type_k_draft = QComboBox()
-        self.adv_cache_type_k_draft.addItems(["f16", "bf16", "f32", "q8_0", "q4_0", "q4_1", "iq4_nl", "q5_0", "q5_1"])
+        self.adv_cache_type_k_draft.addItems(CACHE_TYPE_ITEMS)
         self.adv_cache_type_k_draft.setCurrentText("f16")
         self._add_form_row(form, "草稿KV K类型 (--spec-draft-type-k):", self.adv_cache_type_k_draft)
 
         self.adv_cache_type_v_draft = QComboBox()
-        self.adv_cache_type_v_draft.addItems(["f16", "bf16", "f32", "q8_0", "q4_0", "q4_1", "iq4_nl", "q5_0", "q5_1"])
+        self.adv_cache_type_v_draft.addItems(CACHE_TYPE_ITEMS)
         self.adv_cache_type_v_draft.setCurrentText("f16")
         self._add_form_row(form, "草稿KV V类型 (--spec-draft-type-v):", self.adv_cache_type_v_draft)
 
@@ -674,7 +679,7 @@ class AdvancedPanel(QWidget):
         self._add_form_row(form, "投机拆分概率 (--spec-draft-p-split):", self.adv_spec_draft_p_split)
 
         self.adv_spec_type = QComboBox()
-        self.adv_spec_type.addItems(["none", "draft-simple", "draft-eagle3", "draft-mtp", "ngram-simple", "ngram-map-k", "ngram-map-k4v", "ngram-mod", "ngram-cache"])
+        self.adv_spec_type.addItems(SPEC_TYPE_ITEMS)
         self._add_form_row(form, "投机类型 (--spec-type):", self.adv_spec_type)
 
         self.adv_spec_ngram_n = QSpinBox()
@@ -705,12 +710,12 @@ class AdvancedPanel(QWidget):
         form.setSpacing(8)
 
         self.adv_host = QLineEdit()
-        self.adv_host.setText("127.0.0.1")
+        self.adv_host.setText(DEFAULT_HOST)
         self._add_form_row(form, "主机 (--host):", self.adv_host)
 
         self.adv_port = QSpinBox()
         self.adv_port.setRange(1, 65535)
-        self.adv_port.setValue(8080)
+        self.adv_port.setValue(DEFAULT_PORT)
         self._add_form_row(form, "端口 (--port):", self.adv_port)
 
         self.adv_reuse_port = QCheckBox()

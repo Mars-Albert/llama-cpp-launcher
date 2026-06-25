@@ -129,7 +129,7 @@ _FALLBACK_DEFAULTS = {
     "tools": [],
     "embedding": False,
     "rerank": False,
-    "timeout": 600,
+    "timeout": 3600,
     "cache_prompt": True,
     "cache_reuse": 0,
     "metrics": False,
@@ -488,7 +488,13 @@ def _run_server_command(args, server_path="llama-server"):
             errors="replace",
         )
         return result.stdout, result.stderr
-    except Exception as e:
+    except FileNotFoundError:
+        logger.warning(t("未找到 {server_path}，请确保它在系统 PATH 中。", server_path=server_path))
+        return None, None
+    except subprocess.TimeoutExpired:
+        logger.warning(t("{server_path} 命令超时（10秒）", server_path=server_path))
+        return None, None
+    except OSError as e:
         logger.warning(t("运行 {server_path} 命令失败: {e}", server_path=server_path, e=e))
         return None, None
 

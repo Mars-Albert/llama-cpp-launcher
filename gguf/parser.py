@@ -22,10 +22,20 @@ VT_FLOAT64 = 12
 
 _MAX_SUPPORTED_VERSION = 3
 _MAX_TENSOR_NAME_LEN = 64
+_MAX_TENSOR_COUNT = 1_000_000
+_MAX_METADATA_KV_COUNT = 100_000
+_MAX_NDIMS = 8
 
 
 def _align_offset(offset, alignment):
     return offset + (alignment - (offset % alignment)) % alignment
+
+
+def _safe_read(f, n, context="data"):
+    data = f.read(n)
+    if len(data) < n:
+        raise ValueError(f"Unexpected EOF reading {context}: expected {n} bytes, got {len(data)}")
+    return data
 
 
 def _read_string(f):
@@ -41,34 +51,26 @@ def _read_string(f):
 
 def _read_metadata_value(f, vtype):
     if vtype == VT_UINT8:
-        data = f.read(1)
-        return struct.unpack("<B", data)[0]
+        return struct.unpack("<B", _safe_read(f, 1, "uint8"))[0]
     elif vtype == VT_INT8:
-        data = f.read(1)
-        return struct.unpack("<b", data)[0]
+        return struct.unpack("<b", _safe_read(f, 1, "int8"))[0]
     elif vtype == VT_UINT16:
-        data = f.read(2)
-        return struct.unpack("<H", data)[0]
+        return struct.unpack("<H", _safe_read(f, 2, "uint16"))[0]
     elif vtype == VT_INT16:
-        data = f.read(2)
-        return struct.unpack("<h", data)[0]
+        return struct.unpack("<h", _safe_read(f, 2, "int16"))[0]
     elif vtype == VT_UINT32:
-        data = f.read(4)
-        return struct.unpack("<I", data)[0]
+        return struct.unpack("<I", _safe_read(f, 4, "uint32"))[0]
     elif vtype == VT_INT32:
-        data = f.read(4)
-        return struct.unpack("<i", data)[0]
+        return struct.unpack("<i", _safe_read(f, 4, "int32"))[0]
     elif vtype == VT_FLOAT32:
-        data = f.read(4)
-        return struct.unpack("<f", data)[0]
+        return struct.unpack("<f", _safe_read(f, 4, "float32"))[0]
     elif vtype == VT_BOOL:
-        data = f.read(1)
-        return struct.unpack("<B", data)[0] != 0
+        return struct.unpack("<B", _safe_read(f, 1, "bool"))[0] != 0
     elif vtype == VT_STRING:
         return _read_string(f)
     elif vtype == VT_ARRAY:
-        arr_type = struct.unpack("<I", f.read(4))[0]
-        arr_len = struct.unpack("<Q", f.read(8))[0]
+        arr_type = struct.unpack("<I", _safe_read(f, 4, "array type"))[0]
+        arr_len = struct.unpack("<Q", _safe_read(f, 8, "array length"))[0]
         if arr_len > 10_000_000:
             raise ValueError(f"Array length {arr_len} exceeds sanity limit")
         result = []
@@ -76,14 +78,11 @@ def _read_metadata_value(f, vtype):
             result.append(_read_metadata_value(f, arr_type))
         return result
     elif vtype == VT_UINT64:
-        data = f.read(8)
-        return struct.unpack("<Q", data)[0]
+        return struct.unpack("<Q", _safe_read(f, 8, "uint64"))[0]
     elif vtype == VT_INT64:
-        data = f.read(8)
-        return struct.unpack("<q", data)[0]
+        return struct.unpack("<q", _safe_read(f, 8, "int64"))[0]
     elif vtype == VT_FLOAT64:
-        data = f.read(8)
-        return struct.unpack("<d", data)[0]
+        return struct.unpack("<d", _safe_read(f, 8, "float64"))[0]
     else:
         raise ValueError(f"Unknown metadata value type: {vtype}")
 
@@ -110,16 +109,16 @@ def _classify_tensor(name):
             pass
         module = parts[2] if len(parts) > 2 else None
     else:
-        # Top-level tensors (longer names first to avoid prefix conflicts)
-        known_modules = [
+        # Top-level tensors — sorted by length descending to avoid prefix conflicts
+        _KNOWN_MODULES = sorted([
             "token_embd", "pos_embd", "output_norm", "output",
             "attn_q", "attn_k", "attn_v", "attn_qkv", "attn_output",
             "attn_norm", "attn_norm_2",
             "ffn_gate_inp", "ffn_gate_exp", "ffn_down_exp", "ffn_up_exp",
             "ffn_norm", "ffn_up", "ffn_gate", "ffn_down",
             "ssm_in", "ssm_conv1d", "ssm_x", "ssm_a", "ssm_d", "ssm_dt", "ssm_out",
-        ]
-        for m in known_modules:
+        ], key=len, reverse=True)
+        for m in _KNOWN_MODULES:
             if name.startswith(m):
                 module = m
                 break
@@ -170,6 +169,11 @@ def parse_gguf(path, progress_callback=None):
         tensor_count = struct.unpack("<Q", header_data[8:16])[0]
         metadata_kv_count = struct.unpack("<Q", header_data[16:24])[0]
 
+        if tensor_count > _MAX_TENSOR_COUNT:
+            raise ValueError(f"Tensor count {tensor_count} exceeds sanity limit {_MAX_TENSOR_COUNT}")
+        if metadata_kv_count > _MAX_METADATA_KV_COUNT:
+            raise ValueError(f"Metadata KV count {metadata_kv_count} exceeds sanity limit {_MAX_METADATA_KV_COUNT}")
+
         if version > _MAX_SUPPORTED_VERSION:
             diags.append(GGUFDiagnostic(
                 "warning",
@@ -197,12 +201,14 @@ def parse_gguf(path, progress_callback=None):
         tensors = []
         for i in range(tensor_count):
             name = _read_string(f)
-            n_dims = struct.unpack("<I", f.read(4))[0]
+            n_dims = struct.unpack("<I", _safe_read(f, 4, "n_dims"))[0]
+            if n_dims > _MAX_NDIMS:
+                raise ValueError(f"Tensor '{name}' has {n_dims} dimensions, exceeds limit {_MAX_NDIMS}")
             dims = []
             for _ in range(n_dims):
-                dims.append(struct.unpack("<Q", f.read(8))[0])
-            type_id = struct.unpack("<I", f.read(4))[0]
-            offset = struct.unpack("<Q", f.read(8))[0]
+                dims.append(struct.unpack("<Q", _safe_read(f, 8, "dim"))[0])
+            type_id = struct.unpack("<I", _safe_read(f, 4, "type_id"))[0]
+            offset = struct.unpack("<Q", _safe_read(f, 8, "offset"))[0]
 
             type_name = get_type_name(type_id)
             n_params = 1
@@ -297,7 +303,7 @@ def _run_parse_diagnostics(path, file_size, header, metadata, tensors,
             "File contains quantized tensors but general.quantization_version is not set."
         ))
 
-    # Check tensor offsets
+    # Check tensor offsets and name lengths
     for t in tensors:
         if t.absolute_offset >= file_size:
             diags.append(GGUFDiagnostic(
@@ -313,9 +319,6 @@ def _run_parse_diagnostics(path, file_size, header, metadata, tensors,
                 f"Tensor '{t.name}' absolute offset {t.absolute_offset} "
                 f"is not a multiple of alignment {alignment}."
             ))
-
-    # Check tensor name lengths
-    for t in tensors:
         if len(t.name.encode("utf-8")) > _MAX_TENSOR_NAME_LEN:
             diags.append(GGUFDiagnostic(
                 "warning",

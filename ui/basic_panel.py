@@ -5,6 +5,8 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt
 from core.i18n import t
+from core.constants import DEFAULT_HOST, DEFAULT_PORT, CONTEXT_SIZE_PRESETS, MAIN_GPU_MAX
+from ui.advanced_panel import SPEC_TYPE_ITEMS
 
 
 class BasicPanel(QWidget):
@@ -129,7 +131,7 @@ class BasicPanel(QWidget):
         self.ctx_default_btn.setToolTip(t("使用模型默认上下文长度"))
         self.ctx_default_btn.clicked.connect(lambda: self.ctx_spin.setValue(0))
         row3.addWidget(self.ctx_default_btn)
-        for val in [4096, 8192, 16384, 32768, 65536, 131072, 262144]:
+        for val in CONTEXT_SIZE_PRESETS:
             btn = QPushButton(str(val))
             btn.setMinimumWidth(56)
             btn.setToolTip(t("设置上下文长度为 {val}", val=val))
@@ -216,13 +218,13 @@ class BasicPanel(QWidget):
         layout.setSpacing(12)
         self._lbl_host = QLabel(t("地址:"))
         layout.addWidget(self._lbl_host)
-        self.host_edit = QLineEdit("127.0.0.1")
+        self.host_edit = QLineEdit(DEFAULT_HOST)
         self.host_edit.setFixedWidth(110)
         layout.addWidget(self.host_edit)
         layout.addWidget(QLabel(":"))
         self.port_spin = QSpinBox()
         self.port_spin.setRange(1, 65535)
-        self.port_spin.setValue(8080)
+        self.port_spin.setValue(DEFAULT_PORT)
         self.port_spin.setFixedWidth(70)
         layout.addWidget(self.port_spin)
         layout.addSpacing(12)
@@ -269,7 +271,7 @@ class BasicPanel(QWidget):
         layout.addWidget(self.split_mode_combo)
         layout.addSpacing(12)
         self.spec_type_combo = QComboBox()
-        self.spec_type_combo.addItems(["none", "draft-simple", "draft-eagle3", "draft-mtp", "ngram-simple", "ngram-map-k", "ngram-map-k4v", "ngram-mod", "ngram-cache"])
+        self.spec_type_combo.addItems(SPEC_TYPE_ITEMS)
         self.spec_type_combo.setCurrentText("none")
         self.spec_type_combo.setFixedWidth(140)
         self._lbl_spec_type = QLabel(t("投机类型:"))
@@ -286,25 +288,21 @@ class BasicPanel(QWidget):
         layout.addStretch()
         return self._toggles_group
 
-    def _browse_model(self):
-        path, _ = QFileDialog.getOpenFileName(self, t("选择模型"), "", "GGUF Files (*.gguf)")
+    def _browse_gguf(self, title, combo):
+        path, _ = QFileDialog.getOpenFileName(self, title, "", "GGUF Files (*.gguf)")
         if path:
-            idx = self.model_combo.findText(path)
+            idx = combo.findText(path)
             if idx == -1:
-                self.model_combo.addItem(path)
-                self.model_combo.setCurrentText(path)
+                combo.addItem(path)
+                combo.setCurrentText(path)
             else:
-                self.model_combo.setCurrentIndex(idx)
+                combo.setCurrentIndex(idx)
+
+    def _browse_model(self):
+        self._browse_gguf(t("选择模型"), self.model_combo)
 
     def _browse_mmproj(self):
-        path, _ = QFileDialog.getOpenFileName(self, t("选择MMProj"), "", "GGUF Files (*.gguf)")
-        if path:
-            idx = self.mmproj_combo.findText(path)
-            if idx == -1:
-                self.mmproj_combo.addItem(path)
-                self.mmproj_combo.setCurrentText(path)
-            else:
-                self.mmproj_combo.setCurrentIndex(idx)
+        self._browse_gguf(t("选择MMProj"), self.mmproj_combo)
 
     def _on_temp_changed(self, value):
         self.temp_label.setText(f"{value / 100:.2f}")

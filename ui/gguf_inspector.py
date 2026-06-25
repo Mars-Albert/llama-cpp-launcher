@@ -20,6 +20,7 @@ from PyQt6.QtCore import (
 from PyQt6.QtGui import QFont, QColor
 
 from core.i18n import t
+from core.constants import PARSE_CACHE_MAX
 from gguf.parser import parse_gguf
 from gguf.models import GGUFInfo
 from gguf.ggml_types import GGML_TYPES
@@ -58,11 +59,16 @@ class GGUFParseWorker(QThread):
 # ---------------------------------------------------------------------------
 
 _parse_cache: dict[tuple, GGUFInfo] = {}
-_CACHE_MAX = 10
+_CACHE_MAX = PARSE_CACHE_MAX
 
 
 def _cache_key(path, file_size, mtime_ns):
     return (str(path), file_size, mtime_ns)
+
+
+def clear_parse_cache():
+    """Clear the GGUF parse cache to free memory."""
+    _parse_cache.clear()
 
 
 # ---------------------------------------------------------------------------
@@ -70,7 +76,7 @@ def _cache_key(path, file_size, mtime_ns):
 # ---------------------------------------------------------------------------
 
 class MetadataTableModel(QAbstractTableModel):
-    HEADERS = [t("Key"), t("Type"), t("Preview")]
+    _HEADERS = ["Key", "Type", "Preview"]
 
     def __init__(self):
         super().__init__()
@@ -140,8 +146,8 @@ class MetadataTableModel(QAbstractTableModel):
 
     def headerData(self, section, orientation, role=Qt.ItemDataRole.DisplayRole):
         if role == Qt.ItemDataRole.DisplayRole and orientation == Qt.Orientation.Horizontal:
-            if 0 <= section < len(self.HEADERS):
-                return self.HEADERS[section]
+            if 0 <= section < len(self._HEADERS):
+                return t(self._HEADERS[section])
         return None
 
     def get_row_json(self, row):
@@ -157,10 +163,10 @@ class MetadataTableModel(QAbstractTableModel):
 # ---------------------------------------------------------------------------
 
 class TensorTableModel(QAbstractTableModel):
-    HEADERS = [
-        t("Name"), t("Shape"), t("Type"), t("Params"),
-        t("Est. Size"), t("Offset"), t("Abs Offset"),
-        t("Layer"), t("Module")
+    _HEADERS = [
+        "Name", "Shape", "Type", "Params",
+        "Est. Size", "Offset", "Abs Offset",
+        "Layer", "Module"
     ]
 
     def __init__(self):
@@ -218,8 +224,8 @@ class TensorTableModel(QAbstractTableModel):
 
     def headerData(self, section, orientation, role=Qt.ItemDataRole.DisplayRole):
         if role == Qt.ItemDataRole.DisplayRole and orientation == Qt.Orientation.Horizontal:
-            if 0 <= section < len(self.HEADERS):
-                return self.HEADERS[section]
+            if 0 <= section < len(self._HEADERS):
+                return t(self._HEADERS[section])
         return None
 
     @staticmethod
@@ -459,6 +465,29 @@ class GGUFInspectorDialog(QDialog):
         self._meta_table.customContextMenuRequested.connect(self._meta_context_menu)
         self._meta_table.horizontalHeader().setStretchLastSection(True)
         self._meta_table.verticalHeader().setVisible(False)
+        self._meta_table.setStyleSheet("""
+            QTableView {
+                background-color: #ffffff;
+                alternate-background-color: #f0f4f8;
+                color: #1a1a2e;
+                gridline-color: #e2e8f0;
+                border: 1px solid #d1d5db;
+                border-radius: 4px;
+                font-size: 13px;
+            }
+            QTableView::item:selected {
+                background-color: #bfdbfe;
+                color: #1a1a2e;
+            }
+            QTableView QHeaderView::section {
+                background-color: #e2e8f0;
+                color: #1a1a2e;
+                border: none;
+                border-bottom: 2px solid #94a3b8;
+                padding: 6px 8px;
+                font-weight: bold;
+            }
+        """)
         layout.addWidget(self._meta_table, 1)
 
         return w
@@ -502,6 +531,29 @@ class GGUFInspectorDialog(QDialog):
         self._tensor_table.customContextMenuRequested.connect(self._tensor_context_menu)
         self._tensor_table.horizontalHeader().setStretchLastSection(True)
         self._tensor_table.verticalHeader().setVisible(False)
+        self._tensor_table.setStyleSheet("""
+            QTableView {
+                background-color: #ffffff;
+                alternate-background-color: #f0f4f8;
+                color: #1a1a2e;
+                gridline-color: #e2e8f0;
+                border: 1px solid #d1d5db;
+                border-radius: 4px;
+                font-size: 13px;
+            }
+            QTableView::item:selected {
+                background-color: #bfdbfe;
+                color: #1a1a2e;
+            }
+            QTableView QHeaderView::section {
+                background-color: #e2e8f0;
+                color: #1a1a2e;
+                border: none;
+                border-bottom: 2px solid #94a3b8;
+                padding: 6px 8px;
+                font-weight: bold;
+            }
+        """)
         layout.addWidget(self._tensor_table, 1)
 
         # Stats
@@ -1527,5 +1579,13 @@ class GGUFInspectorDialog(QDialog):
     def closeEvent(self, event):
         if self._worker and self._worker.isRunning():
             self._worker.cancel()
-            self._worker.wait(2000)
+            # Disconnect signals before waiting to prevent delivery to destroyed dialog
+            try:
+                self._worker.parsed.disconnect()
+                self._worker.failed.disconnect()
+                self._worker.progress.disconnect()
+            except TypeError:
+                pass
+            if not self._worker.wait(3000):
+                self._worker.terminate()
         super().closeEvent(event)

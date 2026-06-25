@@ -1,5 +1,9 @@
+import logging
+
 from PyQt6.QtCore import QObject, pyqtSignal, QProcess, QTimer
 from core.i18n import t
+
+logger = logging.getLogger(__name__)
 
 
 class ServerRunner(QObject):
@@ -17,7 +21,8 @@ class ServerRunner(QObject):
         self._is_running = False
         self._is_ready = False
         self._was_stopped_intentionally = False
-        self._log_buffer = ""
+        self._log_parts: list[str] = []
+        self._log_buffer_len = 0
         self._max_log_buffer = 8000
         self._is_stopping = False
         self._kill_timer = QTimer(self)
@@ -40,7 +45,8 @@ class ServerRunner(QObject):
         self.process.setArguments(args)
         if work_dir:
             self.process.setWorkingDirectory(work_dir)
-        self._log_buffer = ""
+        self._log_parts.clear()
+        self._log_buffer_len = 0
         self._is_running = True
         self._is_ready = False
         self._was_stopped_intentionally = False
@@ -60,34 +66,37 @@ class ServerRunner(QObject):
         self.process.terminate()
         if blocking:
             if not self.process.waitForFinished(3000):
-                self.process.kill()
-                self.process.waitForFinished(1000)
-                if self.process.state() != QProcess.ProcessState.NotRunning:
-                    self.process.terminate()
-                    self.process.waitForFinished(1000)
+                self._do_force_kill()
             self._kill_timer.stop()
             self._is_running = False
             self._is_stopping = False
         else:
             self._kill_timer.start(3000)
 
+    def _do_force_kill(self):
+        logger.info("Force killing llama-server process")
+        self.process.kill()
+        if not self.process.waitForFinished(2000):
+            logger.warning("llama-server process did not terminate after force kill")
+            self.error_occurred.emit(t("llama-server 进程无法终止，可能需要手动结束。"))
+
     def _force_kill(self):
         if self.process.state() != QProcess.ProcessState.NotRunning:
-            self.process.kill()
-            if not self.process.waitForFinished(2000):
-                self.process.terminate()
-                self.process.waitForFinished(1000)
-                if self.process.state() != QProcess.ProcessState.NotRunning:
-                    self._is_running = False
-                    self._is_stopping = False
-                    self.state_changed.emit("stopped")
+            self._do_force_kill()
+        self._kill_timer.stop()
+        self._is_running = False
+        self._is_stopping = False
+        self.state_changed.emit("stopped")
 
     def _check_ready(self, text):
         if not self._is_ready and not self._is_stopping:
-            self._log_buffer += text
-            if len(self._log_buffer) > self._max_log_buffer:
-                self._log_buffer = self._log_buffer[-self._max_log_buffer:]
-            lower = self._log_buffer.lower()
+            self._log_parts.append(text)
+            self._log_buffer_len += len(text)
+            if self._log_buffer_len > self._max_log_buffer:
+                while self._log_buffer_len > self._max_log_buffer and len(self._log_parts) > 1:
+                    removed = self._log_parts.pop(0)
+                    self._log_buffer_len -= len(removed)
+            lower = "".join(self._log_parts).lower()
             if "starting the main loop" in lower or "server is listening" in lower:
                 self._is_ready = True
                 self.server_ready.emit()
@@ -110,7 +119,8 @@ class ServerRunner(QObject):
         self._is_running = False
         self._is_ready = False
         self._is_stopping = False
-        self._log_buffer = ""
+        self._log_parts.clear()
+        self._log_buffer_len = 0
         if self._was_stopped_intentionally:
             self.state_changed.emit("stopped")
         elif exit_code != 0:

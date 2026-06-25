@@ -131,6 +131,12 @@ class ModelBrowser(QWidget):
         self.search_dir = Path(path)
         self.scan_models()
 
+    def closeEvent(self, event):
+        if self._scanner_thread and self._scanner_thread.isRunning():
+            self._scanner_thread.stop()
+            self._scanner_thread.wait(3000)
+        super().closeEvent(event)
+
     def retranslate_ui(self):
         self._models_group.setTitle(t("📦 模型文件"))
         self._mmproj_group.setTitle(t("🖼️ 多模态投影"))

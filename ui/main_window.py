@@ -18,6 +18,11 @@ from PyQt6.QtCore import Qt, QTimer, QSize, QThread, pyqtSignal
 from PyQt6.QtGui import QAction, QFont, QTextOption, QIcon, QPixmap, QPainter, QColor
 
 from core.config import ConfigManager, save_scan_path, load_scan_path, save_language
+from core.constants import (
+    WINDOW_WIDTH, WINDOW_HEIGHT, MIN_WINDOW_WIDTH, MIN_WINDOW_HEIGHT,
+    LOG_MAX_BLOCK_COUNT, UNDO_HISTORY_MAX, PREVIEW_TIMER_MS, UNDO_DEBOUNCE_MS,
+    WEBUI_OPEN_DELAY_MS, VERSION_CHECK_TIMEOUT_S,
+)
 from core.defaults import _PRIO_REVERSE
 from core.runner import ServerRunner
 from core.i18n import t, get_language, set_language
@@ -275,7 +280,7 @@ class _VersionCheckWorker(QThread):
                 ["llama-server", "--version"],
                 capture_output=True,
                 text=True,
-                timeout=10,
+                timeout=VERSION_CHECK_TIMEOUT_S,
                 encoding="utf-8",
                 errors="replace",
             )
@@ -315,7 +320,7 @@ class MainWindow(QMainWindow):
         self.is_advanced = False
         self.params = dict(self.defaults)
         self.params_history = [dict(self.params)]
-        self.max_history = 20
+        self.max_history = UNDO_HISTORY_MAX
         self._last_saved = dict(self.params)
         self._pending_snapshot = False
         self.start_time = None
@@ -323,7 +328,7 @@ class MainWindow(QMainWindow):
         self.timer.timeout.connect(self._update_timer)
         self.preview_timer = QTimer()
         self.preview_timer.timeout.connect(self._update_cmd_preview)
-        self.preview_timer.start(300)
+        self.preview_timer.start(PREVIEW_TIMER_MS)
         self._undo_debounce = QTimer()
         self._undo_debounce.setSingleShot(True)
         self._undo_debounce.timeout.connect(self._flush_snapshot)
@@ -336,8 +341,8 @@ class MainWindow(QMainWindow):
 
     def init_ui(self):
         self.setWindowTitle("🦙 llama.cpp Launcher")
-        self.resize(1360, 860)
-        self.setMinimumSize(1100, 700)
+        self.resize(WINDOW_WIDTH, WINDOW_HEIGHT)
+        self.setMinimumSize(MIN_WINDOW_WIDTH, MIN_WINDOW_HEIGHT)
         self.setStyleSheet(self._get_stylesheet())
 
         central = QWidget()
@@ -531,7 +536,7 @@ class MainWindow(QMainWindow):
         self.log_output.setReadOnly(True)
         self.log_output.setFont(QFont("Consolas", 10))
         self.log_output.setStyleSheet("background: #121212; color: #cdd6f4; border: none; padding: 4px;")
-        self.log_output.document().setMaximumBlockCount(5000)
+        self.log_output.document().setMaximumBlockCount(LOG_MAX_BLOCK_COUNT)
 
         log_tab = QWidget()
         log_tab_layout = QVBoxLayout(log_tab)
@@ -617,7 +622,7 @@ class MainWindow(QMainWindow):
             self.basic_panel.show()
         self._apply_params_to_current()
         self._mode_switching = False
-        self.preview_timer.start(300)
+        self.preview_timer.start(PREVIEW_TIMER_MS)
         self._update_cmd_preview()
 
     def _save_current_to_params(self, force=False):
@@ -664,7 +669,9 @@ class MainWindow(QMainWindow):
     def _is_default(self, key, v):
         if key not in v:
             return True
-        return v.get(key) == self.defaults.get(key)
+        if key not in self.defaults:
+            return False
+        return v[key] == self.defaults[key]
 
     def _build_args_from_params(self):
         return self._build_args_from_values(self.params)
@@ -1223,7 +1230,7 @@ class MainWindow(QMainWindow):
         changed = self.params != self._last_saved
         if changed and not self._pending_snapshot:
             self._pending_snapshot = True
-            self._undo_debounce.start(800)
+            self._undo_debounce.start(UNDO_DEBOUNCE_MS)
         args = self._build_args_from_params()
         if args:
             self.cmd_preview.setPlainText("llama-server " + " ".join(args))
@@ -1299,11 +1306,21 @@ class MainWindow(QMainWindow):
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
             )
             if reply == QMessageBox.StandardButton.Yes:
-                self._start_server()
-                QTimer.singleShot(2000, lambda: webbrowser.open(url))
+                self._open_webui_on_ready(url)
             return
         webbrowser.open(url)
         self.statusBar().showMessage(t("已在浏览器中打开: {url}", url=url), 3000)
+
+    def _open_webui_on_ready(self, url):
+        def on_ready():
+            try:
+                self.runner.server_ready.disconnect(on_ready)
+            except TypeError:
+                pass
+            webbrowser.open(url)
+            self.statusBar().showMessage(t("已在浏览器中打开: {url}", url=url), 3000)
+        self.runner.server_ready.connect(on_ready)
+        self._start_server()
 
     def _on_state_changed(self, state):
         self._current_state = state
