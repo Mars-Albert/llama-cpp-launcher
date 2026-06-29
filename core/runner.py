@@ -97,7 +97,7 @@ class ServerRunner(QObject):
                     removed = self._log_parts.pop(0)
                     self._log_buffer_len -= len(removed)
             lower = "".join(self._log_parts).lower()
-            if "starting the main loop" in lower or "server is listening" in lower:
+            if "starting the main loop" in lower or "server is listening" in lower or "listening on http" in lower:
                 self._is_ready = True
                 self.server_ready.emit()
                 self.state_changed.emit("running")

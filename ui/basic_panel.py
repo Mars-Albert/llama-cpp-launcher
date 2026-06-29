@@ -239,6 +239,10 @@ class BasicPanel(QWidget):
         self.chk_webui = QCheckBox("WebUI")
         self.chk_webui.setChecked(True)
         layout.addWidget(self.chk_webui)
+        layout.addSpacing(12)
+        self.chk_verbose = QCheckBox("Verbose")
+        self.chk_verbose.setChecked(False)
+        layout.addWidget(self.chk_verbose)
         layout.addStretch()
         return self._server_group
 
@@ -332,6 +336,7 @@ class BasicPanel(QWidget):
             "parallel": self.parallel_spin.value(),
             "flash_attn": self.flash_attn_combo.currentText(),
             "webui": self.chk_webui.isChecked(),
+            "verbose": self.chk_verbose.isChecked(),
             "reasoning": self.reasoning_combo.currentText(),
             "split_mode": self.split_mode_combo.currentText(),
             "spec_type": self.spec_type_combo.currentText(),
@@ -386,6 +391,8 @@ class BasicPanel(QWidget):
             self.flash_attn_combo.setCurrentText(str(values["flash_attn"]))
         if "webui" in values:
             self.chk_webui.setChecked(values["webui"])
+        if "verbose" in values:
+            self.chk_verbose.setChecked(values["verbose"])
         if "reasoning" in values:
             self.reasoning_combo.setCurrentText(str(values["reasoning"]))
         if "split_mode" in values:

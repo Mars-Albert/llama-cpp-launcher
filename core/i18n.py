@@ -41,6 +41,7 @@ _EN = {
     "文件": "File",
     "帮助": "Help",
     "语言": "Language",
+    "中文": "Chinese",
     "设置扫描路径...": "Set Scan Path...",
     "刷新模型列表": "Refresh Model List",
     "退出": "Exit",
@@ -313,6 +314,7 @@ _EN = {
     "无法找到 llama-server，请确保已添加到系统 PATH 环境变量": "Cannot find llama-server. Make sure it's in your system PATH.",
     "⚠️ 未找到 llama-server": "⚠️ llama-server not found",
     "⚠️ 检测失败": "⚠️ Detection failed",
+    "检测 llama-server 版本时出错": "Error detecting llama-server version",
     "检测 llama-server 版本时出错: {e}": "Error detecting llama-server version: {e}",
     "✅ 所有参数与当前版本匹配": "✅ All parameters match current version",
     "⚠️ 参数差异提示:\n": "⚠️ Parameter differences:\n",
@@ -330,12 +332,18 @@ _EN = {
     "性能优化": "Performance",
     "系统配置": "System Config",
     "视觉编码器": "Vision Encoder",
+    "硬件信息": "Hardware Info",
 
     # Info display - items
+    "🖥️ GPU {idx} 设备": "🖥️ GPU {idx} Device",
+    ", 空闲 {free}": ", Free {free}",
     "🖥️ GPU 设备": "🖥️ GPU Device",
     "🔧 计算能力（CUDA 架构版本）": "🔧 Compute Capability (CUDA Arch)",
     "📊 显卡显存（总可用显存）": "📊 GPU VRAM (Total Available)",
+    "💻 CPU 设备": "💻 CPU Device",
+    "📊 系统内存": "📊 System Memory",
     "🌐 服务地址": "🌐 Service Address",
+    "📦 模型文件": "📦 Model File",
     "🏷️ 模型名称": "🏷️ Model Name",
     "📐 量化类型（量化格式）": "📐 Quant Type (Quant Format)",
     "💾 文件大小（磁盘占用）": "💾 File Size (Disk Usage)",
@@ -372,10 +380,13 @@ _EN = {
     "🔧 线程配置（CPU 线程数）": "🔧 Thread Config (CPU Threads)",
     "🔗 OpenMP（并行计算加速）": "🔗 OpenMP (Parallel Computing)",
     "📦 Repack（权重重打包优化）": "📦 Repack (Weight Repack Optimization)",
+    "🚀 投机解码（Speculative Decoding）": "🚀 Speculative Decoding",
     "👁️ 视觉编码器（多模态图像理解）": "👁️ Vision Encoder (Multimodal Image)",
     "📦 投影文件（视觉投影模型）": "📦 Projector File (Vision Projector)",
     "📊 视觉模型大小": "📊 Vision Model Size",
     "🖼️ 图像尺寸（输入图像分辨率）": "🖼️ Image Size (Input Resolution)",
+    "🔢 最小图像 Token 数": "🔢 Min Image Tokens",
+    "🌐 HTTP 线程数": "🌐 HTTP Threads",
 
     # Log parser dynamic values
     "已启用（多槽位共享缓存）": "Enabled (Multi-slot Shared Cache)",
@@ -477,6 +488,7 @@ _EN = {
 
     # === runner.py ===
     "启动 llama-server 失败。请确保它在系统 PATH 中。": "Failed to start llama-server. Make sure it's in your PATH.",
+    "llama-server 进程无法终止，可能需要手动结束。": "llama-server process could not be terminated. You may need to end it manually.",
 
     # === advanced_panel.py full form labels ===
     "模型 (--model)": "Model (--model)",
@@ -662,10 +674,14 @@ _EN = {
     "保存设置失败: {e}": "Failed to save settings: {e}",
     "保存预设失败: {e}": "Failed to save preset: {e}",
     "加载预设失败: {e}": "Failed to load preset: {e}",
+    "加载预设失败: params 字段不是字典": "Failed to load preset: params field is not a dict",
+    "导入预设失败: params 字段不是字典": "Failed to import preset: params field is not a dict",
     "导入预设失败: 文件格式无效 {src_path}": "Failed to import preset: invalid file format {src_path}",
     "导入预设失败: {e}": "Failed to import preset: {e}",
     # defaults.py logger messages
     "运行 {server_path} 命令失败: {e}": "Failed to run {server_path}: {e}",
+    "未找到 {server_path}，请确保它在系统 PATH 中。": "{server_path} not found. Make sure it's in your system PATH.",
+    "{server_path} 命令超时（10秒）": "{server_path} command timed out (10s)",
     # main_window.py runtime info values
     "是": "Yes",
     "层": "layers",

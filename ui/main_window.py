@@ -32,6 +32,29 @@ from ui.advanced_panel import AdvancedPanel
 from ui.gguf_inspector import GGUFInspectorDialog
 
 
+# Log level colors for colored output (matching llama.cpp terminal colors)
+_LOG_LEVEL_COLORS = {
+    'D': '#6c7086',   # Debug - gray (subtle)
+    'I': '#cdd6f4',   # Info - default light
+    'W': '#f9e2af',   # Warning - yellow
+    'E': '#f38ba8',   # Error - red
+    'F': '#f38ba8',   # Fatal - red
+}
+_LOG_LEVEL_RE = re.compile(r'^[\d.]+\s+([DIWEF])\s')
+
+
+def _colorize_log_line(line):
+    """Convert a log line to HTML with color based on log level."""
+    import html as _html
+    escaped = _html.escape(line)
+    m = _LOG_LEVEL_RE.match(line)
+    if m:
+        level = m.group(1)
+        color = _LOG_LEVEL_COLORS.get(level, '#cdd6f4')
+        return f'<span style="color: {color};">{escaped}</span>'
+    return escaped
+
+
 def _compile_log_patterns():
     """Pre-compile all log parsing patterns for efficient per-line matching."""
     _re = lambda pat: re.compile(pat, re.IGNORECASE)
@@ -87,15 +110,18 @@ def _compile_log_patterns():
         return True
     _add(["srv", "using", "threads for http"], r"using\s+(\d+)\s+threads\s+for\s+HTTP", _handle_threads_http)
 
-    # --- Slots (new: `srv load_model: initializing slots, n_slots = 1`) ---
-    _int_comma(["srv", "initializing slots"], r"n_slots\s*=\s*(\d+)", "n_slots")
+    # --- Slots (new: `srv load_model: initializing, n_slots = 1` / old: `initializing slots`) ---
+    _int_comma(["srv", "initializing"], r"n_slots\s*=\s*(\d+)", "n_slots")
 
-    # --- Slot context (new: `slot load_model: id  0 | task -1 | new slot, n_ctx = 65536`) ---
+    # --- Slot context (old: `slot load_model: id  0 | task -1 | new slot, n_ctx = 65536`) ---
     def _handle_slot_ctx(info, m):
         info["ctx_size"] = f"{int(m.group(1)):,}"
         info["n_slots"] = info.get("n_slots", "1")
         return True
     _add(["slot", "new slot"], r"n_ctx\s*=\s*(\d+)", _handle_slot_ctx)
+
+    # --- Slot context new format (new: `srv load_model: initializing, n_ctx_slot = 131072`) ---
+    _int_comma(["srv", "initializing", "n_ctx_slot"], r"n_ctx_slot\s*=\s*(\d+)", "ctx_size")
 
     # --- Context warning (new: `llama_context: n_ctx_seq (65536) < n_ctx_train (262144)`) ---
     def _handle_ctx_warning(info, m):
@@ -107,29 +133,29 @@ def _compile_log_patterns():
     # --- Prompt cache (new: `srv load_model: use '--cache-ram 0' to disable the prompt cache`) ---
     def _handle_cache_hint(info, m):
         if "prompt_cache" not in info:
-            info["prompt_cache"] = t("已启用")
+            info["prompt_cache"] = "已启用"
         return True
     _add(["srv", "prompt cache"], r"disable the prompt cache", _handle_cache_hint)
 
     # --- Speculative decoding (new: `srv load_model: speculative decoding will use checkpoints`) ---
     _simple(["srv", "speculative decoding"], r"speculative decoding", "speculative_decoding",
-            lambda m: t("已启用"))
+            lambda m: "已启用")
 
     # --- Model loaded (new: `srv main: model loaded`) ---
     def _handle_model_loaded_new(info, m):
-        info["status"] = t("🔄 模型加载完成")
+        info["status"] = "🔄 模型加载完成"
         return True
     _add(["srv", "model loaded"], r"model loaded", _handle_model_loaded_new)
 
     # --- Thinking mode (new: chat template with <think> tag) ---
     def _handle_thinking_new(info, m):
-        info["thinking_mode"] = t("已启用")
+        info["thinking_mode"] = "已启用"
         return True
     _add(["chat template", "<think>"], r"<think>", _handle_thinking_new)
 
     # --- KV unified warning (new: `srv init: --cache-idle-slots requires --kv-unified, disabling`) ---
     def _handle_kv_unified_hint(info, m):
-        info["kv_unified"] = t("需要 --kv-unified，已禁用")
+        info["kv_unified"] = "需要 --kv-unified，已禁用"
         return True
     _add(["srv", "kv-unified", "disabling"], r"requires.*kv-unified.*disabling", _handle_kv_unified_hint)
 
@@ -174,12 +200,13 @@ def _compile_log_patterns():
         return True
     _add(["srv", "loading model", ".gguf"], r"([\w/\\:. -]+\.gguf)", _handle_loading_model_new)
 
-    # --- GGUF / model info (old: print_info format) ---
+    # --- GGUF / model info (old: print_info format / new: llama_model_loader format) ---
     _simple("file format", r"GGUF V(\d+)", "gguf_version", lambda m: f"V{m.group(1)}")
+    _simple("version gguf", r"GGUF\s+V(\d+)", "gguf_version", lambda m: f"V{m.group(1)}")
     _kv(["file type", "print_info"], r"file type\s*=\s*(.+)", "quant_type")
     _kv(["file size", "print_info"], r"file size\s*=\s*(.+)", "file_size")
     _kv(["model params", "print_info"], r"model params\s*=\s*(.+)", "model_params")
-    _kv("general.name", r"general\.name\s+str\s+=\s+(.+)", "model_name")
+    _kv("general.name", r"general\.name\s+(?:str\s+)?=\s+(.+)", "model_name")
     _simple(["arch", "print_info"], r"arch\s+=\s+(\w+)", "arch", lambda m: m.group(1))
     _int_comma(["n_vocab", "print_info"], r"n_vocab\s+=\s+(\d+)", "vocab_size")
     _int_comma(["n_ctx_train", "print_info"], r"n_ctx_train\s+=\s+(\d+)", "train_ctx")
@@ -253,15 +280,16 @@ def _compile_log_patterns():
 
     # --- Thinking (old) ---
     def _handle_thinking_old(info, m):
-        info["thinking_mode"] = t("已启用") if m.group(1) == "1" else t("已禁用")
+        info["thinking_mode"] = "已启用" if m.group(1) == "1" else "已禁用"
         return True
     _add(["thinking", "chat template"], r"thinking\s*=\s*(\d+)", _handle_thinking_old)
 
-    # --- Address (shared) ---
+    # --- Address (old: `server is listening on` / new: `srv llama_server: listening on`) ---
     def _handle_address(info, m):
         info["address"] = m.group(1)
         return True
     _add("server is listening on", r"http://([\d.]+:\d+)", _handle_address)
+    _add(["srv", "listening on"], r"http://([\d.]+:\d+)", _handle_address)
 
     return tuple(patterns)
 
@@ -457,7 +485,7 @@ class MainWindow(QMainWindow):
         self.cmd_preview.setReadOnly(True)
         self.cmd_preview.setFont(QFont("Consolas", 9))
         self.cmd_preview.setStyleSheet("background: #121212; color: #7ab0e0; border: 1px solid #444; border-radius: 4px; padding: 4px;")
-        self.cmd_preview.setFixedHeight(52)
+        self.cmd_preview.setFixedHeight(80)
         self.cmd_preview.setWordWrapMode(QTextOption.WrapMode.WordWrap)
         self.cmd_preview.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.cmd_preview.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
@@ -535,7 +563,43 @@ class MainWindow(QMainWindow):
         self.log_output = QPlainTextEdit()
         self.log_output.setReadOnly(True)
         self.log_output.setFont(QFont("Consolas", 10))
-        self.log_output.setStyleSheet("background: #121212; color: #cdd6f4; border: none; padding: 4px;")
+        self.log_output.setStyleSheet("""
+            QPlainTextEdit {
+                background: #121212;
+                color: #cdd6f4;
+                border: none;
+                padding: 4px;
+            }
+            QScrollBar:vertical {
+                background: #1e1e2e;
+                width: 10px;
+                border-radius: 5px;
+            }
+            QScrollBar::handle:vertical {
+                background: #585b70;
+                border-radius: 5px;
+                min-height: 30px;
+            }
+            QScrollBar::handle:vertical:hover {
+                background: #6c7086;
+            }
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+                height: 0;
+            }
+            QScrollBar:horizontal {
+                background: #1e1e2e;
+                height: 10px;
+                border-radius: 5px;
+            }
+            QScrollBar::handle:horizontal {
+                background: #585b70;
+                border-radius: 5px;
+                min-width: 30px;
+            }
+            QScrollBar::handle:horizontal:hover {
+                background: #6c7086;
+            }
+        """)
         self.log_output.document().setMaximumBlockCount(LOG_MAX_BLOCK_COUNT)
 
         log_tab = QWidget()
@@ -562,10 +626,41 @@ class MainWindow(QMainWindow):
         self.info_display.setReadOnly(True)
         self.info_display.setFont(QFont("Consolas", 10))
         self.info_display.setStyleSheet("""
-            background: #121212;
-            color: #cdd6f4;
-            border: none;
-            padding: 8px;
+            QTextEdit {
+                background: #121212;
+                color: #cdd6f4;
+                border: none;
+                padding: 8px;
+            }
+            QScrollBar:vertical {
+                background: #1e1e2e;
+                width: 10px;
+                border-radius: 5px;
+            }
+            QScrollBar::handle:vertical {
+                background: #585b70;
+                border-radius: 5px;
+                min-height: 30px;
+            }
+            QScrollBar::handle:vertical:hover {
+                background: #6c7086;
+            }
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+                height: 0;
+            }
+            QScrollBar:horizontal {
+                background: #1e1e2e;
+                height: 10px;
+                border-radius: 5px;
+            }
+            QScrollBar::handle:horizontal {
+                background: #585b70;
+                border-radius: 5px;
+                min-width: 30px;
+            }
+            QScrollBar::handle:horizontal:hover {
+                background: #6c7086;
+            }
         """)
         self.info_display.setHtml(self._get_empty_info_html())
 
@@ -1269,9 +1364,10 @@ class MainWindow(QMainWindow):
                 return
 
         args = self._build_args_from_params()
-        self.log_output.appendPlainText(f"[{datetime.now().strftime('%H:%M:%S')}] {t('启动命令:')}")
-        self.log_output.appendPlainText(f"  llama-server {' '.join(args)}")
-        self.log_output.appendPlainText("")
+        timestamp = datetime.now().strftime('%H:%M:%S')
+        self.log_output.appendHtml(f'<span style="color: #89b4fa;">[{timestamp}] {t("启动命令:")}</span>')
+        self.log_output.appendHtml(f'<span style="color: #a6e3a1;">  llama-server {" ".join(args)}</span>')
+        self.log_output.appendHtml("")
 
         self.runner.start(args, work_dir=str(self.work_dir))
         host = v.get('host', '127.0.0.1')
@@ -1382,13 +1478,14 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(t("❌ 启动失败: {msg}", msg=msg[:80]))
 
     def _append_log(self, text):
-        self.log_output.appendPlainText(text.rstrip())
+        for line in text.rstrip().split("\n"):
+            colored = _colorize_log_line(line)
+            self.log_output.appendHtml(colored)
+            self._parse_log_line(line.strip())
         if self.chk_auto_scroll.isChecked():
             self.log_output.verticalScrollBar().setValue(
                 self.log_output.verticalScrollBar().maximum()
             )
-        for line in text.rstrip().split("\n"):
-            self._parse_log_line(line.strip())
 
     def _parse_log_line(self, line):
         stripped = line.strip()
@@ -1403,44 +1500,44 @@ class MainWindow(QMainWindow):
                 if m and handler(info, m):
                     updated = True
 
-        # Special-case handlers
+        # Special-case handlers (store raw Chinese keys, translate in _update_info_display)
         if "system_info:" in lower or "system info:" in lower:
             updated = True
             if "openmp" in lower:
-                info["openmp"] = t("是")
+                info["openmp"] = "是"
             if "repack" in lower:
-                info["repack"] = t("是")
+                info["repack"] = "是"
 
-        if "kv_unified" in lower and "llama_context" in lower:
+        if "kv_unified" in lower and ("llama_context" in lower or "srv" in lower):
             updated = True
             if "true" in lower:
-                info["kv_unified"] = t("已启用（多槽位共享缓存）")
+                info["kv_unified"] = "已启用（多槽位共享缓存）"
             elif "false" in lower:
-                info["kv_unified"] = t("已禁用（各槽位独立缓存）")
+                info["kv_unified"] = "已禁用（各槽位独立缓存）"
 
         if "flash_attn" in lower and "llama_context" in lower:
             updated = True
             if "enabled" in lower:
-                info["flash_attn"] = t("已启用")
+                info["flash_attn"] = "已启用"
             elif "disabled" in lower:
-                info["flash_attn"] = t("已禁用")
+                info["flash_attn"] = "已禁用"
             elif "auto" in lower:
-                info["flash_attn"] = t("自动（根据后端支持）")
+                info["flash_attn"] = "自动（根据后端支持）"
 
         if "flash attention is enabled" in lower:
-            info["flash_attn"] = t("已启用")
+            info["flash_attn"] = "已启用"
             updated = True
 
         if "has vision encoder" in lower:
             info["has_vision"] = True
             updated = True
 
-        if "server is listening on" in lower:
-            info["status"] = t("✅ 服务就绪")
+        if "server is listening on" in lower or ("listening on" in lower and "srv" in lower):
+            info["status"] = "✅ 服务就绪"
             updated = True
 
-        if "model loaded" in lower and "main:" in lower:
-            info["status"] = t("🔄 模型加载完成")
+        if "model loaded" in lower and ("main:" in lower or "llama_server:" in lower):
+            info["status"] = "🔄 模型加载完成"
             updated = True
 
         if updated:
@@ -1548,7 +1645,7 @@ class MainWindow(QMainWindow):
         if info.get("n_slots"):
             items.append((t("🎰 槽位数（并发请求数）"), info.get("n_slots")))
         if info.get("thinking_mode"):
-            items.append((t("🧠 推理模式（思维链/深度思考）"), info.get("thinking_mode")))
+            items.append((t("🧠 推理模式（思维链/深度思考）"), t(info.get("thinking_mode"))))
         if items:
             categories.append((t("运行参数"), items))
 
@@ -1570,15 +1667,15 @@ class MainWindow(QMainWindow):
         if info.get("compute_buffer"):
             items.append((t("🔲 计算缓冲（GPU 计算临时缓冲）"), info.get("compute_buffer")))
         if info.get("prompt_cache"):
-            items.append((t("💬 Prompt 缓存（系统提示词缓存上限）"), info.get("prompt_cache")))
+            items.append((t("💬 Prompt 缓存（系统提示词缓存上限）"), t(info.get("prompt_cache"))))
         if items:
             categories.append((t("显存占用"), items))
 
         items = []
         if info.get("flash_attn"):
-            items.append((t("⚡ Flash Attention（高效注意力机制）"), info.get("flash_attn")))
+            items.append((t("⚡ Flash Attention（高效注意力机制）"), t(info.get("flash_attn"))))
         if info.get("kv_unified"):
-            items.append((t("🔗 KV 统一（统一 KV 缓存）"), info.get("kv_unified")))
+            items.append((t("🔗 KV 统一（统一 KV 缓存）"), t(info.get("kv_unified"))))
         if info.get("graph_nodes"):
             items.append((t("🔗 图节点数（计算图节点数量）"), info.get("graph_nodes")))
         if info.get("graph_splits"):
@@ -1593,11 +1690,11 @@ class MainWindow(QMainWindow):
         if info.get("threads_http"):
             items.append((t("🌐 HTTP 线程数"), info.get("threads_http")))
         if info.get("openmp"):
-            items.append((t("🔗 OpenMP（并行计算加速）"), info.get("openmp")))
+            items.append((t("🔗 OpenMP（并行计算加速）"), t(info.get("openmp"))))
         if info.get("repack"):
-            items.append((t("📦 Repack（权重重打包优化）"), info.get("repack")))
+            items.append((t("📦 Repack（权重重打包优化）"), t(info.get("repack"))))
         if info.get("speculative_decoding"):
-            items.append((t("🚀 投机解码（Speculative Decoding）"), info.get("speculative_decoding")))
+            items.append((t("🚀 投机解码（Speculative Decoding）"), t(info.get("speculative_decoding"))))
         if items:
             categories.append((t("系统配置"), items))
 
@@ -1850,7 +1947,8 @@ class MainWindow(QMainWindow):
             + t("📋 <b>命令预览</b> — 实时生成 llama-server 命令行，一键复制，方便脚本集成<br>")
             + t("📊 <b>运行监控</b> — 实时日志解析（兼容新旧 llama.cpp 格式）、硬件信息展示、运行时间统计<br>")
             + t("🔬 <b>GGUF 检查器</b> — 深度解析 GGUF 文件结构：元数据、张量信息、量化分布、逐层分析、文件名校验、诊断检查<br>")
-            + t("🌐 <b>国际化</b> — 支持中文/英文界面实时切换，无需重启<br><br>")
+            + t("🌐 <b>国际化</b> — 支持中文/英文界面实时切换，无需重启<br>")
+            + "<br>"
             + t("<b>技术栈：</b> PyQt6 · Python · llama.cpp<br>")
             + t("默认参数自动从 llama-server --help 动态获取，确保与您的版本完全匹配。")
         )
