@@ -21,43 +21,10 @@ class BasicPanel(QWidget):
         d = self._defaults
         if not d:
             return
-        if "parallel" in d:
-            self.parallel_spin.setValue(d["parallel"])
-        if "temp" in d:
-            v = d["temp"]
-            val = max(0, min(200, int(round(v * 100))))
-            self.temp_slider.setValue(val)
-            self.temp_label.setText(f"{v:.2f}")
-        if "top_p" in d:
-            v = d["top_p"]
-            self.top_p_slider.setValue(int(round(v * 100)) if v <= 1.0 else int(v))
-            self.top_p_label.setText(f"{v:.2f}")
-        if "min_p" in d:
-            v = d["min_p"]
-            self.min_p_slider.setValue(int(round(v * 100)) if v <= 1.0 else int(v))
-            self.min_p_label.setText(f"{v:.2f}")
-        if "repeat_penalty" in d:
-            v = d["repeat_penalty"]
-            self.repeat_penalty_slider.setValue(int(round(v * 100)) if v <= 2.0 else int(v))
-            self.repeat_penalty_label.setText(f"{v:.2f}")
-        if "top_k" in d:
-            self.top_k_spin.setValue(d["top_k"])
-        if "host" in d:
-            self.host_edit.setText(str(d["host"]))
-        if "port" in d:
-            self.port_spin.setValue(d["port"])
-        if "flash_attn" in d:
-            self.flash_attn_combo.setCurrentText(str(d["flash_attn"]))
-        if "webui" in d:
-            self.chk_webui.setChecked(bool(d["webui"]))
-        if "reasoning" in d:
-            self.reasoning_combo.setCurrentText(str(d["reasoning"]))
-        if "split_mode" in d:
-            self.split_mode_combo.setCurrentText(str(d["split_mode"]))
-        if "spec_type" in d:
-            self.spec_type_combo.setCurrentText(str(d["spec_type"]))
-        if "draft_max" in d:
-            self.draft_max_spin.setValue(d["draft_max"])
+        # Apply the full set of parsed defaults (from llama-server --help) to every
+        # widget, so the UI reflects the live server's defaults rather than
+        # construction-time hardcoded values.
+        self.set_values(dict(d))
 
     def _setup_ui(self):
         layout = QVBoxLayout(self)

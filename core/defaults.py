@@ -17,6 +17,10 @@ _FALLBACK_DEFAULTS = {
     "poll_batch": 50,
     "cpu_strict": 0,
     "cpu_strict_batch": 0,
+    "cpu_mask": "",
+    "cpu_range": "",
+    "cpu_mask_batch": "",
+    "cpu_range_batch": "",
     "ctx_size": 0,
     "n_predict": -1,
     "batch_size": 2048,
@@ -46,14 +50,18 @@ _FALLBACK_DEFAULTS = {
     "direct_io": False,
     "numa": "disable",
     "device": "",
+    "load_mode": "mmap",
     "split_mode": "layer",
     "tensor_split": "",
+    "rpc": "",
     "main_gpu": 0,
     "n_gpu_layers": "auto",
     "fit": "on",
     "fit_target": "1024",
     "fit_ctx": 4096,
     "check_tensors": False,
+    "override_tensor": "",
+    "override_kv": "",
     "op_offload": True,
     "n_cpu_moe": 0,
     "lora": [],
@@ -82,7 +90,8 @@ _FALLBACK_DEFAULTS = {
     "dry_multiplier": 0.0,
     "dry_base": 1.75,
     "dry_allowed_length": 2,
-    "dry_penalty_last_n": -1,
+    "dry_penalty_last_n": 64,
+    "dry_sequence_breaker": "",
     "adaptive_target": -1.0,
     "adaptive_decay": 0.9,
     "dynatemp_range": 0.0,
@@ -97,7 +106,7 @@ _FALLBACK_DEFAULTS = {
     "json_schema": "",
     "json_schema_file": "",
     "ctx_checkpoints": 32,
-    "checkpoint_every_n_tokens": 8192,
+    "checkpoint_min_step": 8192,
     "cache_ram": 8192,
     "kv_unified": True,
     "cache_idle_slots": True,
@@ -105,20 +114,29 @@ _FALLBACK_DEFAULTS = {
     "spm_infill": False,
     "warmup": True,
     "pooling": "none",
+    "embd_normalize": 2,
     "cpu_moe": False,
     "mmproj_auto": True,
     "mmproj_offload": True,
     "image_min_tokens": 0,
     "image_max_tokens": 0,
+    "mtmd_batch_max_tokens": 1024,
     "verbose": False,
     "log_verbosity": 3,
     "log_colors": "auto",
     "log_file": "",
+    "log_disable": False,
+    "log_prompts_dir": "",
     "log_prefix": False,
     "log_timestamps": False,
     "offline": False,
     "host": "127.0.0.1",
     "port": 8080,
+    "sse_ping_interval": 30,
+    "cors_origins": "*",
+    "cors_methods": "GET, POST, DELETE, OPTIONS",
+    "cors_headers": "*",
+    "cors_credentials": True,
     "reuse_port": False,
     "path": "",
     "api_prefix": "",
@@ -127,6 +145,10 @@ _FALLBACK_DEFAULTS = {
     "webui_config_file": "",
     "webui_mcp_proxy": False,
     "tools": [],
+    "tools_runtime": "",
+    "mcp_servers_config": "",
+    "mcp_servers_json": "",
+    "agent": False,
     "embedding": False,
     "rerank": False,
     "timeout": 3600,
@@ -142,6 +164,7 @@ _FALLBACK_DEFAULTS = {
     "reasoning_format": "auto",
     "reasoning_budget": -1,
     "reasoning_budget_message": "",
+    "reasoning_preserve": False,
     "chat_template": "",
     "chat_template_file": "",
     "chat_template_kwargs": "",
@@ -158,13 +181,28 @@ _FALLBACK_DEFAULTS = {
     "api_key_file": "",
     "extra_args": "",
     "model": "",
+    "model_url": "",
+    "docker_repo": "",
+    "hf_repo": "",
+    "hf_file": "",
+    "hf_token": "",
     "mmproj": "",
+    "mmproj_url": "",
     "reverse_prompt": "",
     "special": False,
     "draft_model": "",
+    "spec_draft_hf": "",
     "threads_draft": -1,
     "threads_batch_draft": -1,
-    "ctx_size_draft": 0,
+    "spec_draft_cpu_mask": "",
+    "spec_draft_cpu_range": "",
+    "spec_draft_cpu_strict": 0,
+    "spec_draft_prio": "normal",
+    "spec_draft_poll": 50,
+    "spec_draft_cpu_mask_batch": "",
+    "spec_draft_cpu_strict_batch": 0,
+    "spec_draft_prio_batch": "normal",
+    "spec_draft_poll_batch": 50,
     "device_draft": "",
     "n_gpu_layers_draft": "auto",
     "cpu_moe_draft": False,
@@ -175,12 +213,26 @@ _FALLBACK_DEFAULTS = {
     "draft_min": 0,
     "draft_p_min": 0.0,
     "spec_draft_p_split": 0.10,
+    "spec_draft_backend_sampling": True,
     "spec_type": "none",
     "spec_ngram_size_n": 12,
     "spec_ngram_size_m": 48,
     "spec_ngram_min_hits": 1,
+    "spec_ngram_mod_n_min": 48,
+    "spec_ngram_mod_n_max": 64,
+    "spec_ngram_mod_n_match": 24,
+    "spec_ngram_map_k_size_n": 12,
+    "spec_ngram_map_k_size_m": 48,
+    "spec_ngram_map_k_min_hits": 1,
+    "spec_ngram_map_k4v_size_n": 12,
+    "spec_ngram_map_k4v_size_m": 48,
+    "spec_ngram_map_k4v_min_hits": 1,
+    "lookup_cache_static": "",
+    "lookup_cache_dynamic": "",
     "models_max": 4,
     "models_autoload": True,
+    "models_dir": "",
+    "models_preset": "",
 }
 
 _PRIO_MAP = {0: "normal", -1: "low", 1: "medium", 2: "high", 3: "realtime"}
@@ -204,6 +256,10 @@ _VALUE_FLAG_MAP = {
     "poll_batch": (["--poll-batch"], int),
     "cpu_strict": (["--cpu-strict"], int),  # <0|1>
     "cpu_strict_batch": (["--cpu-strict-batch"], int),  # <0|1>
+    "cpu_mask": (["-C", "--cpu-mask"], str),
+    "cpu_range": (["-Cr", "--cpu-range"], str),
+    "cpu_mask_batch": (["-Cb", "--cpu-mask-batch"], str),
+    "cpu_range_batch": (["-Crb", "--cpu-range-batch"], str),
     "ctx_size": (["-c", "--ctx-size"], int),
     "n_predict": (["-n", "--predict", "--n-predict"], int),
     "batch_size": (["-b", "--batch-size"], int),
@@ -223,14 +279,18 @@ _VALUE_FLAG_MAP = {
     "cache_type_k": (["-ctk", "--cache-type-k"], str),
     "cache_type_v": (["-ctv", "--cache-type-v"], str),
     "device": (["-dev", "--device"], str),
+    "load_mode": (["-lm", "--load-mode"], str),
     "split_mode": (["-sm", "--split-mode"], str),  # {none,layer,row,tensor}
     "tensor_split": (["-ts", "--tensor-split"], str),
+    "rpc": (["--rpc"], str),
     "main_gpu": (["-mg", "--main-gpu"], int),
     "n_gpu_layers": (["-ngl", "--gpu-layers", "--n-gpu-layers"], str),  # N, 'auto', or 'all'
     "fit": (["-fit", "--fit"], str),
     "fit_target": (["-fitt", "--fit-target"], str),
     "fit_ctx": (["-fitc", "--fit-ctx"], int),
     "n_cpu_moe": (["-ncmoe", "--n-cpu-moe"], int),
+    "override_tensor": (["-ot", "--override-tensor"], str),
+    "override_kv": (["--override-kv"], str),
     "lora_scaled": (["--lora-scaled"], str),
     "control_vector_scaled": (["--control-vector-scaled"], str),
     "control_vector_layer_range": (["--control-vector-layer-range"], str),
@@ -255,6 +315,7 @@ _VALUE_FLAG_MAP = {
     "dry_base": (["--dry-base"], float),
     "dry_allowed_length": (["--dry-allowed-length"], int),
     "dry_penalty_last_n": (["--dry-penalty-last-n"], int),
+    "dry_sequence_breaker": (["--dry-sequence-breaker"], str),
     "adaptive_target": (["--adaptive-target"], float),
     "adaptive_decay": (["--adaptive-decay"], float),
     "dynatemp_range": (["--dynatemp-range"], float),
@@ -268,16 +329,23 @@ _VALUE_FLAG_MAP = {
     "json_schema": (["-j", "--json-schema"], str),
     "json_schema_file": (["-jf", "--json-schema-file"], str),
     "ctx_checkpoints": (["-ctxcp", "--ctx-checkpoints", "--swa-checkpoints"], int),
-    "checkpoint_every_n_tokens": (["-cpent", "--checkpoint-every-n-tokens"], int),
+    "checkpoint_min_step": (["-cms", "--checkpoint-min-step"], int),
     "cache_ram": (["-cram", "--cache-ram"], int),
     "pooling": (["--pooling"], str),
+    "embd_normalize": (["--embd-normalize"], int),
     "image_min_tokens": (["--image-min-tokens"], int),
     "image_max_tokens": (["--image-max-tokens"], int),
+    "mtmd_batch_max_tokens": (["--mtmd-batch-max-tokens"], int),
     "log_verbosity": (["-lv", "--verbosity", "--log-verbosity"], int),
     "log_colors": (["--log-colors"], str),
     "log_file": (["--log-file"], str),
+    "log_prompts_dir": (["--log-prompts-dir"], str),
     "host": (["--host"], str),
     "port": (["--port"], int),
+    "sse_ping_interval": (["--sse-ping-interval"], int),
+    "cors_origins": (["--cors-origins"], str),
+    "cors_methods": (["--cors-methods"], str),
+    "cors_headers": (["--cors-headers"], str),
     "path": (["--path"], str),
     "api_prefix": (["--api-prefix"], str),
     "webui_config": (["--webui-config"], str),
@@ -300,10 +368,25 @@ _VALUE_FLAG_MAP = {
     "ssl_cert_file": (["--ssl-cert-file"], str),
     "api_key": (["--api-key"], str),
     "api_key_file": (["--api-key-file"], str),
+    "model_url": (["-mu", "--model-url"], str),
+    "docker_repo": (["-dr", "--docker-repo"], str),
+    "hf_repo": (["-hf", "-hfr", "--hf-repo"], str),
+    "hf_file": (["-hff", "--hf-file"], str),
+    "hf_token": (["-hft", "--hf-token"], str),
+    "mmproj_url": (["-mmu", "--mmproj-url"], str),
     "draft_model": (["-md", "--model-draft", "--spec-draft-model"], str),
+    "spec_draft_hf": (["--spec-draft-hf", "-hfd", "-hfrd", "--hf-repo-draft"], str),
     "threads_draft": (["-td", "--threads-draft", "--spec-draft-threads"], int),
     "threads_batch_draft": (["-tbd", "--threads-batch-draft", "--spec-draft-threads-batch"], int),
-    "ctx_size_draft": (["-cd", "--ctx-size-draft"], int),
+    "spec_draft_cpu_mask": (["--spec-draft-cpu-mask", "-Cd", "--cpu-mask-draft"], str),
+    "spec_draft_cpu_range": (["--spec-draft-cpu-range", "-Crd", "--cpu-range-draft"], str),
+    "spec_draft_cpu_strict": (["--spec-draft-cpu-strict", "--cpu-strict-draft"], int),
+    "spec_draft_prio": (["--spec-draft-prio", "--prio-draft"], _parse_prio),
+    "spec_draft_poll": (["--spec-draft-poll", "--poll-draft"], int),
+    "spec_draft_cpu_mask_batch": (["--spec-draft-cpu-mask-batch", "-Cbd", "--cpu-mask-batch-draft"], str),
+    "spec_draft_cpu_strict_batch": (["--spec-draft-cpu-strict-batch", "--cpu-strict-batch-draft"], int),
+    "spec_draft_prio_batch": (["--spec-draft-prio-batch", "--prio-batch-draft"], _parse_prio),
+    "spec_draft_poll_batch": (["--spec-draft-poll-batch", "--poll-batch-draft"], int),
     "device_draft": (["-devd", "--device-draft", "--spec-draft-device"], str),
     "n_gpu_layers_draft": (["-ngld", "--gpu-layers-draft", "--n-gpu-layers-draft", "--spec-draft-ngl"], str),
     "n_cpu_moe_draft": (["-ncmoed", "--n-cpu-moe-draft", "--spec-draft-n-cpu-moe", "--spec-draft-ncmoe"], int),
@@ -316,7 +399,23 @@ _VALUE_FLAG_MAP = {
     "spec_ngram_size_n": (["--spec-ngram-simple-size-n", "--spec-ngram-size-n"], int),
     "spec_ngram_size_m": (["--spec-ngram-simple-size-m", "--spec-ngram-size-m"], int),
     "spec_ngram_min_hits": (["--spec-ngram-simple-min-hits", "--spec-ngram-min-hits"], int),
+    "spec_ngram_mod_n_min": (["--spec-ngram-mod-n-min"], int),
+    "spec_ngram_mod_n_max": (["--spec-ngram-mod-n-max"], int),
+    "spec_ngram_mod_n_match": (["--spec-ngram-mod-n-match"], int),
+    "spec_ngram_map_k_size_n": (["--spec-ngram-map-k-size-n"], int),
+    "spec_ngram_map_k_size_m": (["--spec-ngram-map-k-size-m"], int),
+    "spec_ngram_map_k_min_hits": (["--spec-ngram-map-k-min-hits"], int),
+    "spec_ngram_map_k4v_size_n": (["--spec-ngram-map-k4v-size-n"], int),
+    "spec_ngram_map_k4v_size_m": (["--spec-ngram-map-k4v-size-m"], int),
+    "spec_ngram_map_k4v_min_hits": (["--spec-ngram-map-k4v-min-hits"], int),
+    "lookup_cache_static": (["-lcs", "--lookup-cache-static"], str),
+    "lookup_cache_dynamic": (["-lcd", "--lookup-cache-dynamic"], str),
     "models_max": (["--models-max"], int),
+    "models_dir": (["--models-dir"], str),
+    "models_preset": (["--models-preset"], str),
+    "tools_runtime": (["--tools-runtime"], str),
+    "mcp_servers_config": (["--mcp-servers-config"], str),
+    "mcp_servers_json": (["--mcp-servers-json"], str),
     "numa": (["--numa"], str),
     "reverse_prompt": (["-r", "--reverse-prompt"], str),
     "spec_type": (["--spec-type"], str),
@@ -328,11 +427,12 @@ _FLAG_MAP = {
     "context_shift": ["--context-shift"],
     "spm_infill": ["--spm-infill"],
     "cpu_moe": ["--cpu-moe"],
-    "cpu_moe_draft": ["--cmoed", "--cpu-moe-draft", "--spec-draft-cpu-moe"],
+    "cpu_moe_draft": ["-cmoed", "--cpu-moe-draft", "--spec-draft-cpu-moe"],
     "check_tensors": ["--check-tensors"],
     "verbose": ["--verbose"],
     "log_prefix": ["--log-prefix"],
     "log_timestamps": ["--log-timestamps"],
+    "log_disable": ["--log-disable"],
     "offline": ["--offline"],
     "reuse_port": ["--reuse-port"],
     "webui_mcp_proxy": ["--webui-mcp-proxy"],
@@ -347,6 +447,8 @@ _FLAG_MAP = {
     "direct_io": ["--direct-io"],
     "lora_init_without_apply": ["--lora-init-without-apply"],
     "models_autoload": ["--models-autoload"],
+    "reasoning_preserve": ["--reasoning-preserve"],
+    "agent": ["-ag", "--agent"],
 }
 
 _NEG_FLAG_MAP = {
@@ -368,6 +470,8 @@ _NEG_FLAG_MAP = {
     "mmproj_offload": ["--no-mmproj-offload"],
     "cache_idle_slots": ["--no-cache-idle-slots"],
     "webui": ["--no-webui"],
+    "cors_credentials": ["--no-cors-credentials"],
+    "spec_draft_backend_sampling": ["--no-spec-draft-backend-sampling"],
 }
 
 
@@ -384,6 +488,11 @@ _KNOWN_STRING_DEFAULTS = {
     "--logit-bias": "",
     "--prio": "normal",
     "--prio-batch": "normal",
+    "--hf-token": "",
+    "--cors-methods": "GET, POST, DELETE, OPTIONS",
+    "--cpu-mask-batch": "",
+    "--spec-draft-cpu-mask": "",
+    "--spec-draft-cpu-mask-batch": "",
 }
 
 
@@ -399,7 +508,7 @@ def _extract_default_from_text(text, flags):
         return m.group(1)
     m = re.search(r"default:\s*(\S+)", text)
     if m:
-        raw = m.group(1).rstrip(")")
+        raw = m.group(1).rstrip(",)")
         return raw
     return None
 
@@ -418,6 +527,8 @@ def _parse_help_to_defaults(help_text):
     lines = help_text.split("\n")
 
     for i, line in enumerate(lines):
+        if not line.strip().startswith("-"):
+            continue  # skip blank lines and description continuation text
         combined = line
         j = i + 1
         while j < len(lines) and lines[j].strip() and not lines[j].strip().startswith("-"):
@@ -461,7 +572,10 @@ def _parse_help_to_defaults(help_text):
     # Normalize placeholder strings from --help to empty string
     # These mean "not set" in llama-server but would display as literal text in the GUI
     _PLACEHOLDER_DEFAULTS = {"none", "unused", "disabled"}
-    for key in ("api_key", "api_key_file", "draft_model", "media_path", "slot_save_path"):
+    for key in ("api_key", "api_key_file", "draft_model", "media_path", "slot_save_path",
+                "hf_repo", "hf_file", "model_url", "docker_repo", "mmproj_url",
+                "spec_draft_hf", "models_dir", "models_preset", "tools_runtime",
+                "mcp_servers_config", "mcp_servers_json", "log_prompts_dir"):
         if defaults.get(key) in _PLACEHOLDER_DEFAULTS:
             defaults[key] = ""
 
@@ -505,6 +619,11 @@ def get_server_version(server_path="llama-server"):
         return None
     text = (stdout + stderr).strip()
     if text:
+        # New format: "version: 10355 (dd1ea5243)"
+        m = re.search(r"version:\s*(\d+)", text)
+        if m:
+            return m.group(1)
+        # Old format: "b1234"
         m = re.search(r"b\d+", text)
         if m:
             return m.group(0)
@@ -540,6 +659,7 @@ def get_chat_templates(server_path="llama-server", help_text=None):
             return []
         help_text = (stdout or "") + (stderr or "")
     templates = []
+    seen = set()
     in_list = False
     for line in help_text.split("\n"):
         if "list of built-in templates:" in line.lower():
@@ -547,10 +667,12 @@ def get_chat_templates(server_path="llama-server", help_text=None):
             continue
         if in_list:
             stripped = line.strip()
-            if not stripped:
+            # End of list: blank line, env line, or a new flag
+            if not stripped or stripped.startswith("(") or stripped.startswith("-"):
                 break
-            for name in stripped.split(", "):
-                name = name.strip().rstrip(",")
-                if name and name[0].isalpha():
+            for name in re.split(r"[,\s]+", stripped):
+                name = name.strip()
+                if name and name[0].isalpha() and name not in seen:
+                    seen.add(name)
                     templates.append(name)
     return templates if templates else []

@@ -11,7 +11,9 @@ from core.constants import DEFAULT_HOST, DEFAULT_PORT, MAIN_GPU_MAX
 
 # Shared combo item lists
 CACHE_TYPE_ITEMS = ["f16", "bf16", "f32", "q8_0", "q4_0", "q4_1", "iq4_nl", "q5_0", "q5_1"]
-SPEC_TYPE_ITEMS = ["none", "draft-simple", "draft-eagle3", "draft-mtp", "ngram-simple", "ngram-map-k", "ngram-map-k4v", "ngram-mod", "ngram-cache"]
+SPEC_TYPE_ITEMS = ["none", "draft-simple", "draft-eagle3", "draft-mtp", "draft-dflash", "draft-dspark", "ngram-simple", "ngram-map-k", "ngram-map-k4v", "ngram-mod", "ngram-cache"]
+LOAD_MODE_ITEMS = ["none", "mmap", "mlock", "mmap+mlock", "dio"]
+DRAFT_PRIO_ITEMS = ["normal", "medium", "high", "realtime"]
 
 
 class AdvancedPanel(QWidget):
@@ -26,21 +28,10 @@ class AdvancedPanel(QWidget):
         d = self._defaults
         if not d:
             return
-
-        if "repeat_penalty" in d:
-            self.adv_repeat_penalty.setValue(d["repeat_penalty"])
-        if "parallel" in d:
-            self.adv_parallel.setValue(d["parallel"])
-        if "log_verbosity" in d:
-            lv = d["log_verbosity"]
-            if 0 <= lv <= 4:
-                self.adv_log_verbosity.setCurrentIndex(lv)
-        if "mirostat" in d:
-            self.adv_mirostat.setCurrentIndex(d["mirostat"])
-        if "sampler_seq" in d:
-            self.adv_sampler_seq.setText(d["sampler_seq"])
-        if "spec_type" in d:
-            self.adv_spec_type.setCurrentText(d["spec_type"])
+        # Apply the full set of parsed defaults (from llama-server --help) to every
+        # widget, so the UI reflects the live server's defaults rather than
+        # construction-time hardcoded values.
+        self.set_values(dict(d))
 
     def init_ui(self):
         layout = QVBoxLayout(self)
@@ -128,6 +119,27 @@ class AdvancedPanel(QWidget):
         self.adv_mmproj_offload.setChecked(True)
         self._add_form_row(form, "MMProj GPU卸载 (--mmproj-offload):", self.adv_mmproj_offload)
 
+        self.adv_hf_repo = QLineEdit()
+        self.adv_hf_repo.setPlaceholderText("ggml-org/GLM-4.7-Flash-GGUF:Q4_K_M")
+        self._add_form_row(form, "HF仓库 (--hf-repo):", self.adv_hf_repo)
+
+        self.adv_hf_file = QLineEdit()
+        self._add_form_row(form, "HF文件 (--hf-file):", self.adv_hf_file)
+
+        self.adv_hf_token = QLineEdit()
+        self.adv_hf_token.setEchoMode(QLineEdit.EchoMode.Password)
+        self._add_form_row(form, "HF令牌 (--hf-token):", self.adv_hf_token)
+
+        self.adv_model_url = QLineEdit()
+        self._add_form_row(form, "模型URL (--model-url):", self.adv_model_url)
+
+        self.adv_docker_repo = QLineEdit()
+        self.adv_docker_repo.setPlaceholderText("ai/<model>[:quant]")
+        self._add_form_row(form, "Docker仓库 (--docker-repo):", self.adv_docker_repo)
+
+        self.adv_mmproj_url = QLineEdit()
+        self._add_form_row(form, "MMProj URL (--mmproj-url):", self.adv_mmproj_url)
+
         self.adv_image_min_tokens = QSpinBox()
         self.adv_image_min_tokens.setRange(0, 999999)
         self.adv_image_min_tokens.setToolTip(t("0=使用模型默认"))
@@ -137,6 +149,11 @@ class AdvancedPanel(QWidget):
         self.adv_image_max_tokens.setRange(0, 999999)
         self.adv_image_max_tokens.setToolTip(t("0=使用模型默认"))
         self._add_form_row(form, "图像最大Token (--image-max-tokens):", self.adv_image_max_tokens)
+
+        self.adv_mtmd_batch_tokens = QSpinBox()
+        self.adv_mtmd_batch_tokens.setRange(0, 99999)
+        self.adv_mtmd_batch_tokens.setValue(1024)
+        self._add_form_row(form, "MTMD批Token (--mtmd-batch-max-tokens):", self.adv_mtmd_batch_tokens)
 
         lora_w, self.adv_lora_list = self._make_list_row(t("LoRA 适配器"), t("选择LoRA文件"), "GGUF Files (*.gguf)")
         self._add_form_row(form, "LoRA 适配器 (--lora)", lora_w)
@@ -293,10 +310,10 @@ class AdvancedPanel(QWidget):
         self.adv_ctx_checkpoints.setValue(32)
         self._add_form_row(form, "上下文检查点 (--ctx-checkpoints):", self.adv_ctx_checkpoints)
 
-        self.adv_checkpoint_every = QSpinBox()
-        self.adv_checkpoint_every.setRange(-1, 999999)
-        self.adv_checkpoint_every.setValue(8192)
-        self._add_form_row(form, "每N Token检查点 (--checkpoint-every-n-tokens):", self.adv_checkpoint_every)
+        self.adv_checkpoint_min_step = QSpinBox()
+        self.adv_checkpoint_min_step.setRange(-1, 999999)
+        self.adv_checkpoint_min_step.setValue(8192)
+        self._add_form_row(form, "每N Token检查点 (--checkpoint-min-step):", self.adv_checkpoint_min_step)
 
         scroll.setWidget(content)
         tab_layout = QVBoxLayout(tab)
@@ -395,8 +412,12 @@ class AdvancedPanel(QWidget):
 
         self.adv_dry_penalty_last_n = QSpinBox()
         self.adv_dry_penalty_last_n.setRange(-1, 999999)
-        self.adv_dry_penalty_last_n.setValue(-1)
+        self.adv_dry_penalty_last_n.setValue(64)
         self._add_form_row(form, "DRY惩罚最后N (--dry-penalty-last-n):", self.adv_dry_penalty_last_n)
+
+        self.adv_dry_seq_breaker = QLineEdit()
+        self.adv_dry_seq_breaker.setPlaceholderText("\\n, :, \", *; 'none' = 不设分隔符")
+        self._add_form_row(form, "DRY序列分隔符 (--dry-sequence-breaker):", self.adv_dry_seq_breaker)
 
         self.adv_adaptive_target = QDoubleSpinBox()
         self.adv_adaptive_target.setRange(-1.0, 1.0)
@@ -516,6 +537,11 @@ class AdvancedPanel(QWidget):
         self.adv_device = QLineEdit()
         self._add_form_row(form, "设备 (--device):", self.adv_device)
 
+        self.adv_load_mode = QComboBox()
+        self.adv_load_mode.addItems(LOAD_MODE_ITEMS)
+        self.adv_load_mode.setCurrentText("mmap")
+        self._add_form_row(form, "加载模式 (--load-mode):", self.adv_load_mode)
+
         self.adv_split_mode = QComboBox()
         self.adv_split_mode.addItems(["layer", "none", "row", "tensor"])
         self._add_form_row(form, "分割模式 (--split-mode):", self.adv_split_mode)
@@ -543,10 +569,46 @@ class AdvancedPanel(QWidget):
         self.adv_threads_http.setValue(-1)
         self._add_form_row(form, "HTTP线程 (--threads-http):", self.adv_threads_http)
 
+        self.adv_cpu_mask = QLineEdit()
+        self._add_form_row(form, "CPU掩码 (--cpu-mask):", self.adv_cpu_mask)
+
+        self.adv_cpu_range = QLineEdit()
+        self.adv_cpu_range.setPlaceholderText("lo-hi")
+        self._add_form_row(form, "CPU范围 (--cpu-range):", self.adv_cpu_range)
+
+        self.adv_cpu_strict = QSpinBox()
+        self.adv_cpu_strict.setRange(0, 1)
+        self._add_form_row(form, "严格CPU (--cpu-strict):", self.adv_cpu_strict)
+
+        self.adv_cpu_mask_batch = QLineEdit()
+        self._add_form_row(form, "批CPU掩码 (--cpu-mask-batch):", self.adv_cpu_mask_batch)
+
+        self.adv_cpu_range_batch = QLineEdit()
+        self.adv_cpu_range_batch.setPlaceholderText("lo-hi")
+        self._add_form_row(form, "批CPU范围 (--cpu-range-batch):", self.adv_cpu_range_batch)
+
+        self.adv_cpu_strict_batch = QSpinBox()
+        self.adv_cpu_strict_batch.setRange(0, 1)
+        self._add_form_row(form, "批严格CPU (--cpu-strict-batch):", self.adv_cpu_strict_batch)
+
+        self.adv_poll = QSpinBox()
+        self.adv_poll.setRange(0, 100)
+        self.adv_poll.setValue(50)
+        self._add_form_row(form, "轮询级别 (--poll):", self.adv_poll)
+
+        self.adv_poll_batch = QSpinBox()
+        self.adv_poll_batch.setRange(0, 100)
+        self.adv_poll_batch.setValue(50)
+        self._add_form_row(form, "批轮询 (--poll-batch):", self.adv_poll_batch)
+
         self.adv_prio = QComboBox()
         self.adv_prio.addItems(["low", "normal", "medium", "high", "realtime"])
         self.adv_prio.setCurrentText("normal")
         self._add_form_row(form, "优先级 (--prio):", self.adv_prio)
+
+        self.adv_rpc = QLineEdit()
+        self.adv_rpc.setPlaceholderText("host:port,host:port")
+        self._add_form_row(form, "RPC服务器 (--rpc):", self.adv_rpc)
 
         self.adv_flash_attn = QComboBox()
         self.adv_flash_attn.addItems(["on", "off", "auto"])
@@ -589,6 +651,14 @@ class AdvancedPanel(QWidget):
         self.adv_n_cpu_moe.setRange(0, 999)
         self._add_form_row(form, "CPU MoE层数 (--n-cpu-moe):", self.adv_n_cpu_moe)
 
+        self.adv_override_tensor = QLineEdit()
+        self.adv_override_tensor.setPlaceholderText("tensor_name=type,...")
+        self._add_form_row(form, "覆盖张量 (--override-tensor):", self.adv_override_tensor)
+
+        self.adv_override_kv = QLineEdit()
+        self.adv_override_kv.setPlaceholderText("KEY=TYPE:VALUE,...")
+        self._add_form_row(form, "覆盖KV (--override-kv):", self.adv_override_kv)
+
         self.adv_direct_io = QCheckBox()
         self._add_form_row(form, "直接IO (--direct-io):", self.adv_direct_io)
 
@@ -626,11 +696,6 @@ class AdvancedPanel(QWidget):
         self.adv_threads_batch_draft.setRange(-1, 256)
         self.adv_threads_batch_draft.setValue(-1)
         self._add_form_row(form, "草稿批处理线程 (--threads-batch-draft):", self.adv_threads_batch_draft)
-
-        self.adv_ctx_size_draft = QSpinBox()
-        self.adv_ctx_size_draft.setRange(0, 999999)
-        self.adv_ctx_size_draft.setToolTip(t("0=使用模型默认"))
-        self._add_form_row(form, "草稿上下文 (--ctx-size-draft):", self.adv_ctx_size_draft)
 
         self.adv_device_draft = QLineEdit()
         self._add_form_row(form, "草稿设备 (--device-draft):", self.adv_device_draft)
@@ -696,6 +761,103 @@ class AdvancedPanel(QWidget):
         self.adv_spec_ngram_min_hits.setRange(1, 256)
         self._add_form_row(form, "Ngram最小命中 (--spec-ngram-simple-min-hits):", self.adv_spec_ngram_min_hits)
 
+        self.adv_spec_draft_hf = QLineEdit()
+        self.adv_spec_draft_hf.setPlaceholderText("<user>/<model>[:quant]")
+        self._add_form_row(form, "草稿HF仓库 (--spec-draft-hf):", self.adv_spec_draft_hf)
+
+        self.adv_spec_draft_cpu_mask = QLineEdit()
+        self._add_form_row(form, "草稿CPU掩码 (--spec-draft-cpu-mask):", self.adv_spec_draft_cpu_mask)
+
+        self.adv_spec_draft_cpu_range = QLineEdit()
+        self.adv_spec_draft_cpu_range.setPlaceholderText("lo-hi")
+        self._add_form_row(form, "草稿CPU范围 (--spec-draft-cpu-range):", self.adv_spec_draft_cpu_range)
+
+        self.adv_spec_draft_cpu_strict = QSpinBox()
+        self.adv_spec_draft_cpu_strict.setRange(0, 1)
+        self._add_form_row(form, "草稿严格CPU (--spec-draft-cpu-strict):", self.adv_spec_draft_cpu_strict)
+
+        self.adv_spec_draft_prio = QComboBox()
+        self.adv_spec_draft_prio.addItems(DRAFT_PRIO_ITEMS)
+        self.adv_spec_draft_prio.setCurrentText("normal")
+        self._add_form_row(form, "草稿优先级 (--spec-draft-prio):", self.adv_spec_draft_prio)
+
+        self.adv_spec_draft_poll = QSpinBox()
+        self.adv_spec_draft_poll.setRange(0, 100)
+        self.adv_spec_draft_poll.setValue(50)
+        self._add_form_row(form, "草稿轮询 (--spec-draft-poll):", self.adv_spec_draft_poll)
+
+        self.adv_spec_draft_cpu_mask_batch = QLineEdit()
+        self._add_form_row(form, "草稿批CPU掩码 (--spec-draft-cpu-mask-batch):", self.adv_spec_draft_cpu_mask_batch)
+
+        self.adv_spec_draft_cpu_strict_batch = QSpinBox()
+        self.adv_spec_draft_cpu_strict_batch.setRange(0, 1)
+        self._add_form_row(form, "草稿批严格CPU (--spec-draft-cpu-strict-batch):", self.adv_spec_draft_cpu_strict_batch)
+
+        self.adv_spec_draft_prio_batch = QComboBox()
+        self.adv_spec_draft_prio_batch.addItems(DRAFT_PRIO_ITEMS)
+        self.adv_spec_draft_prio_batch.setCurrentText("normal")
+        self._add_form_row(form, "草稿批优先级 (--spec-draft-prio-batch):", self.adv_spec_draft_prio_batch)
+
+        self.adv_spec_draft_poll_batch = QSpinBox()
+        self.adv_spec_draft_poll_batch.setRange(0, 100)
+        self.adv_spec_draft_poll_batch.setValue(50)
+        self._add_form_row(form, "草稿批轮询 (--spec-draft-poll-batch):", self.adv_spec_draft_poll_batch)
+
+        self.adv_spec_draft_backend_sampling = QCheckBox()
+        self.adv_spec_draft_backend_sampling.setChecked(True)
+        self._add_form_row(form, "草稿后端采样 (--spec-draft-backend-sampling):", self.adv_spec_draft_backend_sampling)
+
+        lookup_s_row, self.adv_lookup_static = self._make_file_row("file", "All Files (*)")
+        self._add_form_row(form, "静态查找缓存 (--lookup-cache-static):", lookup_s_row)
+
+        lookup_d_row, self.adv_lookup_dynamic = self._make_file_row("file", "All Files (*)")
+        self._add_form_row(form, "动态查找缓存 (--lookup-cache-dynamic):", lookup_d_row)
+
+        self.adv_spec_ngram_mod_n_min = QSpinBox()
+        self.adv_spec_ngram_mod_n_min.setRange(0, 1024)
+        self.adv_spec_ngram_mod_n_min.setValue(48)
+        self._add_form_row(form, "Ngram-mod最小N (--spec-ngram-mod-n-min):", self.adv_spec_ngram_mod_n_min)
+
+        self.adv_spec_ngram_mod_n_max = QSpinBox()
+        self.adv_spec_ngram_mod_n_max.setRange(0, 1024)
+        self.adv_spec_ngram_mod_n_max.setValue(64)
+        self._add_form_row(form, "Ngram-mod最大N (--spec-ngram-mod-n-max):", self.adv_spec_ngram_mod_n_max)
+
+        self.adv_spec_ngram_mod_n_match = QSpinBox()
+        self.adv_spec_ngram_mod_n_match.setRange(0, 1024)
+        self.adv_spec_ngram_mod_n_match.setValue(24)
+        self._add_form_row(form, "Ngram-mod匹配长度 (--spec-ngram-mod-n-match):", self.adv_spec_ngram_mod_n_match)
+
+        self.adv_spec_ngram_mapk_n = QSpinBox()
+        self.adv_spec_ngram_mapk_n.setRange(1, 128)
+        self.adv_spec_ngram_mapk_n.setValue(12)
+        self._add_form_row(form, "Ngram-map-k大小N (--spec-ngram-map-k-size-n):", self.adv_spec_ngram_mapk_n)
+
+        self.adv_spec_ngram_mapk_m = QSpinBox()
+        self.adv_spec_ngram_mapk_m.setRange(1, 256)
+        self.adv_spec_ngram_mapk_m.setValue(48)
+        self._add_form_row(form, "Ngram-map-k大小M (--spec-ngram-map-k-size-m):", self.adv_spec_ngram_mapk_m)
+
+        self.adv_spec_ngram_mapk_min_hits = QSpinBox()
+        self.adv_spec_ngram_mapk_min_hits.setRange(1, 256)
+        self.adv_spec_ngram_mapk_min_hits.setValue(1)
+        self._add_form_row(form, "Ngram-map-k最小命中 (--spec-ngram-map-k-min-hits):", self.adv_spec_ngram_mapk_min_hits)
+
+        self.adv_spec_ngram_mapk4v_n = QSpinBox()
+        self.adv_spec_ngram_mapk4v_n.setRange(1, 128)
+        self.adv_spec_ngram_mapk4v_n.setValue(12)
+        self._add_form_row(form, "Ngram-map-k4v大小N (--spec-ngram-map-k4v-size-n):", self.adv_spec_ngram_mapk4v_n)
+
+        self.adv_spec_ngram_mapk4v_m = QSpinBox()
+        self.adv_spec_ngram_mapk4v_m.setRange(1, 256)
+        self.adv_spec_ngram_mapk4v_m.setValue(48)
+        self._add_form_row(form, "Ngram-map-k4v大小M (--spec-ngram-map-k4v-size-m):", self.adv_spec_ngram_mapk4v_m)
+
+        self.adv_spec_ngram_mapk4v_min_hits = QSpinBox()
+        self.adv_spec_ngram_mapk4v_min_hits.setRange(1, 256)
+        self.adv_spec_ngram_mapk4v_min_hits.setValue(1)
+        self._add_form_row(form, "Ngram-map-k4v最小命中 (--spec-ngram-map-k4v-min-hits):", self.adv_spec_ngram_mapk4v_min_hits)
+
         scroll.setWidget(content)
         tab_layout = QVBoxLayout(tab)
         tab_layout.addWidget(scroll)
@@ -743,7 +905,7 @@ class AdvancedPanel(QWidget):
 
         self.adv_tools_list = QListWidget()
         self.adv_tools_list.setMaximumHeight(80)
-        for tool in ["calculator", "retriever", "python", "bash", "curl"]:
+        for tool in ["read_file", "file_glob_search", "grep_search", "exec_shell_command", "write_file", "edit_file", "get_datetime", "get_info"]:
             item = QListWidgetItem(tool)
             item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
             item.setCheckState(Qt.CheckState.Unchecked)
@@ -761,7 +923,7 @@ class AdvancedPanel(QWidget):
 
         self.adv_timeout = QSpinBox()
         self.adv_timeout.setRange(1, 99999)
-        self.adv_timeout.setValue(600)
+        self.adv_timeout.setValue(3600)
         self._add_form_row(form, "超时秒数 (--timeout):", self.adv_timeout)
 
         self.adv_slot_sim = QDoubleSpinBox()
@@ -792,6 +954,48 @@ class AdvancedPanel(QWidget):
         self.adv_webui_config = QLineEdit()
         self.adv_webui_config.setPlaceholderText(t("JSON格式的WebUI配置"))
         self._add_form_row(form, "WebUI配置JSON (--webui-config):", self.adv_webui_config)
+
+        self.adv_sse_ping = QSpinBox()
+        self.adv_sse_ping.setRange(0, 99999)
+        self.adv_sse_ping.setValue(30)
+        self.adv_sse_ping.setToolTip(t("-1 = 禁用"))
+        self._add_form_row(form, "SSE心跳间隔 (--sse-ping-interval):", self.adv_sse_ping)
+
+        self.adv_cors_origins = QLineEdit()
+        self.adv_cors_origins.setText("*")
+        self._add_form_row(form, "CORS来源 (--cors-origins):", self.adv_cors_origins)
+
+        self.adv_cors_methods = QLineEdit()
+        self.adv_cors_methods.setText("GET, POST, DELETE, OPTIONS")
+        self._add_form_row(form, "CORS方法 (--cors-methods):", self.adv_cors_methods)
+
+        self.adv_cors_headers = QLineEdit()
+        self.adv_cors_headers.setText("*")
+        self._add_form_row(form, "CORS头 (--cors-headers):", self.adv_cors_headers)
+
+        self.adv_cors_credentials = QCheckBox()
+        self.adv_cors_credentials.setChecked(True)
+        self._add_form_row(form, "CORS凭据 (--cors-credentials):", self.adv_cors_credentials)
+
+        models_dir_row, self.adv_models_dir = self._make_file_row("dir")
+        self._add_form_row(form, "模型目录 (--models-dir):", models_dir_row)
+
+        models_preset_row, self.adv_models_preset = self._make_file_row("file", "INI Files (*.ini)")
+        self._add_form_row(form, "模型预设 (--models-preset):", models_preset_row)
+
+        self.adv_tools_runtime = QLineEdit()
+        self.adv_tools_runtime.setPlaceholderText("docker:<image>, podman:<image>, ssh:<target>")
+        self._add_form_row(form, "工具运行时 (--tools-runtime):", self.adv_tools_runtime)
+
+        mcp_cfg_row, self.adv_mcp_servers_config = self._make_file_row("file", "JSON Files (*.json)")
+        self._add_form_row(form, "MCP服务器配置 (--mcp-servers-config):", mcp_cfg_row)
+
+        self.adv_mcp_servers_json = QLineEdit()
+        self.adv_mcp_servers_json.setPlaceholderText('{"servers": {...}}')
+        self._add_form_row(form, "MCP服务器JSON (--mcp-servers-json):", self.adv_mcp_servers_json)
+
+        self.adv_agent = QCheckBox()
+        self._add_form_row(form, "Agent模式 (--agent):", self.adv_agent)
 
         self.adv_slot_save_path = QLineEdit()
         self.adv_slot_save_path.setPlaceholderText(t("槽位KV缓存保存路径"))
@@ -889,6 +1093,9 @@ class AdvancedPanel(QWidget):
         self.adv_reasoning_budget_msg = QLineEdit()
         self._add_form_row(form, "推理预算消息 (--reasoning-budget-message):", self.adv_reasoning_budget_msg)
 
+        self.adv_reasoning_preserve = QCheckBox()
+        self._add_form_row(form, "保留推理痕迹 (--reasoning-preserve):", self.adv_reasoning_preserve)
+
         scroll.setWidget(content)
         tab_layout = QVBoxLayout(tab)
         tab_layout.addWidget(scroll)
@@ -962,11 +1169,16 @@ class AdvancedPanel(QWidget):
         self.adv_pooling.addItems(["none", "mean", "cls", "last", "rank"])
         self._add_form_row(form, "池化类型 (--pooling):", self.adv_pooling)
 
+        self.adv_embd_normalize = QSpinBox()
+        self.adv_embd_normalize.setRange(-1, 10)
+        self.adv_embd_normalize.setValue(2)
+        self._add_form_row(form, "嵌入归一化 (--embd-normalize):", self.adv_embd_normalize)
+
         self.adv_verbose = QCheckBox()
         self._add_form_row(form, "详细输出 (--verbose):", self.adv_verbose)
 
         self.adv_log_verbosity = QComboBox()
-        self.adv_log_verbosity.addItems(["0 (none)", "1 (error)", "2 (warning)", "3 (info)", "4 (debug)"])
+        self.adv_log_verbosity.addItems(["0 (generic)", "1 (error)", "2 (warning)", "3 (info)", "4 (trace)", "5 (debug)"])
         self.adv_log_verbosity.setCurrentIndex(3)
         self._add_form_row(form, "日志详细度 (--log-verbosity):", self.adv_log_verbosity)
 
@@ -977,6 +1189,12 @@ class AdvancedPanel(QWidget):
 
         log_file_row, self.adv_log_file = self._make_file_row("file", "Text Files (*.txt *.log)")
         self._add_form_row(form, "日志文件 (--log-file):", log_file_row)
+
+        self.adv_log_disable = QCheckBox()
+        self._add_form_row(form, "禁用日志 (--log-disable):", self.adv_log_disable)
+
+        log_prompts_dir_row, self.adv_log_prompts_dir = self._make_file_row("dir")
+        self._add_form_row(form, "提示词日志目录 (--log-prompts-dir):", log_prompts_dir_row)
 
         self.adv_log_prefix = QCheckBox()
         self._add_form_row(form, "日志前缀 (--log-prefix):", self.adv_log_prefix)
@@ -1015,8 +1233,15 @@ class AdvancedPanel(QWidget):
         v["control_vector_layer_range"] = self.adv_cv_layer_range.text()
         v["mmproj_auto"] = self.adv_mmproj_auto.isChecked()
         v["mmproj_offload"] = self.adv_mmproj_offload.isChecked()
+        v["hf_repo"] = self.adv_hf_repo.text()
+        v["hf_file"] = self.adv_hf_file.text()
+        v["hf_token"] = self.adv_hf_token.text()
+        v["model_url"] = self.adv_model_url.text()
+        v["docker_repo"] = self.adv_docker_repo.text()
+        v["mmproj_url"] = self.adv_mmproj_url.text()
         v["image_min_tokens"] = self.adv_image_min_tokens.value()
         v["image_max_tokens"] = self.adv_image_max_tokens.value()
+        v["mtmd_batch_max_tokens"] = self.adv_mtmd_batch_tokens.value()
         v["alias"] = self.adv_alias.text()
         v["tags"] = self.adv_tags.text()
         v["ctx_size"] = self.adv_ctx_size.value()
@@ -1037,7 +1262,7 @@ class AdvancedPanel(QWidget):
         v["defrag_thold"] = self.adv_defrag_thold.value()
         v["cache_idle_slots"] = self.adv_cache_idle_slots.isChecked()
         v["ctx_checkpoints"] = self.adv_ctx_checkpoints.value()
-        v["checkpoint_every_n_tokens"] = self.adv_checkpoint_every.value()
+        v["checkpoint_min_step"] = self.adv_checkpoint_min_step.value()
         v["temp"] = self.adv_temp.value()
         v["top_k"] = self.adv_top_k.value()
         v["top_p"] = self.adv_top_p.value()
@@ -1053,6 +1278,7 @@ class AdvancedPanel(QWidget):
         v["dry_base"] = self.adv_dry_base.value()
         v["dry_allowed_length"] = self.adv_dry_len.value()
         v["dry_penalty_last_n"] = self.adv_dry_penalty_last_n.value()
+        v["dry_sequence_breaker"] = self.adv_dry_seq_breaker.text()
         v["adaptive_target"] = self.adv_adaptive_target.value()
         v["adaptive_decay"] = self.adv_adaptive_decay.value()
         v["repeat_last_n"] = self.adv_repeat_last_n.value()
@@ -1073,13 +1299,23 @@ class AdvancedPanel(QWidget):
         v["json_schema_file"] = self.adv_json_schema_file.text()
         v["n_gpu_layers"] = self.adv_ngl.currentText()
         v["device"] = self.adv_device.text()
+        v["load_mode"] = self.adv_load_mode.currentText()
         v["split_mode"] = self.adv_split_mode.currentText()
         v["tensor_split"] = self.adv_tensor_split.text()
         v["main_gpu"] = self.adv_main_gpu.value()
         v["threads"] = self.adv_threads.value()
         v["threads_batch"] = self.adv_threads_batch.value()
         v["threads_http"] = self.adv_threads_http.value()
+        v["cpu_mask"] = self.adv_cpu_mask.text()
+        v["cpu_range"] = self.adv_cpu_range.text()
+        v["cpu_strict"] = self.adv_cpu_strict.value()
+        v["cpu_mask_batch"] = self.adv_cpu_mask_batch.text()
+        v["cpu_range_batch"] = self.adv_cpu_range_batch.text()
+        v["cpu_strict_batch"] = self.adv_cpu_strict_batch.value()
+        v["poll"] = self.adv_poll.value()
+        v["poll_batch"] = self.adv_poll_batch.value()
         v["prio"] = self.adv_prio.currentText()
+        v["rpc"] = self.adv_rpc.text()
         v["flash_attn"] = self.adv_flash_attn.currentText()
         v["mmap"] = self.adv_mmap.isChecked()
         v["mlock"] = self.adv_mlock.isChecked()
@@ -1090,11 +1326,22 @@ class AdvancedPanel(QWidget):
         v["fit_ctx"] = self.adv_fit_ctx.value()
         v["check_tensors"] = self.adv_check_tensors.isChecked()
         v["n_cpu_moe"] = self.adv_n_cpu_moe.value()
+        v["override_tensor"] = self.adv_override_tensor.text()
+        v["override_kv"] = self.adv_override_kv.text()
         v["direct_io"] = self.adv_direct_io.isChecked()
         v["draft_model"] = self.adv_draft_model.text()
+        v["spec_draft_hf"] = self.adv_spec_draft_hf.text()
         v["threads_draft"] = self.adv_threads_draft.value()
         v["threads_batch_draft"] = self.adv_threads_batch_draft.value()
-        v["ctx_size_draft"] = self.adv_ctx_size_draft.value()
+        v["spec_draft_cpu_mask"] = self.adv_spec_draft_cpu_mask.text()
+        v["spec_draft_cpu_range"] = self.adv_spec_draft_cpu_range.text()
+        v["spec_draft_cpu_strict"] = self.adv_spec_draft_cpu_strict.value()
+        v["spec_draft_prio"] = self.adv_spec_draft_prio.currentText()
+        v["spec_draft_poll"] = self.adv_spec_draft_poll.value()
+        v["spec_draft_cpu_mask_batch"] = self.adv_spec_draft_cpu_mask_batch.text()
+        v["spec_draft_cpu_strict_batch"] = self.adv_spec_draft_cpu_strict_batch.value()
+        v["spec_draft_prio_batch"] = self.adv_spec_draft_prio_batch.currentText()
+        v["spec_draft_poll_batch"] = self.adv_spec_draft_poll_batch.value()
         v["device_draft"] = self.adv_device_draft.text()
         v["n_gpu_layers_draft"] = self.adv_n_gpu_layers_draft.currentText()
         v["cpu_moe_draft"] = self.adv_cpu_moe_draft.isChecked()
@@ -1109,6 +1356,18 @@ class AdvancedPanel(QWidget):
         v["spec_ngram_size_n"] = self.adv_spec_ngram_n.value()
         v["spec_ngram_size_m"] = self.adv_spec_ngram_m.value()
         v["spec_ngram_min_hits"] = self.adv_spec_ngram_min_hits.value()
+        v["spec_draft_backend_sampling"] = self.adv_spec_draft_backend_sampling.isChecked()
+        v["lookup_cache_static"] = self.adv_lookup_static.text()
+        v["lookup_cache_dynamic"] = self.adv_lookup_dynamic.text()
+        v["spec_ngram_mod_n_min"] = self.adv_spec_ngram_mod_n_min.value()
+        v["spec_ngram_mod_n_max"] = self.adv_spec_ngram_mod_n_max.value()
+        v["spec_ngram_mod_n_match"] = self.adv_spec_ngram_mod_n_match.value()
+        v["spec_ngram_map_k_size_n"] = self.adv_spec_ngram_mapk_n.value()
+        v["spec_ngram_map_k_size_m"] = self.adv_spec_ngram_mapk_m.value()
+        v["spec_ngram_map_k_min_hits"] = self.adv_spec_ngram_mapk_min_hits.value()
+        v["spec_ngram_map_k4v_size_n"] = self.adv_spec_ngram_mapk4v_n.value()
+        v["spec_ngram_map_k4v_size_m"] = self.adv_spec_ngram_mapk4v_m.value()
+        v["spec_ngram_map_k4v_min_hits"] = self.adv_spec_ngram_mapk4v_min_hits.value()
         v["numa"] = self.adv_numa.currentText()
         v["warmup"] = self.adv_warmup.isChecked()
         v["perf"] = self.adv_perf.isChecked()
@@ -1133,6 +1392,17 @@ class AdvancedPanel(QWidget):
         v["ssl_cert_file"] = self.adv_ssl_cert.text()
         v["api_key_file"] = self.adv_api_key_file.text()
         v["webui_config"] = self.adv_webui_config.text()
+        v["sse_ping_interval"] = self.adv_sse_ping.value()
+        v["cors_origins"] = self.adv_cors_origins.text()
+        v["cors_methods"] = self.adv_cors_methods.text()
+        v["cors_headers"] = self.adv_cors_headers.text()
+        v["cors_credentials"] = self.adv_cors_credentials.isChecked()
+        v["models_dir"] = self.adv_models_dir.text()
+        v["models_preset"] = self.adv_models_preset.text()
+        v["tools_runtime"] = self.adv_tools_runtime.text()
+        v["mcp_servers_config"] = self.adv_mcp_servers_config.text()
+        v["mcp_servers_json"] = self.adv_mcp_servers_json.text()
+        v["agent"] = self.adv_agent.isChecked()
         v["slot_save_path"] = self.adv_slot_save_path.text()
         v["media_path"] = self.adv_media_path.text()
         v["lora_init_without_apply"] = self.adv_lora_init_without_apply.isChecked()
@@ -1149,6 +1419,7 @@ class AdvancedPanel(QWidget):
         v["reasoning_format"] = self.adv_reasoning_fmt.currentText()
         v["reasoning_budget"] = self.adv_reasoning_budget.value()
         v["reasoning_budget_message"] = self.adv_reasoning_budget_msg.text()
+        v["reasoning_preserve"] = self.adv_reasoning_preserve.isChecked()
         v["special"] = self.adv_special.isChecked()
         v["reverse_prompt"] = self.adv_reverse_prompt.text()
         v["spm_infill"] = self.adv_spm_infill.isChecked()
@@ -1164,12 +1435,15 @@ class AdvancedPanel(QWidget):
         v["embedding"] = self.adv_embedding.isChecked()
         v["rerank"] = self.adv_rerank.isChecked()
         v["pooling"] = self.adv_pooling.currentText()
+        v["embd_normalize"] = self.adv_embd_normalize.value()
         v["cpu_moe"] = self.adv_cpu_moe.isChecked()
         v["op_offload"] = self.adv_op_offload.isChecked()
         v["verbose"] = self.adv_verbose.isChecked()
         v["log_verbosity"] = self.adv_log_verbosity.currentIndex()
         v["log_colors"] = self.adv_log_colors.currentText()
         v["log_file"] = self.adv_log_file.text()
+        v["log_disable"] = self.adv_log_disable.isChecked()
+        v["log_prompts_dir"] = self.adv_log_prompts_dir.text()
         v["log_prefix"] = self.adv_log_prefix.isChecked()
         v["log_timestamps"] = self.adv_log_timestamps.isChecked()
         v["offline"] = self.adv_offline.isChecked()
@@ -1200,10 +1474,24 @@ class AdvancedPanel(QWidget):
             self.adv_mmproj_auto.setChecked(values["mmproj_auto"])
         if "mmproj_offload" in values:
             self.adv_mmproj_offload.setChecked(values["mmproj_offload"])
+        if "hf_repo" in values:
+            self.adv_hf_repo.setText(values["hf_repo"])
+        if "hf_file" in values:
+            self.adv_hf_file.setText(values["hf_file"])
+        if "hf_token" in values:
+            self.adv_hf_token.setText(values["hf_token"])
+        if "model_url" in values:
+            self.adv_model_url.setText(values["model_url"])
+        if "docker_repo" in values:
+            self.adv_docker_repo.setText(values["docker_repo"])
+        if "mmproj_url" in values:
+            self.adv_mmproj_url.setText(values["mmproj_url"])
         if "image_min_tokens" in values:
             self.adv_image_min_tokens.setValue(values["image_min_tokens"])
         if "image_max_tokens" in values:
             self.adv_image_max_tokens.setValue(values["image_max_tokens"])
+        if "mtmd_batch_max_tokens" in values:
+            self.adv_mtmd_batch_tokens.setValue(values["mtmd_batch_max_tokens"])
         if "alias" in values:
             self.adv_alias.setText(values["alias"])
         if "tags" in values:
@@ -1244,8 +1532,8 @@ class AdvancedPanel(QWidget):
             self.adv_cache_idle_slots.setChecked(values["cache_idle_slots"])
         if "ctx_checkpoints" in values:
             self.adv_ctx_checkpoints.setValue(values["ctx_checkpoints"])
-        if "checkpoint_every_n_tokens" in values:
-            self.adv_checkpoint_every.setValue(values["checkpoint_every_n_tokens"])
+        if "checkpoint_min_step" in values:
+            self.adv_checkpoint_min_step.setValue(values["checkpoint_min_step"])
         if "temp" in values:
             self.adv_temp.setValue(values["temp"])
         if "top_k" in values:
@@ -1276,6 +1564,8 @@ class AdvancedPanel(QWidget):
             self.adv_dry_len.setValue(values["dry_allowed_length"])
         if "dry_penalty_last_n" in values:
             self.adv_dry_penalty_last_n.setValue(values["dry_penalty_last_n"])
+        if "dry_sequence_breaker" in values:
+            self.adv_dry_seq_breaker.setText(values["dry_sequence_breaker"])
         if "adaptive_target" in values:
             self.adv_adaptive_target.setValue(values["adaptive_target"])
         if "adaptive_decay" in values:
@@ -1327,6 +1617,8 @@ class AdvancedPanel(QWidget):
             self.adv_ngl_spin.blockSignals(False)
         if "device" in values:
             self.adv_device.setText(values["device"])
+        if "load_mode" in values:
+            self.adv_load_mode.setCurrentText(values["load_mode"])
         if "split_mode" in values:
             self.adv_split_mode.setCurrentText(values["split_mode"])
         if "tensor_split" in values:
@@ -1339,8 +1631,26 @@ class AdvancedPanel(QWidget):
             self.adv_threads_batch.setValue(values["threads_batch"])
         if "threads_http" in values:
             self.adv_threads_http.setValue(values["threads_http"])
+        if "cpu_mask" in values:
+            self.adv_cpu_mask.setText(values["cpu_mask"])
+        if "cpu_range" in values:
+            self.adv_cpu_range.setText(values["cpu_range"])
+        if "cpu_strict" in values:
+            self.adv_cpu_strict.setValue(values["cpu_strict"])
+        if "cpu_mask_batch" in values:
+            self.adv_cpu_mask_batch.setText(values["cpu_mask_batch"])
+        if "cpu_range_batch" in values:
+            self.adv_cpu_range_batch.setText(values["cpu_range_batch"])
+        if "cpu_strict_batch" in values:
+            self.adv_cpu_strict_batch.setValue(values["cpu_strict_batch"])
+        if "poll" in values:
+            self.adv_poll.setValue(values["poll"])
+        if "poll_batch" in values:
+            self.adv_poll_batch.setValue(values["poll_batch"])
         if "prio" in values:
             self.adv_prio.setCurrentText(values["prio"])
+        if "rpc" in values:
+            self.adv_rpc.setText(values["rpc"])
         if "flash_attn" in values:
             self.adv_flash_attn.setCurrentText(values["flash_attn"])
         if "mmap" in values:
@@ -1361,16 +1671,38 @@ class AdvancedPanel(QWidget):
             self.adv_check_tensors.setChecked(values["check_tensors"])
         if "n_cpu_moe" in values:
             self.adv_n_cpu_moe.setValue(values["n_cpu_moe"])
+        if "override_tensor" in values:
+            self.adv_override_tensor.setText(values["override_tensor"])
+        if "override_kv" in values:
+            self.adv_override_kv.setText(values["override_kv"])
         if "direct_io" in values:
             self.adv_direct_io.setChecked(values["direct_io"])
         if "draft_model" in values:
             self.adv_draft_model.setText(values["draft_model"])
+        if "spec_draft_hf" in values:
+            self.adv_spec_draft_hf.setText(values["spec_draft_hf"])
         if "threads_draft" in values:
             self.adv_threads_draft.setValue(values["threads_draft"])
         if "threads_batch_draft" in values:
             self.adv_threads_batch_draft.setValue(values["threads_batch_draft"])
-        if "ctx_size_draft" in values:
-            self.adv_ctx_size_draft.setValue(values["ctx_size_draft"])
+        if "spec_draft_cpu_mask" in values:
+            self.adv_spec_draft_cpu_mask.setText(values["spec_draft_cpu_mask"])
+        if "spec_draft_cpu_range" in values:
+            self.adv_spec_draft_cpu_range.setText(values["spec_draft_cpu_range"])
+        if "spec_draft_cpu_strict" in values:
+            self.adv_spec_draft_cpu_strict.setValue(values["spec_draft_cpu_strict"])
+        if "spec_draft_prio" in values:
+            self.adv_spec_draft_prio.setCurrentText(values["spec_draft_prio"])
+        if "spec_draft_poll" in values:
+            self.adv_spec_draft_poll.setValue(values["spec_draft_poll"])
+        if "spec_draft_cpu_mask_batch" in values:
+            self.adv_spec_draft_cpu_mask_batch.setText(values["spec_draft_cpu_mask_batch"])
+        if "spec_draft_cpu_strict_batch" in values:
+            self.adv_spec_draft_cpu_strict_batch.setValue(values["spec_draft_cpu_strict_batch"])
+        if "spec_draft_prio_batch" in values:
+            self.adv_spec_draft_prio_batch.setCurrentText(values["spec_draft_prio_batch"])
+        if "spec_draft_poll_batch" in values:
+            self.adv_spec_draft_poll_batch.setValue(values["spec_draft_poll_batch"])
         if "device_draft" in values:
             self.adv_device_draft.setText(values["device_draft"])
         if "n_gpu_layers_draft" in values:
@@ -1404,6 +1736,30 @@ class AdvancedPanel(QWidget):
             self.adv_spec_ngram_m.setValue(values["spec_ngram_size_m"])
         if "spec_ngram_min_hits" in values:
             self.adv_spec_ngram_min_hits.setValue(values["spec_ngram_min_hits"])
+        if "spec_draft_backend_sampling" in values:
+            self.adv_spec_draft_backend_sampling.setChecked(values["spec_draft_backend_sampling"])
+        if "lookup_cache_static" in values:
+            self.adv_lookup_static.setText(values["lookup_cache_static"])
+        if "lookup_cache_dynamic" in values:
+            self.adv_lookup_dynamic.setText(values["lookup_cache_dynamic"])
+        if "spec_ngram_mod_n_min" in values:
+            self.adv_spec_ngram_mod_n_min.setValue(values["spec_ngram_mod_n_min"])
+        if "spec_ngram_mod_n_max" in values:
+            self.adv_spec_ngram_mod_n_max.setValue(values["spec_ngram_mod_n_max"])
+        if "spec_ngram_mod_n_match" in values:
+            self.adv_spec_ngram_mod_n_match.setValue(values["spec_ngram_mod_n_match"])
+        if "spec_ngram_map_k_size_n" in values:
+            self.adv_spec_ngram_mapk_n.setValue(values["spec_ngram_map_k_size_n"])
+        if "spec_ngram_map_k_size_m" in values:
+            self.adv_spec_ngram_mapk_m.setValue(values["spec_ngram_map_k_size_m"])
+        if "spec_ngram_map_k_min_hits" in values:
+            self.adv_spec_ngram_mapk_min_hits.setValue(values["spec_ngram_map_k_min_hits"])
+        if "spec_ngram_map_k4v_size_n" in values:
+            self.adv_spec_ngram_mapk4v_n.setValue(values["spec_ngram_map_k4v_size_n"])
+        if "spec_ngram_map_k4v_size_m" in values:
+            self.adv_spec_ngram_mapk4v_m.setValue(values["spec_ngram_map_k4v_size_m"])
+        if "spec_ngram_map_k4v_min_hits" in values:
+            self.adv_spec_ngram_mapk4v_min_hits.setValue(values["spec_ngram_map_k4v_min_hits"])
         if "numa" in values:
             self.adv_numa.setCurrentText(values["numa"])
         if "warmup" in values:
@@ -1454,6 +1810,28 @@ class AdvancedPanel(QWidget):
             self.adv_api_key_file.setText(values["api_key_file"])
         if "webui_config" in values:
             self.adv_webui_config.setText(values["webui_config"])
+        if "sse_ping_interval" in values:
+            self.adv_sse_ping.setValue(values["sse_ping_interval"])
+        if "cors_origins" in values:
+            self.adv_cors_origins.setText(values["cors_origins"])
+        if "cors_methods" in values:
+            self.adv_cors_methods.setText(values["cors_methods"])
+        if "cors_headers" in values:
+            self.adv_cors_headers.setText(values["cors_headers"])
+        if "cors_credentials" in values:
+            self.adv_cors_credentials.setChecked(values["cors_credentials"])
+        if "models_dir" in values:
+            self.adv_models_dir.setText(values["models_dir"])
+        if "models_preset" in values:
+            self.adv_models_preset.setText(values["models_preset"])
+        if "tools_runtime" in values:
+            self.adv_tools_runtime.setText(values["tools_runtime"])
+        if "mcp_servers_config" in values:
+            self.adv_mcp_servers_config.setText(values["mcp_servers_config"])
+        if "mcp_servers_json" in values:
+            self.adv_mcp_servers_json.setText(values["mcp_servers_json"])
+        if "agent" in values:
+            self.adv_agent.setChecked(values["agent"])
         if "slot_save_path" in values:
             self.adv_slot_save_path.setText(values["slot_save_path"])
         if "media_path" in values:
@@ -1490,6 +1868,8 @@ class AdvancedPanel(QWidget):
             self.adv_reasoning_budget.setValue(values["reasoning_budget"])
         if "reasoning_budget_message" in values:
             self.adv_reasoning_budget_msg.setText(values["reasoning_budget_message"])
+        if "reasoning_preserve" in values:
+            self.adv_reasoning_preserve.setChecked(values["reasoning_preserve"])
         if "special" in values:
             self.adv_special.setChecked(values["special"])
         if "reverse_prompt" in values:
@@ -1520,6 +1900,8 @@ class AdvancedPanel(QWidget):
             self.adv_rerank.setChecked(values["rerank"])
         if "pooling" in values:
             self.adv_pooling.setCurrentText(values["pooling"])
+        if "embd_normalize" in values:
+            self.adv_embd_normalize.setValue(values["embd_normalize"])
         if "cpu_moe" in values:
             self.adv_cpu_moe.setChecked(values["cpu_moe"])
         if "op_offload" in values:
@@ -1532,6 +1914,10 @@ class AdvancedPanel(QWidget):
             self.adv_log_colors.setCurrentText(values["log_colors"])
         if "log_file" in values:
             self.adv_log_file.setText(values["log_file"])
+        if "log_disable" in values:
+            self.adv_log_disable.setChecked(values["log_disable"])
+        if "log_prompts_dir" in values:
+            self.adv_log_prompts_dir.setText(values["log_prompts_dir"])
         if "log_prefix" in values:
             self.adv_log_prefix.setChecked(values["log_prefix"])
         if "log_timestamps" in values:

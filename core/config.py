@@ -129,6 +129,11 @@ class ConfigManager:
         if not isinstance(params, dict):
             logger.warning(t("加载预设失败: params 字段不是字典"))
             return False
+        params = dict(params)
+        # Migrate param keys renamed/removed across llama-server versions
+        if "checkpoint_every_n_tokens" in params and "checkpoint_min_step" not in params:
+            params["checkpoint_min_step"] = params.pop("checkpoint_every_n_tokens")
+        params.pop("ctx_size_draft", None)
         merged = dict(self._defaults)
         merged.update(params)
         self.current = merged

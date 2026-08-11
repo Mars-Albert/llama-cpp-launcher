@@ -805,6 +805,18 @@ class MainWindow(QMainWindow):
         if not self._is_default("mmproj_offload", v):
             if not v.get("mmproj_offload", True):
                 args.append("--no-mmproj-offload")
+        if v.get("hf_repo"):
+            args.extend(["--hf-repo", v["hf_repo"]])
+        if v.get("hf_file"):
+            args.extend(["--hf-file", v["hf_file"]])
+        if v.get("hf_token"):
+            args.extend(["--hf-token", v["hf_token"]])
+        if v.get("model_url"):
+            args.extend(["--model-url", v["model_url"]])
+        if v.get("docker_repo"):
+            args.extend(["--docker-repo", v["docker_repo"]])
+        if v.get("mmproj_url"):
+            args.extend(["--mmproj-url", v["mmproj_url"]])
         if not self._is_default("image_min_tokens", v):
             img_min = v.get("image_min_tokens", 0)
             if img_min and img_min > 0:
@@ -813,6 +825,8 @@ class MainWindow(QMainWindow):
             img_max = v.get("image_max_tokens", 0)
             if img_max and img_max > 0:
                 args.extend(["--image-max-tokens", str(img_max)])
+        if not self._is_default("mtmd_batch_max_tokens", v):
+            args.extend(["--mtmd-batch-max-tokens", str(v["mtmd_batch_max_tokens"])])
         if v.get("alias"):
             args.extend(["--alias", v["alias"]])
         if v.get("tags"):
@@ -886,8 +900,8 @@ class MainWindow(QMainWindow):
                 args.append("--no-cache-idle-slots")
         if not self._is_default("ctx_checkpoints", v):
             args.extend(["-ctxcp", str(v["ctx_checkpoints"])])
-        if not self._is_default("checkpoint_every_n_tokens", v):
-            args.extend(["-cpent", str(v["checkpoint_every_n_tokens"])])
+        if not self._is_default("checkpoint_min_step", v):
+            args.extend(["-cms", str(v["checkpoint_min_step"])])
         return args
 
     def _build_sampling_args(self, v):
@@ -922,6 +936,10 @@ class MainWindow(QMainWindow):
             args.extend(["--dry-allowed-length", str(v["dry_allowed_length"])])
         if not self._is_default("dry_penalty_last_n", v):
             args.extend(["--dry-penalty-last-n", str(v["dry_penalty_last_n"])])
+        if not self._is_default("dry_sequence_breaker", v):
+            dsb = v.get("dry_sequence_breaker", "")
+            if dsb:
+                args.extend(["--dry-sequence-breaker", dsb])
         if not self._is_default("adaptive_target", v):
             at = v.get("adaptive_target", -1.0)
             if at >= 0:
@@ -985,7 +1003,11 @@ class MainWindow(QMainWindow):
         if not self._is_default("device", v):
             dev = v.get("device", "")
             if dev:
-                args.extend(["--dev", dev])
+                args.extend(["-dev", dev])
+        if not self._is_default("load_mode", v):
+            lm = v.get("load_mode", "mmap")
+            if lm:
+                args.extend(["--load-mode", lm])
         if not self._is_default("split_mode", v):
             sm = v.get("split_mode", "")
             if sm:
@@ -1002,6 +1024,30 @@ class MainWindow(QMainWindow):
             args.extend(["-tb", str(v["threads_batch"])])
         if not self._is_default("threads_http", v):
             args.extend(["--threads-http", str(v["threads_http"])])
+        if not self._is_default("cpu_mask", v):
+            cm = v.get("cpu_mask", "")
+            if cm:
+                args.extend(["--cpu-mask", cm])
+        if not self._is_default("cpu_range", v):
+            cr = v.get("cpu_range", "")
+            if cr:
+                args.extend(["--cpu-range", cr])
+        if not self._is_default("cpu_strict", v):
+            args.extend(["--cpu-strict", str(v["cpu_strict"])])
+        if not self._is_default("cpu_mask_batch", v):
+            cmb = v.get("cpu_mask_batch", "")
+            if cmb:
+                args.extend(["--cpu-mask-batch", cmb])
+        if not self._is_default("cpu_range_batch", v):
+            crb = v.get("cpu_range_batch", "")
+            if crb:
+                args.extend(["--cpu-range-batch", crb])
+        if not self._is_default("cpu_strict_batch", v):
+            args.extend(["--cpu-strict-batch", str(v["cpu_strict_batch"])])
+        if not self._is_default("poll", v):
+            args.extend(["--poll", str(v["poll"])])
+        if not self._is_default("poll_batch", v):
+            args.extend(["--poll-batch", str(v["poll_batch"])])
         if not self._is_default("prio", v):
             prio_val = v.get("prio", "normal")
             prio_num = _PRIO_REVERSE.get(str(prio_val), 0)
@@ -1010,6 +1056,10 @@ class MainWindow(QMainWindow):
             prio_batch_val = v.get("prio_batch", "normal")
             prio_batch_num = _PRIO_REVERSE.get(str(prio_batch_val), 0)
             args.extend(["--prio-batch", str(prio_batch_num)])
+        if not self._is_default("rpc", v):
+            rpc = v.get("rpc", "")
+            if rpc:
+                args.extend(["--rpc", rpc])
         if not self._is_default("flash_attn", v):
             args.extend(["--flash-attn", v["flash_attn"]])
         if not self._is_default("mmap", v):
@@ -1037,6 +1087,14 @@ class MainWindow(QMainWindow):
             ncmoe = v.get("n_cpu_moe", 0)
             if ncmoe and ncmoe > 0:
                 args.extend(["--n-cpu-moe", str(ncmoe)])
+        if not self._is_default("override_tensor", v):
+            ot = v.get("override_tensor", "")
+            if ot:
+                args.extend(["--override-tensor", ot])
+        if not self._is_default("override_kv", v):
+            ok = v.get("override_kv", "")
+            if ok:
+                args.extend(["--override-kv", ok])
         if not self._is_default("direct_io", v):
             if v.get("direct_io"):
                 args.append("--direct-io")
@@ -1060,14 +1118,41 @@ class MainWindow(QMainWindow):
             dm = v.get("draft_model", "")
             if dm:
                 args.extend(["--model-draft", dm])
+        if v.get("spec_draft_hf"):
+            args.extend(["--spec-draft-hf", v["spec_draft_hf"]])
         if not self._is_default("threads_draft", v):
             args.extend(["--threads-draft", str(v["threads_draft"])])
         if not self._is_default("threads_batch_draft", v):
             args.extend(["--threads-batch-draft", str(v["threads_batch_draft"])])
-        if not self._is_default("ctx_size_draft", v):
-            csd = v.get("ctx_size_draft", 0)
-            if csd and csd > 0:
-                args.extend(["--ctx-size-draft", str(csd)])
+        if not self._is_default("spec_draft_cpu_mask", v):
+            scm = v.get("spec_draft_cpu_mask", "")
+            if scm:
+                args.extend(["--spec-draft-cpu-mask", scm])
+        if not self._is_default("spec_draft_cpu_range", v):
+            scr = v.get("spec_draft_cpu_range", "")
+            if scr:
+                args.extend(["--spec-draft-cpu-range", scr])
+        if not self._is_default("spec_draft_cpu_strict", v):
+            args.extend(["--spec-draft-cpu-strict", str(v["spec_draft_cpu_strict"])])
+        if not self._is_default("spec_draft_prio", v):
+            dp = v.get("spec_draft_prio", "normal")
+            args.extend(["--spec-draft-prio", str(_PRIO_REVERSE.get(str(dp), 0))])
+        if not self._is_default("spec_draft_poll", v):
+            args.extend(["--spec-draft-poll", str(v["spec_draft_poll"])])
+        if not self._is_default("spec_draft_cpu_mask_batch", v):
+            scmb = v.get("spec_draft_cpu_mask_batch", "")
+            if scmb:
+                args.extend(["--spec-draft-cpu-mask-batch", scmb])
+        if not self._is_default("spec_draft_cpu_strict_batch", v):
+            args.extend(["--spec-draft-cpu-strict-batch", str(v["spec_draft_cpu_strict_batch"])])
+        if not self._is_default("spec_draft_prio_batch", v):
+            dpb = v.get("spec_draft_prio_batch", "normal")
+            args.extend(["--spec-draft-prio-batch", str(_PRIO_REVERSE.get(str(dpb), 0))])
+        if not self._is_default("spec_draft_poll_batch", v):
+            args.extend(["--spec-draft-poll-batch", str(v["spec_draft_poll_batch"])])
+        if not self._is_default("spec_draft_backend_sampling", v):
+            if not v.get("spec_draft_backend_sampling", True):
+                args.append("--no-spec-draft-backend-sampling")
         if not self._is_default("device_draft", v):
             dd = v.get("device_draft", "")
             if dd:
@@ -1101,6 +1186,8 @@ class MainWindow(QMainWindow):
                 args.extend(["--spec-draft-n-min", str(dm)])
         if not self._is_default("draft_p_min", v):
             args.extend(["--spec-draft-p-min", f'{v["draft_p_min"]:.2f}'])
+        if not self._is_default("spec_draft_p_split", v):
+            args.extend(["--spec-draft-p-split", f'{v["spec_draft_p_split"]:.2f}'])
         if not self._is_default("spec_type", v):
             st = v.get("spec_type", "none")
             if st and st != "none":
@@ -1111,6 +1198,32 @@ class MainWindow(QMainWindow):
             args.extend(["--spec-ngram-simple-size-m", str(v["spec_ngram_size_m"])])
         if not self._is_default("spec_ngram_min_hits", v):
             args.extend(["--spec-ngram-simple-min-hits", str(v["spec_ngram_min_hits"])])
+        if not self._is_default("spec_ngram_mod_n_min", v):
+            args.extend(["--spec-ngram-mod-n-min", str(v["spec_ngram_mod_n_min"])])
+        if not self._is_default("spec_ngram_mod_n_max", v):
+            args.extend(["--spec-ngram-mod-n-max", str(v["spec_ngram_mod_n_max"])])
+        if not self._is_default("spec_ngram_mod_n_match", v):
+            args.extend(["--spec-ngram-mod-n-match", str(v["spec_ngram_mod_n_match"])])
+        if not self._is_default("spec_ngram_map_k_size_n", v):
+            args.extend(["--spec-ngram-map-k-size-n", str(v["spec_ngram_map_k_size_n"])])
+        if not self._is_default("spec_ngram_map_k_size_m", v):
+            args.extend(["--spec-ngram-map-k-size-m", str(v["spec_ngram_map_k_size_m"])])
+        if not self._is_default("spec_ngram_map_k_min_hits", v):
+            args.extend(["--spec-ngram-map-k-min-hits", str(v["spec_ngram_map_k_min_hits"])])
+        if not self._is_default("spec_ngram_map_k4v_size_n", v):
+            args.extend(["--spec-ngram-map-k4v-size-n", str(v["spec_ngram_map_k4v_size_n"])])
+        if not self._is_default("spec_ngram_map_k4v_size_m", v):
+            args.extend(["--spec-ngram-map-k4v-size-m", str(v["spec_ngram_map_k4v_size_m"])])
+        if not self._is_default("spec_ngram_map_k4v_min_hits", v):
+            args.extend(["--spec-ngram-map-k4v-min-hits", str(v["spec_ngram_map_k4v_min_hits"])])
+        if not self._is_default("lookup_cache_static", v):
+            lcs = v.get("lookup_cache_static", "")
+            if lcs:
+                args.extend(["--lookup-cache-static", lcs])
+        if not self._is_default("lookup_cache_dynamic", v):
+            lcd = v.get("lookup_cache_dynamic", "")
+            if lcd:
+                args.extend(["--lookup-cache-dynamic", lcd])
         return args
 
     def _build_server_args(self, v):
@@ -1182,6 +1295,46 @@ class MainWindow(QMainWindow):
             wc = v.get("webui_config", "")
             if wc:
                 args.extend(["--webui-config", wc])
+        if not self._is_default("sse_ping_interval", v):
+            args.extend(["--sse-ping-interval", str(v["sse_ping_interval"])])
+        if not self._is_default("cors_origins", v):
+            co = v.get("cors_origins", "*")
+            if co:
+                args.extend(["--cors-origins", co])
+        if not self._is_default("cors_methods", v):
+            cm = v.get("cors_methods", "")
+            if cm:
+                args.extend(["--cors-methods", cm])
+        if not self._is_default("cors_headers", v):
+            ch = v.get("cors_headers", "*")
+            if ch:
+                args.extend(["--cors-headers", ch])
+        if not self._is_default("cors_credentials", v):
+            if not v.get("cors_credentials", True):
+                args.append("--no-cors-credentials")
+        if not self._is_default("models_dir", v):
+            md = v.get("models_dir", "")
+            if md:
+                args.extend(["--models-dir", md])
+        if not self._is_default("models_preset", v):
+            mp = v.get("models_preset", "")
+            if mp:
+                args.extend(["--models-preset", mp])
+        if not self._is_default("tools_runtime", v):
+            tr = v.get("tools_runtime", "")
+            if tr:
+                args.extend(["--tools-runtime", tr])
+        if not self._is_default("mcp_servers_config", v):
+            msc = v.get("mcp_servers_config", "")
+            if msc:
+                args.extend(["--mcp-servers-config", msc])
+        if not self._is_default("mcp_servers_json", v):
+            msj = v.get("mcp_servers_json", "")
+            if msj:
+                args.extend(["--mcp-servers-json", msj])
+        if not self._is_default("agent", v):
+            if v.get("agent"):
+                args.append("--agent")
         if not self._is_default("slot_save_path", v):
             ssp = v.get("slot_save_path", "")
             if ssp:
@@ -1235,6 +1388,9 @@ class MainWindow(QMainWindow):
             rbm = v.get("reasoning_budget_message", "")
             if rbm:
                 args.extend(["--reasoning-budget-message", rbm])
+        if not self._is_default("reasoning_preserve", v):
+            if v.get("reasoning_preserve"):
+                args.append("--reasoning-preserve")
         if not self._is_default("special", v):
             if v.get("special"):
                 args.append("--special")
@@ -1287,6 +1443,8 @@ class MainWindow(QMainWindow):
             pl = v.get("pooling", "")
             if pl and pl != "none":
                 args.extend(["--pooling", pl])
+        if not self._is_default("embd_normalize", v):
+            args.extend(["--embd-normalize", str(v["embd_normalize"])])
         if not self._is_default("verbose", v):
             if v.get("verbose"):
                 args.append("--verbose")
@@ -1298,6 +1456,13 @@ class MainWindow(QMainWindow):
             lf = v.get("log_file", "")
             if lf:
                 args.extend(["--log-file", lf])
+        if not self._is_default("log_disable", v):
+            if v.get("log_disable"):
+                args.append("--log-disable")
+        if not self._is_default("log_prompts_dir", v):
+            lpd = v.get("log_prompts_dir", "")
+            if lpd:
+                args.extend(["--log-prompts-dir", lpd])
         if not self._is_default("offline", v):
             if v.get("offline"):
                 args.append("--offline")
@@ -2140,7 +2305,14 @@ class MainWindow(QMainWindow):
             missing = []
             changed = []
             for key, fallback_val in _FALLBACK_DEFAULTS.items():
-                if key in ("model", "mmproj", "lora", "lora_scaled", "control_vector", "control_vector_scaled", "control_vector_layer_range", "alias", "tags", "extra_args", "tools", "grammar", "json_schema", "reverse_prompt", "api_key", "api_key_file", "device", "tensor_split", "chat_template", "chat_template_file", "chat_template_kwargs", "reasoning_budget_message", "log_file", "ssl_key_file", "ssl_cert_file", "webui_config_file", "webui_config", "path", "api_prefix", "samplers", "sampler_seq", "logit_bias", "grammar_file", "json_schema_file", "slot_save_path", "media_path", "draft_model", "device_draft"):
+                if key in ("model", "mmproj", "lora", "lora_scaled", "control_vector", "control_vector_scaled", "control_vector_layer_range", "alias", "tags", "extra_args", "tools", "grammar", "json_schema", "reverse_prompt", "api_key", "api_key_file", "device", "tensor_split", "chat_template", "chat_template_file", "chat_template_kwargs", "reasoning_budget_message", "log_file", "ssl_key_file", "ssl_cert_file", "webui_config_file", "webui_config", "path", "api_prefix", "samplers", "sampler_seq", "logit_bias", "grammar_file", "json_schema_file", "slot_save_path", "media_path", "draft_model", "device_draft",
+                           "hf_repo", "hf_file", "hf_token", "model_url", "docker_repo", "mmproj_url",
+                           "rpc", "cpu_mask", "cpu_range", "cpu_mask_batch", "cpu_range_batch",
+                           "override_tensor", "override_kv", "tools_runtime", "mcp_servers_config",
+                           "mcp_servers_json", "models_dir", "models_preset", "lookup_cache_static",
+                           "lookup_cache_dynamic", "spec_draft_hf", "spec_draft_cpu_mask",
+                           "spec_draft_cpu_range", "spec_draft_cpu_mask_batch", "log_prompts_dir",
+                           "dry_sequence_breaker", "cors_origins", "cors_methods", "cors_headers"):
                     continue
                 if key not in current_defaults:
                     missing.append(key)
