@@ -65,28 +65,35 @@ class ServerRunner(QObject):
         self._is_ready = False
         self.process.terminate()
         if blocking:
-            if not self.process.waitForFinished(3000):
+            # 关闭应用时允许阻塞等待
+            if not self.process.waitForFinished(8000):
                 self._do_force_kill()
             self._kill_timer.stop()
             self._is_running = False
             self._is_stopping = False
         else:
-            self._kill_timer.start(3000)
+            # 非阻塞路径：定时器到期后执行 kill，不阻塞主线程
+            self._kill_timer.start(5000)
 
     def _do_force_kill(self):
         logger.info("Force killing llama-server process")
         self.process.kill()
-        if not self.process.waitForFinished(2000):
+        if not self.process.waitForFinished(15000):
             logger.warning("llama-server process did not terminate after force kill")
-            self.error_occurred.emit(t("llama-server 进程无法终止，可能需要手动结束。"))
+            if self.process.state() != QProcess.ProcessState.NotRunning:
+                self.error_occurred.emit(t("llama-server 进程无法终止，可能需要手动结束。"))
 
     def _force_kill(self):
-        if self.process.state() != QProcess.ProcessState.NotRunning:
-            self._do_force_kill()
         self._kill_timer.stop()
-        self._is_running = False
-        self._is_stopping = False
-        self.state_changed.emit("stopped")
+        if self.process.state() != QProcess.ProcessState.NotRunning:
+            self.process.kill()
+            # 3 秒后异步检查，避免 waitForFinished 阻塞导致界面无响应
+            QTimer.singleShot(3000, self._check_force_kill_result)
+
+    def _check_force_kill_result(self):
+        if self.process.state() != QProcess.ProcessState.NotRunning:
+            logger.warning("llama-server process still running after force kill")
+            self.error_occurred.emit(t("llama-server 进程无法终止，可能需要手动结束。"))
 
     def _check_ready(self, text):
         if not self._is_ready and not self._is_stopping:

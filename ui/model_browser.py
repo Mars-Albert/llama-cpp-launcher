@@ -93,7 +93,7 @@ class ModelBrowser(QWidget):
 
         if self._scanner_thread and self._scanner_thread.isRunning():
             self._scanner_thread.stop()
-            self._scanner_thread.wait()
+            self._scanner_thread.wait(5000)
 
         self._scanner_thread = ModelScanner(self.search_dir)
         self._scanner_thread.scan_finished.connect(self._on_scan_finished)
