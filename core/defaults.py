@@ -50,7 +50,7 @@ _FALLBACK_DEFAULTS = {
     "direct_io": False,
     "numa": "disable",
     "device": "",
-    "load_mode": "mmap",
+    "load_mode": "auto",
     "split_mode": "layer",
     "tensor_split": "",
     "rpc": "",
@@ -233,6 +233,7 @@ _FALLBACK_DEFAULTS = {
     "models_autoload": True,
     "models_dir": "",
     "models_preset": "",
+    "override_tensor_draft": "",
 }
 
 _PRIO_MAP = {0: "normal", -1: "low", 1: "medium", 2: "high", 3: "realtime"}
@@ -348,8 +349,8 @@ _VALUE_FLAG_MAP = {
     "cors_headers": (["--cors-headers"], str),
     "path": (["--path"], str),
     "api_prefix": (["--api-prefix"], str),
-    "webui_config": (["--webui-config"], str),
-    "webui_config_file": (["--webui-config-file"], str),
+    "webui_config": (["--webui-config", "--ui-config"], str),
+    "webui_config_file": (["--webui-config-file", "--ui-config-file"], str),
     "timeout": (["-to", "--timeout"], int),
     "cache_reuse": (["--cache-reuse"], int),
     "slot_save_path": (["--slot-save-path"], str),
@@ -392,13 +393,13 @@ _VALUE_FLAG_MAP = {
     "n_cpu_moe_draft": (["-ncmoed", "--n-cpu-moe-draft", "--spec-draft-n-cpu-moe", "--spec-draft-ncmoe"], int),
     "cache_type_k_draft": (["--spec-draft-type-k", "-ctkd", "--cache-type-k-draft"], str),
     "cache_type_v_draft": (["--spec-draft-type-v", "-ctvd", "--cache-type-v-draft"], str),
-    "draft_max": (["--spec-draft-n-max", "--draft", "--draft-n", "--draft-max"], int),
-    "draft_min": (["--spec-draft-n-min", "--draft-min", "--draft-n-min"], int),
+    "draft_max": (["--spec-draft-n-max"], int),
+    "draft_min": (["--spec-draft-n-min"], int),
     "draft_p_min": (["--spec-draft-p-min", "--draft-p-min"], float),
     "spec_draft_p_split": (["--spec-draft-p-split", "--draft-p-split"], float),
-    "spec_ngram_size_n": (["--spec-ngram-simple-size-n", "--spec-ngram-size-n"], int),
-    "spec_ngram_size_m": (["--spec-ngram-simple-size-m", "--spec-ngram-size-m"], int),
-    "spec_ngram_min_hits": (["--spec-ngram-simple-min-hits", "--spec-ngram-min-hits"], int),
+    "spec_ngram_size_n": (["--spec-ngram-simple-size-n"], int),
+    "spec_ngram_size_m": (["--spec-ngram-simple-size-m"], int),
+    "spec_ngram_min_hits": (["--spec-ngram-simple-min-hits"], int),
     "spec_ngram_mod_n_min": (["--spec-ngram-mod-n-min"], int),
     "spec_ngram_mod_n_max": (["--spec-ngram-mod-n-max"], int),
     "spec_ngram_mod_n_match": (["--spec-ngram-mod-n-match"], int),
@@ -419,6 +420,7 @@ _VALUE_FLAG_MAP = {
     "numa": (["--numa"], str),
     "reverse_prompt": (["-r", "--reverse-prompt"], str),
     "spec_type": (["--spec-type"], str),
+    "override_tensor_draft": (["--spec-draft-override-tensor", "-otd"], str),
 }
 
 _FLAG_MAP = {
@@ -435,7 +437,7 @@ _FLAG_MAP = {
     "log_disable": ["--log-disable"],
     "offline": ["--offline"],
     "reuse_port": ["--reuse-port"],
-    "webui_mcp_proxy": ["--webui-mcp-proxy"],
+    "webui_mcp_proxy": ["--webui-mcp-proxy", "--ui-mcp-proxy"],
     "embedding": ["--embedding"],
     "rerank": ["--rerank"],
     "backend_sampling": ["-bs", "--backend-sampling"],
@@ -472,6 +474,8 @@ _NEG_FLAG_MAP = {
     "webui": ["--no-webui"],
     "cors_credentials": ["--no-cors-credentials"],
     "spec_draft_backend_sampling": ["--no-spec-draft-backend-sampling"],
+    "webui_mcp_proxy": ["--no-webui-mcp-proxy", "--no-ui-mcp-proxy"],
+    "context_shift": ["--no-context-shift"],
 }
 
 

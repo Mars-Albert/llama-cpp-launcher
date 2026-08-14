@@ -2280,13 +2280,15 @@ class MainWindow(QMainWindow):
 
     def _on_version_result(self, ver_num, commit, version_line):
         if ver_num:
-            self.version_label.setText(f"🔖 llama.cpp v{ver_num} ({commit})")
-            self.version_label.setStyleSheet("color: #16a34a; font-size: 12px; font-weight: bold;")
-            self.version_label.setToolTip(t("llama.cpp 版本: {ver}\n提交: {commit}", ver=ver_num, commit=commit))
-            self._validate_params()
+            text = f"🔖 llama.cpp v{ver_num} ({commit})"
+            tooltip = t("llama.cpp 版本: {ver}\n提交: {commit}", ver=ver_num, commit=commit)
         else:
-            self.version_label.setText(f"🔖 {version_line}")
-            self.version_label.setStyleSheet("color: #d97706; font-size: 12px;")
+            text = f"🔖 {version_line}"
+            tooltip = t("llama.cpp 版本信息") + f"\n{version_line}"
+        self.version_label.setText(text)
+        self.version_label.setStyleSheet("color: #16a34a; font-size: 12px; font-weight: bold;")
+        self.version_label.setToolTip(tooltip)
+        self._validate_params()
 
     def _on_version_failed(self, error_type):
         if error_type == "not_found":
@@ -2321,6 +2323,7 @@ class MainWindow(QMainWindow):
 
             if not missing and not changed:
                 self.version_label.setToolTip(self.version_label.toolTip() + "\n\n" + t("✅ 所有参数与当前版本匹配"))
+                self.version_label.setStyleSheet("color: #16a34a; font-size: 12px; font-weight: bold;")
             else:
                 tip = self.version_label.toolTip() + "\n\n" + t("⚠️ 参数差异提示:\n")
                 if missing:

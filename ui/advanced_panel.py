@@ -12,7 +12,7 @@ from core.constants import DEFAULT_HOST, DEFAULT_PORT, MAIN_GPU_MAX
 # Shared combo item lists
 CACHE_TYPE_ITEMS = ["f16", "bf16", "f32", "q8_0", "q4_0", "q4_1", "iq4_nl", "q5_0", "q5_1"]
 SPEC_TYPE_ITEMS = ["none", "draft-simple", "draft-eagle3", "draft-mtp", "draft-dflash", "draft-dspark", "ngram-simple", "ngram-map-k", "ngram-map-k4v", "ngram-mod", "ngram-cache"]
-LOAD_MODE_ITEMS = ["none", "mmap", "mlock", "mmap+mlock", "dio"]
+LOAD_MODE_ITEMS = ["auto", "none", "mmap", "mlock", "mmap+mlock", "dio"]
 DRAFT_PRIO_ITEMS = ["normal", "medium", "high", "realtime"]
 
 
@@ -539,7 +539,8 @@ class AdvancedPanel(QWidget):
 
         self.adv_load_mode = QComboBox()
         self.adv_load_mode.addItems(LOAD_MODE_ITEMS)
-        self.adv_load_mode.setCurrentText("mmap")
+        self.adv_load_mode.setEditable(True)
+        self.adv_load_mode.setCurrentText("auto")
         self._add_form_row(form, "加载模式 (--load-mode):", self.adv_load_mode)
 
         self.adv_split_mode = QComboBox()
@@ -602,7 +603,7 @@ class AdvancedPanel(QWidget):
         self._add_form_row(form, "批轮询 (--poll-batch):", self.adv_poll_batch)
 
         self.adv_prio = QComboBox()
-        self.adv_prio.addItems(["low", "normal", "medium", "high", "realtime"])
+        self.adv_prio.addItems(["normal", "medium", "high", "realtime"])
         self.adv_prio.setCurrentText("normal")
         self._add_form_row(form, "优先级 (--prio):", self.adv_prio)
 
@@ -806,6 +807,10 @@ class AdvancedPanel(QWidget):
         self.adv_spec_draft_backend_sampling = QCheckBox()
         self.adv_spec_draft_backend_sampling.setChecked(True)
         self._add_form_row(form, "草稿后端采样 (--spec-draft-backend-sampling):", self.adv_spec_draft_backend_sampling)
+
+        self.adv_override_tensor_draft = QLineEdit()
+        self.adv_override_tensor_draft.setPlaceholderText("tensor_name=type,...")
+        self._add_form_row(form, "草稿张量覆盖 (--spec-draft-override-tensor):", self.adv_override_tensor_draft)
 
         lookup_s_row, self.adv_lookup_static = self._make_file_row("file", "All Files (*)")
         self._add_form_row(form, "静态查找缓存 (--lookup-cache-static):", lookup_s_row)
@@ -1357,6 +1362,7 @@ class AdvancedPanel(QWidget):
         v["spec_ngram_size_m"] = self.adv_spec_ngram_m.value()
         v["spec_ngram_min_hits"] = self.adv_spec_ngram_min_hits.value()
         v["spec_draft_backend_sampling"] = self.adv_spec_draft_backend_sampling.isChecked()
+        v["override_tensor_draft"] = self.adv_override_tensor_draft.text()
         v["lookup_cache_static"] = self.adv_lookup_static.text()
         v["lookup_cache_dynamic"] = self.adv_lookup_dynamic.text()
         v["spec_ngram_mod_n_min"] = self.adv_spec_ngram_mod_n_min.value()
@@ -1738,6 +1744,8 @@ class AdvancedPanel(QWidget):
             self.adv_spec_ngram_min_hits.setValue(values["spec_ngram_min_hits"])
         if "spec_draft_backend_sampling" in values:
             self.adv_spec_draft_backend_sampling.setChecked(values["spec_draft_backend_sampling"])
+        if "override_tensor_draft" in values:
+            self.adv_override_tensor_draft.setText(values["override_tensor_draft"])
         if "lookup_cache_static" in values:
             self.adv_lookup_static.setText(values["lookup_cache_static"])
         if "lookup_cache_dynamic" in values:
