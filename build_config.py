@@ -1,3 +1,3 @@
 APP_NAME = "LlamaCppLauncher"
 APP_NAME_DISPLAY = "Llama CPP Launcher"
-VERSION = "1.4.1"
+VERSION = "1.4.2"
