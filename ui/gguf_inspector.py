@@ -32,8 +32,10 @@ from gguf.ggml_types import GGML_TYPES
 
 class GGUFParseWorker(QThread):
     progress = pyqtSignal(str)
-    parsed = pyqtSignal(object)
-    failed = pyqtSignal(str)
+    # 第一个参数是实际被解析的路径：解析期间用户可能切换了文件，
+    # 结果必须按这个路径（而非当前选中路径）回写 UI 和缓存
+    parsed = pyqtSignal(str, object)
+    failed = pyqtSignal(str, str)
 
     def __init__(self, path):
         super().__init__()
@@ -45,10 +47,10 @@ class GGUFParseWorker(QThread):
             self.progress.emit(t("正在读取文件头..."))
             info = parse_gguf(self._path, progress_callback=self.progress.emit)
             if not self._cancelled:
-                self.parsed.emit(info)
+                self.parsed.emit(self._path, info)
         except Exception as e:
             if not self._cancelled:
-                self.failed.emit(str(e))
+                self.failed.emit(self._path, str(e))
 
     def cancel(self):
         self._cancelled = True
@@ -69,6 +71,11 @@ def _cache_key(path, file_size, mtime_ns):
 def clear_parse_cache():
     """Clear the GGUF parse cache to free memory."""
     _parse_cache.clear()
+
+
+# 对话框关闭时仍在解析的 worker：模块级持引用，防止 QThread 对象
+# 在运行中被销毁（销毁运行中的 QThread 会直接崩进程），结束后自动清理
+_active_workers: set = set()
 
 
 # ---------------------------------------------------------------------------
@@ -629,7 +636,7 @@ class GGUFInspectorDialog(QDialog):
             st = os.stat(path)
             key = _cache_key(path, st.st_size, int(st.st_mtime_ns))
             if key in _parse_cache:
-                self._on_parsed(_parse_cache[key])
+                self._on_parsed(path, _parse_cache[key])
                 return
         except OSError:
             pass
@@ -651,16 +658,36 @@ class GGUFInspectorDialog(QDialog):
         self._progress.setRange(0, 0)
         self._btn_reparse.setEnabled(False)
         self._lbl_status.setText(t("正在解析..."))
-        self._worker = GGUFParseWorker(self._path)
-        self._worker.progress.connect(self._on_progress)
-        self._worker.parsed.connect(self._on_parsed)
-        self._worker.failed.connect(self._on_failed)
-        self._worker.start()
+        worker = GGUFParseWorker(self._path)
+        self._worker = worker
+        worker.progress.connect(self._on_progress)
+        worker.parsed.connect(self._on_parsed)
+        worker.failed.connect(self._on_failed)
+        _active_workers.add(worker)
+        worker.finished.connect(lambda: _active_workers.discard(worker))
+        worker.start()
 
     def _on_progress(self, msg):
         self._lbl_status.setText(msg)
 
-    def _on_parsed(self, info: GGUFInfo):
+    def _on_parsed(self, path, info: GGUFInfo):
+        # 缓存 key 用实际解析的路径，避免解析中切文件后把 A 的结果
+        # 存进 B 的 (path, size, mtime) key 下污染缓存
+        try:
+            st = os.stat(path)
+            key = _cache_key(path, st.st_size, int(st.st_mtime_ns))
+            if len(_parse_cache) >= _CACHE_MAX:
+                _parse_cache.pop(next(iter(_parse_cache)))
+            _parse_cache[key] = info
+        except OSError:
+            pass
+
+        if path != self._path:
+            # 解析期间用户已切换到别的文件：不展示旧结果，
+            # 旧 worker 已结束，直接为当前文件补一次解析
+            self._try_cache_or_parse()
+            return
+
         self._info = info
         self._progress.setVisible(False)
         self._btn_reparse.setEnabled(True)
@@ -671,19 +698,15 @@ class GGUFInspectorDialog(QDialog):
             f"{info.file_size / (1024**3):.2f} GB"
         )
 
-        # Cache
-        try:
-            st = os.stat(self._path)
-            key = _cache_key(self._path, st.st_size, int(st.st_mtime_ns))
-            if len(_parse_cache) >= _CACHE_MAX:
-                _parse_cache.pop(next(iter(_parse_cache)))
-            _parse_cache[key] = info
-        except OSError:
-            pass
-
         self._populate_all_tabs()
 
-    def _on_failed(self, msg):
+    def _on_failed(self, path, msg):
+        if path != self._path:
+            # 失败的是之前选中的文件，用户已切换：继续解析当前文件
+            self._progress.setVisible(False)
+            self._btn_reparse.setEnabled(True)
+            self._try_cache_or_parse()
+            return
         self._progress.setVisible(False)
         self._btn_reparse.setEnabled(True)
         self._lbl_status.setText(t("解析失败"))
@@ -1577,15 +1600,19 @@ class GGUFInspectorDialog(QDialog):
     # ------------------------------------------------------------------
 
     def closeEvent(self, event):
-        if self._worker and self._worker.isRunning():
-            self._worker.cancel()
+        worker = self._worker
+        if worker is not None and worker.isRunning():
+            worker.cancel()
             # Disconnect signals before waiting to prevent delivery to destroyed dialog
             try:
-                self._worker.parsed.disconnect()
-                self._worker.failed.disconnect()
-                self._worker.progress.disconnect()
+                worker.parsed.disconnect()
+                worker.failed.disconnect()
+                worker.progress.disconnect()
             except TypeError:
                 pass
-            if not self._worker.wait(3000):
-                self._worker.terminate()
+            # 不能 terminate() 正在执行 Python 代码的线程（文档明确标注的
+            # 最后手段，可能挂死或崩掉整个进程）。信号已断开，解析在后台
+            # 跑完是无害的；worker 对象由 _active_workers 保活，结束后
+            # finished 信号触发自动清理
+            worker.wait(1000)
         super().closeEvent(event)

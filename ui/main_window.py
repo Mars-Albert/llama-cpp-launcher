@@ -351,6 +351,9 @@ class MainWindow(QMainWindow):
         self.max_history = UNDO_HISTORY_MAX
         self._last_saved = dict(self.params)
         self._pending_snapshot = False
+        self._applying_values = False
+        self._pending_webui_url = None
+        self._log_tail = ""
         self.start_time = None
         self.timer = QTimer()
         self.timer.timeout.connect(self._update_timer)
@@ -477,9 +480,9 @@ class MainWindow(QMainWindow):
         self.stacked_layout.addWidget(self.advanced_panel)
         layout.addWidget(self.stacked)
 
-        cmd_label = QLabel(t("📝 启动命令预览"))
-        cmd_label.setStyleSheet("font-weight: bold; color: #7aa2f7; font-size: 13px;")
-        layout.addWidget(cmd_label)
+        self.cmd_label = QLabel(t("📝 启动命令预览"))
+        self.cmd_label.setStyleSheet("font-weight: bold; color: #7aa2f7; font-size: 13px;")
+        layout.addWidget(self.cmd_label)
 
         self.cmd_preview = QPlainTextEdit()
         self.cmd_preview.setReadOnly(True)
@@ -721,7 +724,7 @@ class MainWindow(QMainWindow):
         self._update_cmd_preview()
 
     def _save_current_to_params(self, force=False):
-        if not force and self._mode_switching:
+        if not force and (self._mode_switching or self._applying_values):
             return
         if self.is_advanced:
             self.params.update(self.advanced_panel.get_values())
@@ -748,10 +751,17 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage(t("已撤销"), 2000)
 
     def _apply_params_to_current(self):
-        if self.is_advanced:
-            self.advanced_panel.set_values(self.params)
-        else:
-            self.basic_panel.set_values(self.params)
+        # 应用期间屏蔽信号回读：set_values 逐个改控件时 valueChanged 会触发
+        # _update_model_info → _get_current_values，读到半更新的控件状态并写回
+        # params，把混合状态污染进 undo 历史
+        self._applying_values = True
+        try:
+            if self.is_advanced:
+                self.advanced_panel.set_values(self.params)
+            else:
+                self.basic_panel.set_values(self.params)
+        finally:
+            self._applying_values = False
 
     def _get_current_values(self):
         self._save_current_to_params()
@@ -1511,12 +1521,12 @@ class MainWindow(QMainWindow):
         v = self._get_current_values()
         if not v.get("model"):
             QMessageBox.warning(self, t("警告"), t("请选择一个模型文件"))
-            return
+            return False
 
         model_path = v["model"]
         if not Path(model_path).exists():
             QMessageBox.warning(self, t("警告"), t("模型文件不存在:\n{model_path}", model_path=model_path))
-            return
+            return False
 
         port = v.get("port", 8080)
         if self._is_port_in_use(port):
@@ -1526,7 +1536,7 @@ class MainWindow(QMainWindow):
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
             )
             if reply == QMessageBox.StandardButton.No:
-                return
+                return False
 
         args = self._build_args_from_params()
         timestamp = datetime.now().strftime('%H:%M:%S')
@@ -1541,6 +1551,7 @@ class MainWindow(QMainWindow):
         if host == "0.0.0.0":
             msg += t("  ⚠️ 监听所有网卡，局域网可访问")
         self.statusBar().showMessage(msg)
+        return True
 
     def _stop_server(self):
         self.runner.stop()
@@ -1573,15 +1584,27 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(t("已在浏览器中打开: {url}", url=url), 3000)
 
     def _open_webui_on_ready(self, url):
-        def on_ready():
-            try:
-                self.runner.server_ready.disconnect(on_ready)
-            except TypeError:
-                pass
-            webbrowser.open(url)
-            self.statusBar().showMessage(t("已在浏览器中打开: {url}", url=url), 3000)
-        self.runner.server_ready.connect(on_ready)
-        self._start_server()
+        self._pending_webui_url = url
+        self.runner.server_ready.connect(self._on_server_ready_for_webui)
+        if not self._start_server():
+            # 启动被拦下（未选模型/文件不存在/端口冲突选否）时撤掉连接，
+            # 否则下次正常启动会意外打开浏览器
+            self._cancel_pending_webui()
+
+    def _on_server_ready_for_webui(self):
+        if self._pending_webui_url is None:
+            return
+        url = self._pending_webui_url
+        self._cancel_pending_webui()
+        webbrowser.open(url)
+        self.statusBar().showMessage(t("已在浏览器中打开: {url}", url=url), 3000)
+
+    def _cancel_pending_webui(self):
+        self._pending_webui_url = None
+        try:
+            self.runner.server_ready.disconnect(self._on_server_ready_for_webui)
+        except TypeError:
+            pass
 
     def _on_state_changed(self, state):
         self._current_state = state
@@ -1601,6 +1624,8 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage(t("🚀 服务已启动: {url}", url=self._get_web_address()))
             self._update_webui_button()
         elif state == "stopped":
+            self._flush_log_tail()
+            self._cancel_pending_webui()
             self.status_indicator.setText(t("⏸ 已停止"))
             self.status_indicator.setStyleSheet("color: #6b7280; font-weight: bold; font-size: 13px;")
             self.btn_start.setEnabled(True)
@@ -1609,6 +1634,8 @@ class MainWindow(QMainWindow):
             self._reset_runtime_state()
             self.statusBar().showMessage(t("⏹ 服务已停止"))
         elif state == "error":
+            self._flush_log_tail()
+            self._cancel_pending_webui()
             self.status_indicator.setText(t("🔴 错误"))
             self.status_indicator.setStyleSheet("color: #dc2626; font-weight: bold; font-size: 13px;")
             self.btn_start.setEnabled(True)
@@ -1643,14 +1670,31 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(t("❌ 启动失败: {msg}", msg=msg[:80]))
 
     def _append_log(self, text):
-        for line in text.rstrip().split("\n"):
-            colored = _colorize_log_line(line)
-            self.log_output.appendHtml(colored)
-            self._parse_log_line(line.strip())
+        # QProcess 的读取块不保证按行对齐，最后一个元素可能是未写完的半行，
+        # 先挂起拼到下一个块，否则跨块的一行会被切成两半解析
+        text = self._log_tail + text
+        self._log_tail = ""
+        if not text:
+            return
+        lines = text.split("\n")
+        self._log_tail = lines.pop()
+        for line in lines:
+            self._append_log_line(line)
         if self.chk_auto_scroll.isChecked():
             self.log_output.verticalScrollBar().setValue(
                 self.log_output.verticalScrollBar().maximum()
             )
+
+    def _append_log_line(self, line):
+        self.log_output.appendHtml(_colorize_log_line(line))
+        self._parse_log_line(line.strip())
+
+    def _flush_log_tail(self):
+        # 进程结束时最后一个块可能没有换行，把挂起的半行补显出来
+        if self._log_tail:
+            line = self._log_tail
+            self._log_tail = ""
+            self._append_log_line(line)
 
     def _parse_log_line(self, line):
         stripped = line.strip()
@@ -2014,6 +2058,7 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event):
         if self.runner.is_running:
             self.runner.stop(blocking=True)
+        self.model_browser.shutdown()
         if hasattr(self, '_version_worker') and self._version_worker is not None:
             self._version_worker.quit()
             self._version_worker.wait(2000)
@@ -2122,6 +2167,7 @@ class MainWindow(QMainWindow):
 
     def _create_model_info_group(self):
         group = QGroupBox(t("📊 模型信息"))
+        self.model_info_group = group
         layout = QGridLayout(group)
         layout.setContentsMargins(10, 20, 10, 8)
         layout.setSpacing(6)
@@ -2356,6 +2402,7 @@ class MainWindow(QMainWindow):
         self.btn_import.setText(t("导入"))
         self.btn_export.setText(t("导出"))
         # Model info labels
+        self.model_info_group.setTitle(t("📊 模型信息"))
         for key, (lbl, label_text) in self._model_info_label_widgets.items():
             lbl.setText(t(label_text))
         self.btn_gguf_inspect.setText(t("🔍 GGUF"))
@@ -2365,6 +2412,7 @@ class MainWindow(QMainWindow):
             self.btn_gguf_inspect.setToolTip(t("请先选择 .gguf 模型"))
 
         # Right panel
+        self.cmd_label.setText(t("📝 启动命令预览"))
         self.mode_label.setText(t("模式:"))
         self.mode_combo.setItemText(0, t("基础模式"))
         self.mode_combo.setItemText(1, t("高级模式"))

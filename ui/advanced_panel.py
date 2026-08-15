@@ -1,3 +1,5 @@
+import logging
+
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QFormLayout,
     QTabWidget, QGroupBox, QComboBox, QSpinBox, QDoubleSpinBox,
@@ -8,6 +10,8 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt
 from core.i18n import t
 from core.constants import DEFAULT_HOST, DEFAULT_PORT, MAIN_GPU_MAX
+
+logger = logging.getLogger(__name__)
 
 # Shared combo item lists
 CACHE_TYPE_ITEMS = ["f16", "bf16", "f32", "q8_0", "q4_0", "q4_1", "iq4_nl", "q5_0", "q5_1"]
@@ -76,6 +80,14 @@ class AdvancedPanel(QWidget):
         lay.addWidget(btn)
         return w, edit
 
+    def _browse_to_edit(self, edit, mode="file", title=None, filter_str="GGUF Files (*.gguf)"):
+        if mode == "file":
+            path, _ = QFileDialog.getOpenFileName(self, title or t("选择文件"), "", filter_str)
+        else:
+            path = QFileDialog.getExistingDirectory(self, title or t("选择目录"))
+        if path:
+            edit.setText(path)
+
     def _create_model_tab(self):
         tab = QWidget()
         scroll = QScrollArea()
@@ -90,7 +102,7 @@ class AdvancedPanel(QWidget):
         model_browse = QPushButton(t("浏览"))
         model_browse.setFixedWidth(80)
         self._browse_btns.append(model_browse)
-        model_browse.clicked.connect(lambda: self.adv_model.setText(QFileDialog.getOpenFileName(self, t("选择模型"), "", "GGUF Files (*.gguf)")[0]))
+        model_browse.clicked.connect(lambda: self._browse_to_edit(self.adv_model, title=t("选择模型")))
         model_w = QWidget()
         model_lay = QHBoxLayout(model_w)
         model_lay.setContentsMargins(0, 0, 0, 0)
@@ -103,7 +115,7 @@ class AdvancedPanel(QWidget):
         mmproj_browse = QPushButton(t("浏览"))
         mmproj_browse.setFixedWidth(80)
         self._browse_btns.append(mmproj_browse)
-        mmproj_browse.clicked.connect(lambda: self.adv_mmproj.setText(QFileDialog.getOpenFileName(self, t("选择MMProj"), "", "GGUF Files (*.gguf)")[0]))
+        mmproj_browse.clicked.connect(lambda: self._browse_to_edit(self.adv_mmproj, title=t("选择MMProj")))
         mmproj_w = QWidget()
         mmproj_lay = QHBoxLayout(mmproj_w)
         mmproj_lay.setContentsMargins(0, 0, 0, 0)
@@ -1010,7 +1022,7 @@ class AdvancedPanel(QWidget):
         slot_save_btn = QPushButton(t("浏览"))
         slot_save_btn.setFixedWidth(80)
         self._browse_btns.append(slot_save_btn)
-        slot_save_btn.clicked.connect(lambda: self.adv_slot_save_path.setText(QFileDialog.getExistingDirectory(self, t("选择目录"))))
+        slot_save_btn.clicked.connect(lambda: self._browse_to_edit(self.adv_slot_save_path, mode="dir", title=t("选择目录")))
         slot_save_lay.addWidget(self.adv_slot_save_path, 1)
         slot_save_lay.addWidget(slot_save_btn)
         self._add_form_row(form, "槽位保存路径 (--slot-save-path):", slot_save_row)
@@ -1023,7 +1035,7 @@ class AdvancedPanel(QWidget):
         media_btn = QPushButton(t("浏览"))
         media_btn.setFixedWidth(80)
         self._browse_btns.append(media_btn)
-        media_btn.clicked.connect(lambda: self.adv_media_path.setText(QFileDialog.getExistingDirectory(self, t("选择目录"))))
+        media_btn.clicked.connect(lambda: self._browse_to_edit(self.adv_media_path, mode="dir", title=t("选择目录")))
         media_lay.addWidget(self.adv_media_path, 1)
         media_lay.addWidget(media_btn)
         self._add_form_row(form, "媒体路径 (--media-path):", media_row)
@@ -1457,6 +1469,20 @@ class AdvancedPanel(QWidget):
         return v
 
     def set_values(self, values):
+        values = dict(values)
+        try:
+            self._set_values_impl(values)
+            return
+        except (TypeError, ValueError):
+            # 预设值类型损坏（如 port 存成了字符串）：按 key 逐个应用，
+            # 跳过问题 key，避免一个坏值中断整个预设加载
+            for key in values:
+                try:
+                    self._set_values_impl({key: values[key]})
+                except (TypeError, ValueError):
+                    logger.warning("忽略无效的预设值: %s=%r", key, values[key])
+
+    def _set_values_impl(self, values):
         values = dict(values)
         if "model" in values:
             self.adv_model.setText(values["model"])

@@ -1,3 +1,5 @@
+import logging
+
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGroupBox,
     QComboBox, QSpinBox, QSlider, QLineEdit,
@@ -7,6 +9,8 @@ from PyQt6.QtCore import Qt
 from core.i18n import t
 from core.constants import DEFAULT_HOST, DEFAULT_PORT, CONTEXT_SIZE_PRESETS, MAIN_GPU_MAX
 from ui.advanced_panel import SPEC_TYPE_ITEMS
+
+logger = logging.getLogger(__name__)
 
 
 class BasicPanel(QWidget):
@@ -311,6 +315,19 @@ class BasicPanel(QWidget):
         }
 
     def set_values(self, values):
+        values = dict(values)
+        try:
+            self._set_values_impl(values)
+            return
+        except (TypeError, ValueError):
+            # 预设值类型损坏：按 key 逐个应用，跳过问题 key，避免中断整个预设加载
+            for key in values:
+                try:
+                    self._set_values_impl({key: values[key]})
+                except (TypeError, ValueError):
+                    logger.warning("忽略无效的预设值: %s=%r", key, values[key])
+
+    def _set_values_impl(self, values):
         values = dict(values)
         if "model" in values:
             val = values["model"]

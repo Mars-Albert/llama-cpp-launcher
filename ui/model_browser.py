@@ -91,15 +91,31 @@ class ModelBrowser(QWidget):
         self.model_list.clear()
         self.mmproj_list.clear()
 
-        if self._scanner_thread and self._scanner_thread.isRunning():
-            self._scanner_thread.stop()
-            self._scanner_thread.wait(5000)
+        old = self._scanner_thread
+        if old is not None and old.isRunning():
+            old.stop()
+            # 不在主线程等旧线程（它可能正在枚举大目录，wait(5000) 会卡死
+            # 界面）；它检测到 stop 标志后自行退出，其残留结果由
+            # _on_scan_finished 里的 sender() 检查过滤
+            try:
+                old.scan_finished.disconnect(self._on_scan_finished)
+            except TypeError:
+                pass
 
         self._scanner_thread = ModelScanner(self.search_dir)
         self._scanner_thread.scan_finished.connect(self._on_scan_finished)
         self._scanner_thread.start()
 
+    def shutdown(self):
+        # 本控件嵌在主窗口里，closeEvent 不会触发；应用退出时由主窗口显式调用，
+        # 避免 QThread 在运行中被销毁
+        if self._scanner_thread is not None and self._scanner_thread.isRunning():
+            self._scanner_thread.stop()
+            self._scanner_thread.wait(3000)
+
     def _on_scan_finished(self, models, mmprojs, loras):
+        if self.sender() is not self._scanner_thread:
+            return
         self.models = [m[0] for m in models]
         self.mmprojs = [m[0] for m in mmprojs]
         self.loras = loras
@@ -130,12 +146,6 @@ class ModelBrowser(QWidget):
     def set_search_dir(self, path):
         self.search_dir = Path(path)
         self.scan_models()
-
-    def closeEvent(self, event):
-        if self._scanner_thread and self._scanner_thread.isRunning():
-            self._scanner_thread.stop()
-            self._scanner_thread.wait(3000)
-        super().closeEvent(event)
 
     def retranslate_ui(self):
         self._models_group.setTitle(t("📦 模型文件"))
