@@ -1,27 +1,22 @@
-from PyQt6.QtCore import QObject, pyqtSignal
+import logging
+
+logger = logging.getLogger(__name__)
 
 _current_language = "zh"
 
 
-class _LanguageEmitter(QObject):
-    changed = pyqtSignal()
-
-
-_emitter = _LanguageEmitter()
-
+# C4: the old _LanguageEmitter QObject had zero subscribers — live language
+# switching works by calling retranslate_ui() on every widget. Removing it
+# also drops the PyQt6 dependency, so this module is pure stdlib and can be
+# tested headless (unblocks D4).
 
 def set_language(lang: str):
     global _current_language
     _current_language = lang
-    _emitter.changed.emit()
 
 
 def get_language() -> str:
     return _current_language
-
-
-def on_language_changed(callback):
-    _emitter.changed.connect(callback)
 
 
 def t(text: str, **kwargs) -> str:
@@ -30,7 +25,13 @@ def t(text: str, **kwargs) -> str:
     else:
         result = text
     if kwargs:
-        result = result.format(**kwargs)
+        try:
+            result = result.format(**kwargs)
+        except (KeyError, IndexError, ValueError):
+            # C4: copy containing literal braces (e.g. MCP JSON examples) must
+            # not crash — fall back to the unformatted source text
+            logger.error("t(): format failed for %r with %r; returning unformatted", text, kwargs)
+            result = text
     return result
 
 
@@ -131,9 +132,13 @@ _EN = {
     "确定删除预设 '{name}'?": "Delete preset '{name}'?",
     "已删除预设: {name}": "Deleted preset: {name}",
     "导入预设": "Import Preset",
-    "预设已导入": "Preset imported",
+    "预设已导入: {name}": "Preset imported: {name}",
+    "导入失败": "Import Failed",
+    "预设导入失败，请检查文件是否为有效的预设 JSON。": "Failed to import preset. Please check that the file is a valid preset JSON.",
     "导出预设": "Export Preset",
-    "预设已导出": "Preset exported",
+    "预设已导出: {name}": "Preset exported: {name}",
+    "导出失败": "Export Failed",
+    "预设导出失败，请检查目标路径是否可写。": "Failed to export preset. Please check that the target path is writable.",
 
     # Scan path
     "选择模型扫描目录": "Select Model Scan Directory",
@@ -141,6 +146,20 @@ _EN = {
 
     # Export log
     "导出日志": "Export Log",
+    "日志已导出: {path}": "Log exported: {path}",
+    "选择要导出的日志范围": "Choose the log range to export",
+    "仅显示区（最近 {n} 行）": "Visible area only (last {n} lines)",
+    "完整日志（{n} 行）": "Full log ({n} lines)",
+
+    # Log panel (E3): search + level filter
+    "🔍 搜索日志 (Ctrl+F)": "Search log (Ctrl+F)",
+    "未找到": "Not found",
+    "{n} 处匹配": "{n} matches",
+    "关闭搜索": "Close search",
+    "调试": "Debug",
+    "上一个": "Previous",
+    "下一个": "Next",
+    "取消": "Cancel",
 
     # About dialog
     "一个功能丰富的图形化 llama-server 启动器，帮助您轻松管理和运行 GGUF 格式的大语言模型。<br><br>": "A feature-rich GUI launcher for llama-server to help you easily manage and run GGUF large language models.<br><br>",
@@ -178,6 +197,26 @@ _EN = {
     "重新解析": "Re-parse",
     "🔄 重新解析": "🔄 Re-parse",
     "重新解析当前 GGUF 文件": "Re-parse the current GGUF file",
+    "📂 打开...": "📂 Open...",
+    "包含模型路径 (model/mmproj)": "Include model paths (model/mmproj)",
+    "不勾选时预设不记录模型/mmproj 路径，便于在不同机器间共享": "When unchecked the preset omits the model/mmproj paths, making it easier to share between machines",
+    "创建时间: {created}": "Created: {created}",
+    "预设 {name} · 创建于 {created}": "Preset {name} · created {created}",
+    "参数与当前版本存在差异，点击查看完整列表": "Parameters differ from the current version — click for the full list",
+    "参数版本差异": "Parameter version differences",
+    "检测到 {n} 项参数与当前 llama-server 版本不匹配": "{n} parameter(s) differ from the current llama-server version",
+    "以下参数在当前版本中不存在:": "The following parameters do not exist in the current version:",
+    "以下参数的默认值已变化:": "The following parameters have changed defaults:",
+    "当前 llama-server: {line}": "Detected llama-server: {line}",
+    "仅 CPU（未检测到 GPU 设备）": "CPU only (no GPU device detected)",
+    "检测到 {n}× GPU: {names}": "Detected {n}× GPU: {names}",
+    "未检测到 GPU 设备": "No GPU device detected",
+    "🖥️ GPU（本次运行）": "🖥️ GPU (this run)",
+    "🌙 深色主题": "🌙 Dark theme",
+    "已切换到深色主题": "Switched to dark theme",
+    "已切换到浅色主题": "Switched to light theme",
+    "打开任意 GGUF 文件加入列表": "Open any GGUF file and add it to the list",
+    "打开 GGUF 文件": "Open GGUF File",
     "导出": "Export",
     "📥 导出": "📥 Export",
     "导出解析结果": "Export parse results",
@@ -442,6 +481,13 @@ _EN = {
 
     # Sampling tab labels
     "禁用": "Disabled",
+    "禁用 (0)": "Disabled (0)",
+    "草稿张量覆盖 (--spec-draft-override-tensor):": "Draft tensor override (--spec-draft-override-tensor):",
+    "\\n, :, \", *; 'none' = 不设分隔符": "\\n, :, \", *; 'none' = no separator",
+    "-1 = 禁用": "-1 = disabled",
+    "预设 '{name}' 保存失败，请检查预设目录权限。": "Failed to save preset '{name}'. Check the presets directory permissions.",
+    "预设 {name} 中 {keys} 在本机不存在，已清空相应字段": "Preset {name}: {keys} not found on this machine, field(s) cleared",
+    "注意: 预设将以明文保存密钥 ({keys})，请注意不要分享该文件": "Note: the preset stores key(s) ({keys}) in plain text — do not share this file",
 
     # GPU tab labels
     "手动指定层数": "Manual Layer Count",
@@ -471,6 +517,15 @@ _EN = {
     "使用模型默认上下文长度": "Use model default context length",
     "设置上下文长度为 {val}": "Set context length to {val}",
     "温度:": "Temp:",
+    # === basic_panel.py (C4: previously hardcoded English labels) ===
+    "...": "...",
+    "mmproj:": "mmproj:",
+    "Top-P:": "Top-P:",
+    "Top-K:": "Top-K:",
+    "Min-P:": "Min-P:",
+    "FlashAttn:": "FlashAttn:",
+    "WebUI": "WebUI",
+    "Verbose": "Verbose",
     "重复惩罚:": "Repeat:",
     "地址:": "Host:",
     "并行:": "Parallel:",
@@ -485,9 +540,20 @@ _EN = {
     "未扫描": "Not scanned",
     "扫描中...": "Scanning...",
     "已扫描: {n_models} 个模型, {n_mmprojs} 个 mmproj": "Scanned: {n_models} models, {n_mmprojs} mmproj",
+    "未发现匹配的 mmproj，可手动选择 {n_mmprojs} 个": "No matching mmproj found, {n_mmprojs} available (select manually)",
 
     # === runner.py ===
-    "启动 llama-server 失败。请确保它在系统 PATH 中。": "Failed to start llama-server. Make sure it's in your PATH.",
+    "启动 llama-server 失败（{server_path}）。请检查路径是否正确，或确保它在系统 PATH 中。": "Failed to start llama-server ({server_path}). Check the path, or make sure it's in your system PATH.",
+
+    # E1: configurable llama-server path
+    "设置 llama-server 路径...": "Set llama-server path...",
+    "llama-server 路径": "llama-server path",
+    "llama-server 可执行文件路径:": "Path to the llama-server executable:",
+    "浏览...": "Browse...",
+    "路径验证失败: {e}": "Verification failed: {e}",
+    "路径验证失败，仍要保存吗？": "Verification failed. Save it anyway?",
+    "llama-server 路径已设置: {path}": "llama-server path set: {path}",
+    "未在 PATH 中找到 llama-server，请手动选择": "llama-server not found in PATH — select it manually",
     "llama-server 进程无法终止，可能需要手动结束。": "llama-server process could not be terminated. You may need to end it manually.",
 
     # === advanced_panel.py full form labels ===
@@ -742,4 +808,13 @@ _EN = {
     "是": "Yes",
     "层": "layers",
     "推理={n} / 批处理={nb} / 总计={total}": "Inference={n} / Batch={nb} / Total={total}",
+
+    # C4: previously-missing entries found by the D4 coverage test
+    "🔍": "🔍",
+    "聊天模板": "Chat Template",
+    "元数据": "Metadata",
+    "  ⚠️ 监听所有网卡，局域网可访问": "  ⚠️ Listening on all interfaces, accessible from the LAN",
+    "English": "English",
+    "保存失败": "Save Failed",
+    "加载设置失败: {e}": "Failed to load settings: {e}",
 }

@@ -1,4 +1,5 @@
 import logging
+import re
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QFormLayout,
@@ -10,6 +11,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt
 from core.i18n import t
 from core.constants import DEFAULT_HOST, DEFAULT_PORT, MAIN_GPU_MAX
+from core.params_schema import PARAMS_BY_KEY, UI_PARAMS, tab_params
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +39,24 @@ class AdvancedPanel(QWidget):
         # construction-time hardcoded values.
         self.set_values(dict(d))
 
+    def set_defaults(self, defaults):
+        """Update the defaults baseline (live-parsed defaults arriving after startup, plan A10)."""
+        self._defaults = dict(defaults)
+
+    def set_chat_templates(self, templates):
+        """Replace the chat-template list, preserving the current selection (plan A10)."""
+        self._chat_templates = list(templates)
+        current = self.adv_chat_template.currentText()
+        self.adv_chat_template.blockSignals(True)
+        try:
+            self.adv_chat_template.clear()
+            self.adv_chat_template.addItems([""] + self._chat_templates)
+            idx = self.adv_chat_template.findText(current)
+            if idx >= 0:
+                self.adv_chat_template.setCurrentIndex(idx)
+        finally:
+            self.adv_chat_template.blockSignals(False)
+
     def init_ui(self):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(4, 4, 4, 4)
@@ -45,13 +65,8 @@ class AdvancedPanel(QWidget):
         self._add_rm_btns = []
         self._section_labels = []
         self.tabs = QTabWidget()
-        self.tabs.addTab(self._create_model_tab(), t("模型"))
-        self.tabs.addTab(self._create_context_tab(), t("上下文"))
-        self.tabs.addTab(self._create_sampling_tab(), t("采样"))
-        self.tabs.addTab(self._create_gpu_tab(), t("GPU/性能"))
-        self.tabs.addTab(self._create_server_tab(), t("服务"))
-        self.tabs.addTab(self._create_chat_tab(), t("聊天/推理"))
-        self.tabs.addTab(self._create_advanced_tab(), t("高级"))
+        for tab_key, tab_name in self._TAB_TITLES:
+            self.tabs.addTab(self._create_tab(tab_key), t(tab_name))
         layout.addWidget(self.tabs)
 
     def _add_form_row(self, form, label_key, widget):
@@ -59,26 +74,6 @@ class AdvancedPanel(QWidget):
         self._form_labels[label_key] = lbl
         form.addRow(lbl, widget)
         return lbl
-
-    def _make_file_row(self, browse_mode="file", filter_str="All Files (*)"):
-        w = QWidget()
-        lay = QHBoxLayout(w)
-        lay.setContentsMargins(0, 0, 0, 0)
-        edit = QLineEdit()
-        btn = QPushButton(t("浏览"))
-        self._browse_btns.append(btn)
-        def do_browse():
-            if browse_mode == "file":
-                path, _ = QFileDialog.getOpenFileName(self, t("选择文件"), "", filter_str)
-            else:
-                path = QFileDialog.getExistingDirectory(self, t("选择目录"))
-            if path:
-                edit.setText(path)
-        btn.clicked.connect(do_browse)
-        btn.setFixedWidth(80)
-        lay.addWidget(edit, 1)
-        lay.addWidget(btn)
-        return w, edit
 
     def _browse_to_edit(self, edit, mode="file", title=None, filter_str="GGUF Files (*.gguf)"):
         if mode == "file":
@@ -88,117 +83,183 @@ class AdvancedPanel(QWidget):
         if path:
             edit.setText(path)
 
-    def _create_model_tab(self):
+    # -- C1: schema-driven UI construction ------------------------------
+    #
+    # The seven tabs are built from core.params_schema: each Param carries
+    # its tab, row order, label, and the full widget definition (kind,
+    # range, items, placeholder, tooltip, browse dialog, ...). The two
+    # non-parameter rows (the E8 GPU-info label and the draft-model
+    # section label) are anchored after the parameter that precedes them.
+    #
+    # The schema stores raw Chinese literals; t() is applied at build
+    # time here (labels via _add_form_row, items/placeholders/tooltips
+    # via _T) so live language switching keeps working (D4).
+
+    _TAB_TITLES = (
+        ("model", "模型"),
+        ("context", "上下文"),
+        ("sampling", "采样"),
+        ("gpu", "GPU/性能"),
+        ("server", "服务"),
+        ("chat", "聊天/推理"),
+        ("advanced", "高级"),
+    )
+    # Text widgets whose construction-time text is the param default
+    # (the rest start empty; _apply_defaults fills them all anyway).
+    _INIT_TEXT = frozenset({"host", "cors_origins", "cors_methods",
+                            "cors_headers", "fit_target", "samplers"})
+    _CJK_RE = re.compile(r"[\u4e00-\u9fff]")
+
+    @classmethod
+    def _T(cls, s):
+        """Translate a schema string at build/retranslate time (C1)."""
+        return t(s) if cls._CJK_RE.search(s) else s
+
+    @classmethod
+    def _t_items(cls, items):
+        return [cls._T(i) for i in items]
+
+    def _create_tab(self, tab_key):
         tab = QWidget()
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         content = QWidget()
         form = QFormLayout(content)
         form.setSpacing(8)
-        form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
-
-        self.adv_model = QLineEdit()
-        self.adv_model.setPlaceholderText(t("选择或输入模型文件路径"))
-        model_browse = QPushButton(t("浏览"))
-        model_browse.setFixedWidth(80)
-        self._browse_btns.append(model_browse)
-        model_browse.clicked.connect(lambda: self._browse_to_edit(self.adv_model, title=t("选择模型")))
-        model_w = QWidget()
-        model_lay = QHBoxLayout(model_w)
-        model_lay.setContentsMargins(0, 0, 0, 0)
-        model_lay.addWidget(self.adv_model)
-        model_lay.addWidget(model_browse)
-        self._add_form_row(form, "模型 (--model)", model_w)
-
-        self.adv_mmproj = QLineEdit()
-        self.adv_mmproj.setPlaceholderText(t("选择或输入视觉投影模型路径"))
-        mmproj_browse = QPushButton(t("浏览"))
-        mmproj_browse.setFixedWidth(80)
-        self._browse_btns.append(mmproj_browse)
-        mmproj_browse.clicked.connect(lambda: self._browse_to_edit(self.adv_mmproj, title=t("选择MMProj")))
-        mmproj_w = QWidget()
-        mmproj_lay = QHBoxLayout(mmproj_w)
-        mmproj_lay.setContentsMargins(0, 0, 0, 0)
-        mmproj_lay.addWidget(self.adv_mmproj)
-        mmproj_lay.addWidget(mmproj_browse)
-        self._add_form_row(form, "视觉投影 (--mmproj)", mmproj_w)
-
-        self.adv_mmproj_auto = QCheckBox()
-        self.adv_mmproj_auto.setChecked(True)
-        self._add_form_row(form, "自动MMProj (--mmproj-auto):", self.adv_mmproj_auto)
-
-        self.adv_mmproj_offload = QCheckBox()
-        self.adv_mmproj_offload.setChecked(True)
-        self._add_form_row(form, "MMProj GPU卸载 (--mmproj-offload):", self.adv_mmproj_offload)
-
-        self.adv_hf_repo = QLineEdit()
-        self.adv_hf_repo.setPlaceholderText("ggml-org/GLM-4.7-Flash-GGUF:Q4_K_M")
-        self._add_form_row(form, "HF仓库 (--hf-repo):", self.adv_hf_repo)
-
-        self.adv_hf_file = QLineEdit()
-        self._add_form_row(form, "HF文件 (--hf-file):", self.adv_hf_file)
-
-        self.adv_hf_token = QLineEdit()
-        self.adv_hf_token.setEchoMode(QLineEdit.EchoMode.Password)
-        self._add_form_row(form, "HF令牌 (--hf-token):", self.adv_hf_token)
-
-        self.adv_model_url = QLineEdit()
-        self._add_form_row(form, "模型URL (--model-url):", self.adv_model_url)
-
-        self.adv_docker_repo = QLineEdit()
-        self.adv_docker_repo.setPlaceholderText("ai/<model>[:quant]")
-        self._add_form_row(form, "Docker仓库 (--docker-repo):", self.adv_docker_repo)
-
-        self.adv_mmproj_url = QLineEdit()
-        self._add_form_row(form, "MMProj URL (--mmproj-url):", self.adv_mmproj_url)
-
-        self.adv_image_min_tokens = QSpinBox()
-        self.adv_image_min_tokens.setRange(0, 999999)
-        self.adv_image_min_tokens.setToolTip(t("0=使用模型默认"))
-        self._add_form_row(form, "图像最小Token (--image-min-tokens):", self.adv_image_min_tokens)
-
-        self.adv_image_max_tokens = QSpinBox()
-        self.adv_image_max_tokens.setRange(0, 999999)
-        self.adv_image_max_tokens.setToolTip(t("0=使用模型默认"))
-        self._add_form_row(form, "图像最大Token (--image-max-tokens):", self.adv_image_max_tokens)
-
-        self.adv_mtmd_batch_tokens = QSpinBox()
-        self.adv_mtmd_batch_tokens.setRange(0, 99999)
-        self.adv_mtmd_batch_tokens.setValue(1024)
-        self._add_form_row(form, "MTMD批Token (--mtmd-batch-max-tokens):", self.adv_mtmd_batch_tokens)
-
-        lora_w, self.adv_lora_list = self._make_list_row(t("LoRA 适配器"), t("选择LoRA文件"), "GGUF Files (*.gguf)")
-        self._add_form_row(form, "LoRA 适配器 (--lora)", lora_w)
-
-        self.adv_lora_scaled = QLineEdit()
-        self.adv_lora_scaled.setPlaceholderText("1.0, 0.5, ...")
-        self._add_form_row(form, "LoRA 缩放 (--lora-scaled)", self.adv_lora_scaled)
-
-        cv_w, self.adv_cv_list = self._make_list_row(t("控制向量"), t("选择控制向量文件"), "GGUF Files (*.gguf)")
-        self._add_form_row(form, "控制向量 (--control-vector)", cv_w)
-
-        self.adv_cv_scaled = QLineEdit()
-        self.adv_cv_scaled.setPlaceholderText("path:scale, ...")
-        self._add_form_row(form, "控制向量缩放 (--control-vector-scaled)", self.adv_cv_scaled)
-
-        self.adv_cv_layer_range = QLineEdit()
-        self.adv_cv_layer_range.setPlaceholderText("START END")
-        self._add_form_row(form, "控制向量层范围 (--control-vector-layer-range)", self.adv_cv_layer_range)
-
-        self.adv_alias = QLineEdit()
-        self.adv_alias.setPlaceholderText(t("模型的自定义名称"))
-        self._add_form_row(form, "别名 (--alias)", self.adv_alias)
-
-        self.adv_tags = QLineEdit()
-        self.adv_tags.setPlaceholderText(t("逗号分隔的标签列表"))
-        self._add_form_row(form, "标签 (--tags)", self.adv_tags)
-
+        if tab_key == "model":
+            form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
+        for p in tab_params(tab_key):
+            self._build_param_row(form, p)
+            if tab_key == "gpu" and p.key == "tensor_split":
+                # E8: detected GPU devices (from the `--list-devices` probe)
+                self.gpu_info_label = QLabel("")
+                self.gpu_info_label.setStyleSheet("color: #6b7280; font-size: 11px;")
+                self.gpu_info_label.setVisible(False)
+                form.addRow(self.gpu_info_label)
+            if tab_key == "gpu" and p.key == "op_offload":
+                draft_section_lbl = QLabel(f"<b>{t('--- 草稿模型 (投机解码) ---')}</b>")
+                self._section_labels.append(("--- 草稿模型 (投机解码) ---", draft_section_lbl))
+                form.addRow(draft_section_lbl)
         scroll.setWidget(content)
         tab_layout = QVBoxLayout(tab)
         tab_layout.addWidget(scroll)
         return tab
 
-    def _make_list_row(self, label, title, filter_str):
+    def _add_widget_row(self, form, p, row_widget, widget=None):
+        # Explicit None check: empty Qt models (e.g. a fresh QListWidget)
+        # are falsy in PyQt, so `widget or row_widget` would misfire.
+        if widget is None:
+            widget = row_widget
+        setattr(self, p.wattr, widget)
+        self._add_form_row(form, p.label, row_widget)
+
+    def _build_param_row(self, form, p):
+        kind = p.widget
+        if kind == "check":
+            w = QCheckBox()
+            if p.default:
+                w.setChecked(True)
+            self._add_widget_row(form, p, w)
+        elif kind == "spin":
+            w = QSpinBox()
+            w.setRange(p.min, p.max)
+            if p.default:
+                w.setValue(p.default)
+            if p.tooltip:
+                w.setToolTip(self._T(p.tooltip))
+            self._add_widget_row(form, p, w)
+        elif kind == "dspin":
+            w = QDoubleSpinBox()
+            w.setRange(p.min, p.max)
+            if p.step:
+                w.setSingleStep(p.step)
+            if p.default:
+                w.setValue(float(p.default))
+            if p.tooltip:
+                w.setToolTip(self._T(p.tooltip))
+            self._add_widget_row(form, p, w)
+        elif kind in ("combo", "combo_index"):
+            w = QComboBox()
+            w.addItems(self._t_items(p.items))
+            if kind == "combo" and p.curtext:
+                w.setCurrentText(p.curtext)
+            if kind == "combo_index" and p.curidx is not None:
+                w.setCurrentIndex(p.curidx)
+            self._add_widget_row(form, p, w)
+        elif kind == "combo_edit":
+            self._build_combo_edit_row(form, p)
+        elif kind == "mtext":
+            w = QTextEdit()
+            w.setMaximumHeight(80)
+            if p.placeholder:
+                w.setPlaceholderText(self._T(p.placeholder))
+            row_w = QWidget()
+            lay = QVBoxLayout(row_w)
+            lay.setContentsMargins(0, 0, 0, 0)
+            lay.addWidget(w)
+            self._add_widget_row(form, p, row_w, widget=w)
+        elif kind == "list":
+            row_w, w = self._make_list_row(self._T(p.list_title), p.list_filter)
+            self._add_widget_row(form, p, row_w, widget=w)
+        elif kind == "checklist":
+            w = QListWidget()
+            w.setMaximumHeight(80)
+            for name in p.items:
+                item = QListWidgetItem(name)
+                item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+                item.setCheckState(Qt.CheckState.Unchecked)
+                w.addItem(item)
+            self._add_widget_row(form, p, w)
+        else:  # text / file / password / dir / dir_text
+            w = QLineEdit()
+            if p.placeholder:
+                w.setPlaceholderText(self._T(p.placeholder))
+            if p.echo:
+                w.setEchoMode(QLineEdit.EchoMode.Password)
+            if p.key in self._INIT_TEXT and p.default:
+                w.setText(str(p.default))
+            if p.browse:
+                row_w = QWidget()
+                lay = QHBoxLayout(row_w)
+                lay.setContentsMargins(0, 0, 0, 0)
+                btn = QPushButton(t("浏览"))
+                self._browse_btns.append(btn)
+                title = self._T(p.browse_title) if p.browse_title else None
+                filter_str = p.filter_str or "All Files (*)"
+                btn.clicked.connect(lambda: self._browse_to_edit(
+                    w, mode=p.browse, title=title, filter_str=filter_str))
+                btn.setFixedWidth(80)
+                lay.addWidget(w, 1)
+                lay.addWidget(btn)
+                self._add_widget_row(form, p, row_w, widget=w)
+            else:
+                self._add_widget_row(form, p, w)
+
+    def _build_combo_edit_row(self, form, p):
+        w = QComboBox()
+        if p.key == "chat_template":
+            # Dynamic item list (live-parsed chat templates, plan A10).
+            w.addItems([""] + self._chat_templates)
+        elif p.items:
+            w.addItems(self._t_items(p.items))
+        w.setEditable(True)
+        if p.curtext:
+            w.setCurrentText(p.curtext)
+        setattr(self, p.wattr, w)
+        self._add_form_row(form, p.label, w)
+        if p.value != "ngl":
+            return
+        # ngl composite: the editable combo plus a helper spinbox; the
+        # combo is the source of truth (get_values reads currentText).
+        spin = QSpinBox()
+        spin.setRange(0, 999)
+        spin.setValue(0)
+        spin.setToolTip(t("手动指定层数"))
+        spin.valueChanged.connect(lambda v: w.setEditText(str(v)))
+        self.adv_ngl_spin = spin
+        self._add_form_row(form, "手动指定层数:", spin)
+
+    def _make_list_row(self, title, filter_str):
         w = QWidget()
         lay = QVBoxLayout(w)
         lay.setContentsMargins(0, 0, 0, 0)
@@ -232,1241 +293,86 @@ class AdvancedPanel(QWidget):
         for item in lst.selectedItems():
             lst.takeItem(lst.row(item))
 
-    def _create_context_tab(self):
-        tab = QWidget()
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        content = QWidget()
-        form = QFormLayout(content)
-        form.setSpacing(8)
-
-        self.adv_ctx_size = QSpinBox()
-        self.adv_ctx_size.setRange(0, 999999)
-        self.adv_ctx_size.setValue(0)
-        self.adv_ctx_size.setToolTip(t("0=使用模型默认"))
-        self._add_form_row(form, "上下文大小 (--ctx-size):", self.adv_ctx_size)
-
-        self.adv_batch_size = QSpinBox()
-        self.adv_batch_size.setRange(64, 16384)
-        self.adv_batch_size.setValue(2048)
-        self._add_form_row(form, "批处理大小 (--batch-size):", self.adv_batch_size)
-
-        self.adv_ubatch_size = QSpinBox()
-        self.adv_ubatch_size.setRange(32, 4096)
-        self.adv_ubatch_size.setValue(512)
-        self._add_form_row(form, "物理批处理 (--ubatch-size):", self.adv_ubatch_size)
-
-        self.adv_n_predict = QSpinBox()
-        self.adv_n_predict.setRange(-1, 999999)
-        self.adv_n_predict.setValue(-1)
-        self._add_form_row(form, "预测Token数 (--n-predict):", self.adv_n_predict)
-
-        self.adv_keep = QSpinBox()
-        self.adv_keep.setRange(0, 999999)
-        self.adv_keep.setValue(0)
-        self._add_form_row(form, "保留历史 (--keep):", self.adv_keep)
-
-        self.adv_cache_prompt = QCheckBox()
-        self.adv_cache_prompt.setChecked(True)
-        self._add_form_row(form, "提示词缓存 (--cache-prompt):", self.adv_cache_prompt)
-
-        self.adv_cache_reuse = QSpinBox()
-        self.adv_cache_reuse.setRange(0, 999999)
-        self.adv_cache_reuse.setValue(0)
-        self._add_form_row(form, "缓存复用 (--cache-reuse):", self.adv_cache_reuse)
-
-        self.adv_cache_ram = QSpinBox()
-        self.adv_cache_ram.setRange(-1, 999999)
-        self.adv_cache_ram.setValue(8192)
-        self._add_form_row(form, "缓存RAM (--cache-ram):", self.adv_cache_ram)
-
-        self.adv_context_shift = QCheckBox()
-        self._add_form_row(form, "上下文偏移 (--context-shift):", self.adv_context_shift)
-
-        self.adv_kv_offload = QCheckBox()
-        self.adv_kv_offload.setChecked(True)
-        self._add_form_row(form, "KV卸载 (--kv-offload):", self.adv_kv_offload)
-
-        self.adv_kv_unified = QCheckBox()
-        self.adv_kv_unified.setChecked(True)
-        self._add_form_row(form, "统一KV (--kv-unified):", self.adv_kv_unified)
-
-        self.adv_cache_type_k = QComboBox()
-        self.adv_cache_type_k.addItems(CACHE_TYPE_ITEMS)
-        self.adv_cache_type_k.setCurrentText("f16")
-        self._add_form_row(form, "KV Cache K类型 (--cache-type-k):", self.adv_cache_type_k)
-
-        self.adv_cache_type_v = QComboBox()
-        self.adv_cache_type_v.addItems(CACHE_TYPE_ITEMS)
-        self.adv_cache_type_v.setCurrentText("f16")
-        self._add_form_row(form, "KV Cache V类型 (--cache-type-v):", self.adv_cache_type_v)
-
-        self.adv_swa_full = QCheckBox()
-        self._add_form_row(form, "SWA完整模式 (--swa-full):", self.adv_swa_full)
-
-        self.adv_escape = QCheckBox()
-        self.adv_escape.setChecked(True)
-        self._add_form_row(form, "转义处理 (--escape):", self.adv_escape)
-
-        self.adv_defrag_thold = QSpinBox()
-        self.adv_defrag_thold.setRange(0, 999999)
-        self.adv_defrag_thold.setToolTip("(DEPRECATED) KV cache defragmentation threshold")
-        self._add_form_row(form, "KV整理阈值 (--defrag-thold):", self.adv_defrag_thold)
-
-        self.adv_cache_idle_slots = QCheckBox()
-        self.adv_cache_idle_slots.setChecked(True)
-        self._add_form_row(form, "空闲槽位缓存 (--cache-idle-slots):", self.adv_cache_idle_slots)
-
-        self.adv_ctx_checkpoints = QSpinBox()
-        self.adv_ctx_checkpoints.setRange(1, 256)
-        self.adv_ctx_checkpoints.setValue(32)
-        self._add_form_row(form, "上下文检查点 (--ctx-checkpoints):", self.adv_ctx_checkpoints)
-
-        self.adv_checkpoint_min_step = QSpinBox()
-        self.adv_checkpoint_min_step.setRange(-1, 999999)
-        self.adv_checkpoint_min_step.setValue(8192)
-        self._add_form_row(form, "每N Token检查点 (--checkpoint-min-step):", self.adv_checkpoint_min_step)
-
-        scroll.setWidget(content)
-        tab_layout = QVBoxLayout(tab)
-        tab_layout.addWidget(scroll)
-        return tab
-
-    def _create_sampling_tab(self):
-        tab = QWidget()
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        content = QWidget()
-        form = QFormLayout(content)
-        form.setSpacing(8)
-
-        self.adv_temp = QDoubleSpinBox()
-        self.adv_temp.setRange(0, 2.0)
-        self.adv_temp.setSingleStep(0.05)
-        self.adv_temp.setValue(0.8)
-        self._add_form_row(form, "温度 (--temp):", self.adv_temp)
-
-        self.adv_top_k = QSpinBox()
-        self.adv_top_k.setRange(0, 200)
-        self.adv_top_k.setValue(40)
-        self._add_form_row(form, "Top-K (--top-k):", self.adv_top_k)
-
-        self.adv_top_p = QDoubleSpinBox()
-        self.adv_top_p.setRange(0, 1.0)
-        self.adv_top_p.setSingleStep(0.05)
-        self.adv_top_p.setValue(0.95)
-        self._add_form_row(form, "Top-P (--top-p):", self.adv_top_p)
-
-        self.adv_min_p = QDoubleSpinBox()
-        self.adv_min_p.setRange(0, 1.0)
-        self.adv_min_p.setSingleStep(0.05)
-        self.adv_min_p.setValue(0.05)
-        self._add_form_row(form, "Min-P (--min-p):", self.adv_min_p)
-
-        self.adv_typical_p = QDoubleSpinBox()
-        self.adv_typical_p.setRange(0, 1.0)
-        self.adv_typical_p.setSingleStep(0.05)
-        self.adv_typical_p.setValue(1.0)
-        self._add_form_row(form, "Typical-P (--typical-p):", self.adv_typical_p)
-
-        self.adv_top_n_sigma = QDoubleSpinBox()
-        self.adv_top_n_sigma.setRange(-1.0, 3.0)
-        self.adv_top_n_sigma.setSingleStep(0.1)
-        self.adv_top_n_sigma.setValue(-1.0)
-        self._add_form_row(form, "Top-N-Sigma (--top-n-sigma):", self.adv_top_n_sigma)
-
-        self.adv_xtc_prob = QDoubleSpinBox()
-        self.adv_xtc_prob.setRange(0, 1.0)
-        self.adv_xtc_prob.setSingleStep(0.05)
-        self.adv_xtc_prob.setValue(0.0)
-        self._add_form_row(form, "XTC概率 (--xtc-probability):", self.adv_xtc_prob)
-
-        self.adv_xtc_thresh = QDoubleSpinBox()
-        self.adv_xtc_thresh.setRange(0, 1.0)
-        self.adv_xtc_thresh.setSingleStep(0.05)
-        self.adv_xtc_thresh.setValue(0.1)
-        self._add_form_row(form, "XTC阈值 (--xtc-threshold):", self.adv_xtc_thresh)
-
-        self.adv_repeat_penalty = QDoubleSpinBox()
-        self.adv_repeat_penalty.setRange(0, 2.0)
-        self.adv_repeat_penalty.setSingleStep(0.05)
-        self.adv_repeat_penalty.setValue(1.0)
-        self._add_form_row(form, "重复惩罚 (--repeat-penalty):", self.adv_repeat_penalty)
-
-        self.adv_presence_penalty = QDoubleSpinBox()
-        self.adv_presence_penalty.setRange(-2.0, 2.0)
-        self.adv_presence_penalty.setSingleStep(0.1)
-        self.adv_presence_penalty.setValue(0.0)
-        self._add_form_row(form, "存在惩罚 (--presence-penalty):", self.adv_presence_penalty)
-
-        self.adv_freq_penalty = QDoubleSpinBox()
-        self.adv_freq_penalty.setRange(-2.0, 2.0)
-        self.adv_freq_penalty.setSingleStep(0.1)
-        self.adv_freq_penalty.setValue(0.0)
-        self._add_form_row(form, "频率惩罚 (--frequency-penalty):", self.adv_freq_penalty)
-
-        self.adv_dry_mult = QDoubleSpinBox()
-        self.adv_dry_mult.setRange(0, 2.0)
-        self.adv_dry_mult.setSingleStep(0.05)
-        self.adv_dry_mult.setValue(0.0)
-        self._add_form_row(form, "DRY乘数 (--dry-multiplier):", self.adv_dry_mult)
-
-        self.adv_dry_base = QDoubleSpinBox()
-        self.adv_dry_base.setRange(1.0, 3.0)
-        self.adv_dry_base.setSingleStep(0.05)
-        self.adv_dry_base.setValue(1.75)
-        self._add_form_row(form, "DRY基数 (--dry-base):", self.adv_dry_base)
-
-        self.adv_dry_len = QSpinBox()
-        self.adv_dry_len.setRange(1, 64)
-        self.adv_dry_len.setValue(2)
-        self._add_form_row(form, "DRY允许长度 (--dry-allowed-length):", self.adv_dry_len)
-
-        self.adv_dry_penalty_last_n = QSpinBox()
-        self.adv_dry_penalty_last_n.setRange(-1, 999999)
-        self.adv_dry_penalty_last_n.setValue(64)
-        self._add_form_row(form, "DRY惩罚最后N (--dry-penalty-last-n):", self.adv_dry_penalty_last_n)
-
-        self.adv_dry_seq_breaker = QLineEdit()
-        self.adv_dry_seq_breaker.setPlaceholderText("\\n, :, \", *; 'none' = 不设分隔符")
-        self._add_form_row(form, "DRY序列分隔符 (--dry-sequence-breaker):", self.adv_dry_seq_breaker)
-
-        self.adv_adaptive_target = QDoubleSpinBox()
-        self.adv_adaptive_target.setRange(-1.0, 1.0)
-        self.adv_adaptive_target.setSingleStep(0.05)
-        self.adv_adaptive_target.setValue(-1.0)
-        self._add_form_row(form, "自适应目标 (--adaptive-target):", self.adv_adaptive_target)
-
-        self.adv_adaptive_decay = QDoubleSpinBox()
-        self.adv_adaptive_decay.setRange(0.0, 0.99)
-        self.adv_adaptive_decay.setSingleStep(0.05)
-        self.adv_adaptive_decay.setValue(0.9)
-        self._add_form_row(form, "自适应衰减 (--adaptive-decay):", self.adv_adaptive_decay)
-
-        self.adv_repeat_last_n = QSpinBox()
-        self.adv_repeat_last_n.setRange(-1, 999999)
-        self.adv_repeat_last_n.setValue(64)
-        self._add_form_row(form, "重复最后N (--repeat-last-n):", self.adv_repeat_last_n)
-
-        self.adv_seed = QSpinBox()
-        self.adv_seed.setRange(-1, 999999999)
-        self.adv_seed.setValue(-1)
-        self._add_form_row(form, "随机种子 (--seed):", self.adv_seed)
-
-        self.adv_mirostat = QComboBox()
-        self.adv_mirostat.addItems([t("禁用") + " (0)", "Mirostat (1)", "Mirostat 2.0 (2)"])
-        self._add_form_row(form, "Mirostat (--mirostat):", self.adv_mirostat)
-
-        self.adv_mirostat_lr = QDoubleSpinBox()
-        self.adv_mirostat_lr.setRange(0, 1.0)
-        self.adv_mirostat_lr.setSingleStep(0.01)
-        self.adv_mirostat_lr.setValue(0.1)
-        self._add_form_row(form, "Mirostat学习率 (--mirostat-lr):", self.adv_mirostat_lr)
-
-        self.adv_mirostat_ent = QDoubleSpinBox()
-        self.adv_mirostat_ent.setRange(0, 10.0)
-        self.adv_mirostat_ent.setSingleStep(0.1)
-        self.adv_mirostat_ent.setValue(5.0)
-        self._add_form_row(form, "Mirostat熵 (--mirostat-ent):", self.adv_mirostat_ent)
-
-        self.adv_dynatemp_range = QDoubleSpinBox()
-        self.adv_dynatemp_range.setRange(0, 2.0)
-        self.adv_dynatemp_range.setSingleStep(0.05)
-        self.adv_dynatemp_range.setValue(0.0)
-        self._add_form_row(form, "动态温度范围 (--dynatemp-range):", self.adv_dynatemp_range)
-
-        self.adv_dynatemp_exp = QDoubleSpinBox()
-        self.adv_dynatemp_exp.setRange(0.1, 5.0)
-        self.adv_dynatemp_exp.setSingleStep(0.1)
-        self.adv_dynatemp_exp.setValue(1.0)
-        self._add_form_row(form, "动态温度指数 (--dynatemp-exp):", self.adv_dynatemp_exp)
-
-        self.adv_ignore_eos = QCheckBox()
-        self._add_form_row(form, "忽略EOS (--ignore-eos):", self.adv_ignore_eos)
-
-        self.adv_backend_sampling = QCheckBox()
-        self._add_form_row(form, "后端采样 (--backend-sampling):", self.adv_backend_sampling)
-
-        self.adv_samplers = QLineEdit()
-        self.adv_samplers.setText("penalties;dry;top_n_sigma;top_k;typ_p;top_p;min_p;xtc;temperature")
-        self._add_form_row(form, "采样器顺序 (--samplers):", self.adv_samplers)
-
-        self.adv_sampler_seq = QLineEdit()
-        self.adv_sampler_seq.setPlaceholderText(t("简化采样器序列"))
-        self._add_form_row(form, "采样器序列 (--sampling-seq):", self.adv_sampler_seq)
-
-        self.adv_logit_bias = QLineEdit()
-        self.adv_logit_bias.setPlaceholderText("TOKEN_ID(+/-)BIAS")
-        self._add_form_row(form, "Logit偏置 (--logit-bias):", self.adv_logit_bias)
-
-        grammar_row, self.adv_grammar = self._make_file_row("file", "GBNF Files (*.gbnf)")
-        self._add_form_row(form, "Grammar (--grammar):", grammar_row)
-
-        grammar_file_row, self.adv_grammar_file = self._make_file_row("file", "All Files (*)")
-        self._add_form_row(form, "Grammar文件 (--grammar-file):", grammar_file_row)
-
-        json_schema_row, self.adv_json_schema = self._make_text_row("JSON Schema")
-        self._add_form_row(form, "JSON Schema (--json-schema):", json_schema_row)
-
-        json_schema_file_row, self.adv_json_schema_file = self._make_file_row("file", "JSON Files (*.json)")
-        self._add_form_row(form, "JSON Schema文件 (--json-schema-file):", json_schema_file_row)
-
-        scroll.setWidget(content)
-        tab_layout = QVBoxLayout(tab)
-        tab_layout.addWidget(scroll)
-        return tab
-
-    def _make_text_row(self, placeholder):
-        w = QWidget()
-        lay = QVBoxLayout(w)
-        lay.setContentsMargins(0, 0, 0, 0)
-        edit = QTextEdit()
-        edit.setMaximumHeight(80)
-        edit.setPlaceholderText(placeholder)
-        lay.addWidget(edit)
-        return w, edit
-
-    def _create_gpu_tab(self):
-        tab = QWidget()
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        content = QWidget()
-        form = QFormLayout(content)
-        form.setSpacing(8)
-
-        self.adv_ngl = QComboBox()
-        self.adv_ngl.addItems(["auto", "all"])
-        self.adv_ngl.setEditable(True)
-        self._add_form_row(form, "GPU层数 (--n-gpu-layers):", self.adv_ngl)
-
-        self.adv_ngl_spin = QSpinBox()
-        self.adv_ngl_spin.setRange(0, 999)
-        self.adv_ngl_spin.setValue(0)
-        self.adv_ngl_spin.setToolTip(t("手动指定层数"))
-        self.adv_ngl_spin.valueChanged.connect(lambda v: self.adv_ngl.setEditText(str(v)))
-        self._add_form_row(form, "手动指定层数:", self.adv_ngl_spin)
-
-        self.adv_device = QLineEdit()
-        self._add_form_row(form, "设备 (--device):", self.adv_device)
-
-        self.adv_load_mode = QComboBox()
-        self.adv_load_mode.addItems(LOAD_MODE_ITEMS)
-        self.adv_load_mode.setEditable(True)
-        self.adv_load_mode.setCurrentText("auto")
-        self._add_form_row(form, "加载模式 (--load-mode):", self.adv_load_mode)
-
-        self.adv_split_mode = QComboBox()
-        self.adv_split_mode.addItems(["layer", "none", "row", "tensor"])
-        self._add_form_row(form, "分割模式 (--split-mode):", self.adv_split_mode)
-
-        self.adv_tensor_split = QLineEdit()
-        self._add_form_row(form, "张量分割 (--tensor-split):", self.adv_tensor_split)
-
-        self.adv_main_gpu = QSpinBox()
-        self.adv_main_gpu.setRange(0, MAIN_GPU_MAX)
-        self.adv_main_gpu.setValue(0)
-        self._add_form_row(form, "主GPU (--main-gpu):", self.adv_main_gpu)
-
-        self.adv_threads = QSpinBox()
-        self.adv_threads.setRange(-1, 256)
-        self.adv_threads.setValue(-1)
-        self._add_form_row(form, "线程数 (--threads):", self.adv_threads)
-
-        self.adv_threads_batch = QSpinBox()
-        self.adv_threads_batch.setRange(-1, 256)
-        self.adv_threads_batch.setValue(-1)
-        self._add_form_row(form, "批处理线程 (--threads-batch):", self.adv_threads_batch)
-
-        self.adv_threads_http = QSpinBox()
-        self.adv_threads_http.setRange(-1, 256)
-        self.adv_threads_http.setValue(-1)
-        self._add_form_row(form, "HTTP线程 (--threads-http):", self.adv_threads_http)
-
-        self.adv_cpu_mask = QLineEdit()
-        self._add_form_row(form, "CPU掩码 (--cpu-mask):", self.adv_cpu_mask)
-
-        self.adv_cpu_range = QLineEdit()
-        self.adv_cpu_range.setPlaceholderText("lo-hi")
-        self._add_form_row(form, "CPU范围 (--cpu-range):", self.adv_cpu_range)
-
-        self.adv_cpu_strict = QSpinBox()
-        self.adv_cpu_strict.setRange(0, 1)
-        self._add_form_row(form, "严格CPU (--cpu-strict):", self.adv_cpu_strict)
-
-        self.adv_cpu_mask_batch = QLineEdit()
-        self._add_form_row(form, "批CPU掩码 (--cpu-mask-batch):", self.adv_cpu_mask_batch)
-
-        self.adv_cpu_range_batch = QLineEdit()
-        self.adv_cpu_range_batch.setPlaceholderText("lo-hi")
-        self._add_form_row(form, "批CPU范围 (--cpu-range-batch):", self.adv_cpu_range_batch)
-
-        self.adv_cpu_strict_batch = QSpinBox()
-        self.adv_cpu_strict_batch.setRange(0, 1)
-        self._add_form_row(form, "批严格CPU (--cpu-strict-batch):", self.adv_cpu_strict_batch)
-
-        self.adv_poll = QSpinBox()
-        self.adv_poll.setRange(0, 100)
-        self.adv_poll.setValue(50)
-        self._add_form_row(form, "轮询级别 (--poll):", self.adv_poll)
-
-        self.adv_poll_batch = QSpinBox()
-        self.adv_poll_batch.setRange(0, 100)
-        self.adv_poll_batch.setValue(50)
-        self._add_form_row(form, "批轮询 (--poll-batch):", self.adv_poll_batch)
-
-        self.adv_prio = QComboBox()
-        self.adv_prio.addItems(["normal", "medium", "high", "realtime"])
-        self.adv_prio.setCurrentText("normal")
-        self._add_form_row(form, "优先级 (--prio):", self.adv_prio)
-
-        self.adv_rpc = QLineEdit()
-        self.adv_rpc.setPlaceholderText("host:port,host:port")
-        self._add_form_row(form, "RPC服务器 (--rpc):", self.adv_rpc)
-
-        self.adv_flash_attn = QComboBox()
-        self.adv_flash_attn.addItems(["on", "off", "auto"])
-        self.adv_flash_attn.setCurrentText("auto")
-        self._add_form_row(form, "Flash Attention (--flash-attn):", self.adv_flash_attn)
-
-        self.adv_mmap = QCheckBox()
-        self.adv_mmap.setChecked(True)
-        self._add_form_row(form, "内存映射 (--mmap):", self.adv_mmap)
-
-        self.adv_mlock = QCheckBox()
-        self._add_form_row(form, "内存锁定 (--mlock):", self.adv_mlock)
-
-        self.adv_no_host = QCheckBox()
-        self._add_form_row(form, "无主机内存 (--no-host):", self.adv_no_host)
-
-        self.adv_repack = QCheckBox()
-        self.adv_repack.setChecked(True)
-        self._add_form_row(form, "重打包 (--repack):", self.adv_repack)
-
-        self.adv_fit = QComboBox()
-        self.adv_fit.addItems(["on", "off"])
-        self.adv_fit.setCurrentText("on")
-        self._add_form_row(form, "适配内存 (--fit):", self.adv_fit)
-
-        self.adv_fit_target = QLineEdit()
-        self.adv_fit_target.setText("1024")
-        self.adv_fit_target.setPlaceholderText("1024, 2048, ...")
-        self._add_form_row(form, "适配目标MiB (--fit-target):", self.adv_fit_target)
-
-        self.adv_fit_ctx = QSpinBox()
-        self.adv_fit_ctx.setRange(256, 999999)
-        self.adv_fit_ctx.setValue(4096)
-        self._add_form_row(form, "适配最小上下文 (--fit-ctx):", self.adv_fit_ctx)
-
-        self.adv_check_tensors = QCheckBox()
-        self._add_form_row(form, "检查张量 (--check-tensors):", self.adv_check_tensors)
-
-        self.adv_n_cpu_moe = QSpinBox()
-        self.adv_n_cpu_moe.setRange(0, 999)
-        self._add_form_row(form, "CPU MoE层数 (--n-cpu-moe):", self.adv_n_cpu_moe)
-
-        self.adv_override_tensor = QLineEdit()
-        self.adv_override_tensor.setPlaceholderText("tensor_name=type,...")
-        self._add_form_row(form, "覆盖张量 (--override-tensor):", self.adv_override_tensor)
-
-        self.adv_override_kv = QLineEdit()
-        self.adv_override_kv.setPlaceholderText("KEY=TYPE:VALUE,...")
-        self._add_form_row(form, "覆盖KV (--override-kv):", self.adv_override_kv)
-
-        self.adv_direct_io = QCheckBox()
-        self._add_form_row(form, "直接IO (--direct-io):", self.adv_direct_io)
-
-        self.adv_numa = QComboBox()
-        self.adv_numa.addItems(["disable", "distribute", "isolate", "numactl"])
-        self._add_form_row(form, "NUMA (--numa):", self.adv_numa)
-
-        self.adv_warmup = QCheckBox()
-        self.adv_warmup.setChecked(True)
-        self._add_form_row(form, "预热 (--warmup):", self.adv_warmup)
-
-        self.adv_perf = QCheckBox()
-        self._add_form_row(form, "性能统计 (--perf):", self.adv_perf)
-
-        self.adv_cpu_moe = QCheckBox()
-        self._add_form_row(form, "CPU MoE (--cpu-moe):", self.adv_cpu_moe)
-
-        self.adv_op_offload = QCheckBox()
-        self.adv_op_offload.setChecked(True)
-        self._add_form_row(form, "算子卸载 (--op-offload):", self.adv_op_offload)
-
-        draft_section_lbl = QLabel(f"<b>{t('--- 草稿模型 (投机解码) ---')}</b>")
-        self._section_labels.append(("--- 草稿模型 (投机解码) ---", draft_section_lbl))
-        form.addRow(draft_section_lbl)
-
-        draft_model_row, self.adv_draft_model = self._make_file_row("file", "GGUF Files (*.gguf)")
-        self._add_form_row(form, "草稿模型 (--model-draft):", draft_model_row)
-
-        self.adv_threads_draft = QSpinBox()
-        self.adv_threads_draft.setRange(-1, 256)
-        self.adv_threads_draft.setValue(-1)
-        self._add_form_row(form, "草稿线程 (--threads-draft):", self.adv_threads_draft)
-
-        self.adv_threads_batch_draft = QSpinBox()
-        self.adv_threads_batch_draft.setRange(-1, 256)
-        self.adv_threads_batch_draft.setValue(-1)
-        self._add_form_row(form, "草稿批处理线程 (--threads-batch-draft):", self.adv_threads_batch_draft)
-
-        self.adv_device_draft = QLineEdit()
-        self._add_form_row(form, "草稿设备 (--device-draft):", self.adv_device_draft)
-
-        self.adv_n_gpu_layers_draft = QComboBox()
-        self.adv_n_gpu_layers_draft.addItems(["auto", "all"])
-        self.adv_n_gpu_layers_draft.setEditable(True)
-        self._add_form_row(form, "草稿GPU层数 (--n-gpu-layers-draft):", self.adv_n_gpu_layers_draft)
-
-        self.adv_cpu_moe_draft = QCheckBox()
-        self._add_form_row(form, "草稿CPU MoE (--cpu-moe-draft):", self.adv_cpu_moe_draft)
-
-        self.adv_n_cpu_moe_draft = QSpinBox()
-        self.adv_n_cpu_moe_draft.setRange(0, 999)
-        self._add_form_row(form, "草稿CPU MoE层数 (--n-cpu-moe-draft):", self.adv_n_cpu_moe_draft)
-
-        self.adv_cache_type_k_draft = QComboBox()
-        self.adv_cache_type_k_draft.addItems(CACHE_TYPE_ITEMS)
-        self.adv_cache_type_k_draft.setCurrentText("f16")
-        self._add_form_row(form, "草稿KV K类型 (--spec-draft-type-k):", self.adv_cache_type_k_draft)
-
-        self.adv_cache_type_v_draft = QComboBox()
-        self.adv_cache_type_v_draft.addItems(CACHE_TYPE_ITEMS)
-        self.adv_cache_type_v_draft.setCurrentText("f16")
-        self._add_form_row(form, "草稿KV V类型 (--spec-draft-type-v):", self.adv_cache_type_v_draft)
-
-        self.adv_draft_max = QSpinBox()
-        self.adv_draft_max.setRange(1, 256)
-        self.adv_draft_max.setValue(3)
-        self._add_form_row(form, "草稿Token数 (--spec-draft-n-max):", self.adv_draft_max)
-
-        self.adv_draft_min = QSpinBox()
-        self.adv_draft_min.setRange(0, 256)
-        self._add_form_row(form, "草稿最小Token (--spec-draft-n-min):", self.adv_draft_min)
-
-        self.adv_draft_p_min = QDoubleSpinBox()
-        self.adv_draft_p_min.setRange(0.0, 1.0)
-        self.adv_draft_p_min.setSingleStep(0.05)
-        self.adv_draft_p_min.setValue(0.0)
-        self._add_form_row(form, "草稿最小概率 (--spec-draft-p-min):", self.adv_draft_p_min)
-
-        self.adv_spec_draft_p_split = QDoubleSpinBox()
-        self.adv_spec_draft_p_split.setRange(0.0, 1.0)
-        self.adv_spec_draft_p_split.setSingleStep(0.05)
-        self.adv_spec_draft_p_split.setValue(0.10)
-        self._add_form_row(form, "投机拆分概率 (--spec-draft-p-split):", self.adv_spec_draft_p_split)
-
-        self.adv_spec_type = QComboBox()
-        self.adv_spec_type.addItems(SPEC_TYPE_ITEMS)
-        self._add_form_row(form, "投机类型 (--spec-type):", self.adv_spec_type)
-
-        self.adv_spec_ngram_n = QSpinBox()
-        self.adv_spec_ngram_n.setRange(1, 128)
-        self.adv_spec_ngram_n.setValue(12)
-        self._add_form_row(form, "Ngram大小N (--spec-ngram-simple-size-n):", self.adv_spec_ngram_n)
-
-        self.adv_spec_ngram_m = QSpinBox()
-        self.adv_spec_ngram_m.setRange(1, 256)
-        self.adv_spec_ngram_m.setValue(48)
-        self._add_form_row(form, "Ngram大小M (--spec-ngram-simple-size-m):", self.adv_spec_ngram_m)
-
-        self.adv_spec_ngram_min_hits = QSpinBox()
-        self.adv_spec_ngram_min_hits.setRange(1, 256)
-        self._add_form_row(form, "Ngram最小命中 (--spec-ngram-simple-min-hits):", self.adv_spec_ngram_min_hits)
-
-        self.adv_spec_draft_hf = QLineEdit()
-        self.adv_spec_draft_hf.setPlaceholderText("<user>/<model>[:quant]")
-        self._add_form_row(form, "草稿HF仓库 (--spec-draft-hf):", self.adv_spec_draft_hf)
-
-        self.adv_spec_draft_cpu_mask = QLineEdit()
-        self._add_form_row(form, "草稿CPU掩码 (--spec-draft-cpu-mask):", self.adv_spec_draft_cpu_mask)
-
-        self.adv_spec_draft_cpu_range = QLineEdit()
-        self.adv_spec_draft_cpu_range.setPlaceholderText("lo-hi")
-        self._add_form_row(form, "草稿CPU范围 (--spec-draft-cpu-range):", self.adv_spec_draft_cpu_range)
-
-        self.adv_spec_draft_cpu_strict = QSpinBox()
-        self.adv_spec_draft_cpu_strict.setRange(0, 1)
-        self._add_form_row(form, "草稿严格CPU (--spec-draft-cpu-strict):", self.adv_spec_draft_cpu_strict)
-
-        self.adv_spec_draft_prio = QComboBox()
-        self.adv_spec_draft_prio.addItems(DRAFT_PRIO_ITEMS)
-        self.adv_spec_draft_prio.setCurrentText("normal")
-        self._add_form_row(form, "草稿优先级 (--spec-draft-prio):", self.adv_spec_draft_prio)
-
-        self.adv_spec_draft_poll = QSpinBox()
-        self.adv_spec_draft_poll.setRange(0, 100)
-        self.adv_spec_draft_poll.setValue(50)
-        self._add_form_row(form, "草稿轮询 (--spec-draft-poll):", self.adv_spec_draft_poll)
-
-        self.adv_spec_draft_cpu_mask_batch = QLineEdit()
-        self._add_form_row(form, "草稿批CPU掩码 (--spec-draft-cpu-mask-batch):", self.adv_spec_draft_cpu_mask_batch)
-
-        self.adv_spec_draft_cpu_strict_batch = QSpinBox()
-        self.adv_spec_draft_cpu_strict_batch.setRange(0, 1)
-        self._add_form_row(form, "草稿批严格CPU (--spec-draft-cpu-strict-batch):", self.adv_spec_draft_cpu_strict_batch)
-
-        self.adv_spec_draft_prio_batch = QComboBox()
-        self.adv_spec_draft_prio_batch.addItems(DRAFT_PRIO_ITEMS)
-        self.adv_spec_draft_prio_batch.setCurrentText("normal")
-        self._add_form_row(form, "草稿批优先级 (--spec-draft-prio-batch):", self.adv_spec_draft_prio_batch)
-
-        self.adv_spec_draft_poll_batch = QSpinBox()
-        self.adv_spec_draft_poll_batch.setRange(0, 100)
-        self.adv_spec_draft_poll_batch.setValue(50)
-        self._add_form_row(form, "草稿批轮询 (--spec-draft-poll-batch):", self.adv_spec_draft_poll_batch)
-
-        self.adv_spec_draft_backend_sampling = QCheckBox()
-        self.adv_spec_draft_backend_sampling.setChecked(True)
-        self._add_form_row(form, "草稿后端采样 (--spec-draft-backend-sampling):", self.adv_spec_draft_backend_sampling)
-
-        self.adv_override_tensor_draft = QLineEdit()
-        self.adv_override_tensor_draft.setPlaceholderText("tensor_name=type,...")
-        self._add_form_row(form, "草稿张量覆盖 (--spec-draft-override-tensor):", self.adv_override_tensor_draft)
-
-        lookup_s_row, self.adv_lookup_static = self._make_file_row("file", "All Files (*)")
-        self._add_form_row(form, "静态查找缓存 (--lookup-cache-static):", lookup_s_row)
-
-        lookup_d_row, self.adv_lookup_dynamic = self._make_file_row("file", "All Files (*)")
-        self._add_form_row(form, "动态查找缓存 (--lookup-cache-dynamic):", lookup_d_row)
-
-        self.adv_spec_ngram_mod_n_min = QSpinBox()
-        self.adv_spec_ngram_mod_n_min.setRange(0, 1024)
-        self.adv_spec_ngram_mod_n_min.setValue(48)
-        self._add_form_row(form, "Ngram-mod最小N (--spec-ngram-mod-n-min):", self.adv_spec_ngram_mod_n_min)
-
-        self.adv_spec_ngram_mod_n_max = QSpinBox()
-        self.adv_spec_ngram_mod_n_max.setRange(0, 1024)
-        self.adv_spec_ngram_mod_n_max.setValue(64)
-        self._add_form_row(form, "Ngram-mod最大N (--spec-ngram-mod-n-max):", self.adv_spec_ngram_mod_n_max)
-
-        self.adv_spec_ngram_mod_n_match = QSpinBox()
-        self.adv_spec_ngram_mod_n_match.setRange(0, 1024)
-        self.adv_spec_ngram_mod_n_match.setValue(24)
-        self._add_form_row(form, "Ngram-mod匹配长度 (--spec-ngram-mod-n-match):", self.adv_spec_ngram_mod_n_match)
-
-        self.adv_spec_ngram_mapk_n = QSpinBox()
-        self.adv_spec_ngram_mapk_n.setRange(1, 128)
-        self.adv_spec_ngram_mapk_n.setValue(12)
-        self._add_form_row(form, "Ngram-map-k大小N (--spec-ngram-map-k-size-n):", self.adv_spec_ngram_mapk_n)
-
-        self.adv_spec_ngram_mapk_m = QSpinBox()
-        self.adv_spec_ngram_mapk_m.setRange(1, 256)
-        self.adv_spec_ngram_mapk_m.setValue(48)
-        self._add_form_row(form, "Ngram-map-k大小M (--spec-ngram-map-k-size-m):", self.adv_spec_ngram_mapk_m)
-
-        self.adv_spec_ngram_mapk_min_hits = QSpinBox()
-        self.adv_spec_ngram_mapk_min_hits.setRange(1, 256)
-        self.adv_spec_ngram_mapk_min_hits.setValue(1)
-        self._add_form_row(form, "Ngram-map-k最小命中 (--spec-ngram-map-k-min-hits):", self.adv_spec_ngram_mapk_min_hits)
-
-        self.adv_spec_ngram_mapk4v_n = QSpinBox()
-        self.adv_spec_ngram_mapk4v_n.setRange(1, 128)
-        self.adv_spec_ngram_mapk4v_n.setValue(12)
-        self._add_form_row(form, "Ngram-map-k4v大小N (--spec-ngram-map-k4v-size-n):", self.adv_spec_ngram_mapk4v_n)
-
-        self.adv_spec_ngram_mapk4v_m = QSpinBox()
-        self.adv_spec_ngram_mapk4v_m.setRange(1, 256)
-        self.adv_spec_ngram_mapk4v_m.setValue(48)
-        self._add_form_row(form, "Ngram-map-k4v大小M (--spec-ngram-map-k4v-size-m):", self.adv_spec_ngram_mapk4v_m)
-
-        self.adv_spec_ngram_mapk4v_min_hits = QSpinBox()
-        self.adv_spec_ngram_mapk4v_min_hits.setRange(1, 256)
-        self.adv_spec_ngram_mapk4v_min_hits.setValue(1)
-        self._add_form_row(form, "Ngram-map-k4v最小命中 (--spec-ngram-map-k4v-min-hits):", self.adv_spec_ngram_mapk4v_min_hits)
-
-        scroll.setWidget(content)
-        tab_layout = QVBoxLayout(tab)
-        tab_layout.addWidget(scroll)
-        return tab
-
-    def _create_server_tab(self):
-        tab = QWidget()
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        content = QWidget()
-        form = QFormLayout(content)
-        form.setSpacing(8)
-
-        self.adv_host = QLineEdit()
-        self.adv_host.setText(DEFAULT_HOST)
-        self._add_form_row(form, "主机 (--host):", self.adv_host)
-
-        self.adv_port = QSpinBox()
-        self.adv_port.setRange(1, 65535)
-        self.adv_port.setValue(DEFAULT_PORT)
-        self._add_form_row(form, "端口 (--port):", self.adv_port)
-
-        self.adv_reuse_port = QCheckBox()
-        self._add_form_row(form, "复用端口 (--reuse-port):", self.adv_reuse_port)
-
-        self.adv_api_key = QLineEdit()
-        self.adv_api_key.setEchoMode(QLineEdit.EchoMode.Password)
-        self._add_form_row(form, "API密钥 (--api-key):", self.adv_api_key)
-
-        self.adv_api_prefix = QLineEdit()
-        self._add_form_row(form, "API前缀 (--api-prefix):", self.adv_api_prefix)
-
-        self.adv_path = QLineEdit()
-        self._add_form_row(form, "API路径 (--path):", self.adv_path)
-
-        self.adv_webui = QCheckBox()
-        self.adv_webui.setChecked(True)
-        self._add_form_row(form, "WebUI (--webui):", self.adv_webui)
-
-        webui_cfg_row, self.adv_webui_cfg = self._make_file_row("file", "JSON Files (*.json)")
-        self._add_form_row(form, "WebUI配置 (--webui-config-file):", webui_cfg_row)
-
-        self.adv_webui_mcp = QCheckBox()
-        self._add_form_row(form, "WebUI MCP代理 (--webui-mcp-proxy):", self.adv_webui_mcp)
-
-        self.adv_tools_list = QListWidget()
-        self.adv_tools_list.setMaximumHeight(80)
-        for tool in ["read_file", "file_glob_search", "grep_search", "exec_shell_command", "write_file", "edit_file", "get_datetime", "get_info"]:
-            item = QListWidgetItem(tool)
-            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
-            item.setCheckState(Qt.CheckState.Unchecked)
-            self.adv_tools_list.addItem(item)
-        self._add_form_row(form, "工具 (--tools):", self.adv_tools_list)
-
-        self.adv_cont_batching = QCheckBox()
-        self.adv_cont_batching.setChecked(True)
-        self._add_form_row(form, "连续批处理 (--cont-batching):", self.adv_cont_batching)
-
-        self.adv_parallel = QSpinBox()
-        self.adv_parallel.setRange(-1, 64)
-        self.adv_parallel.setValue(-1)
-        self._add_form_row(form, "并行槽位 (--parallel):", self.adv_parallel)
-
-        self.adv_timeout = QSpinBox()
-        self.adv_timeout.setRange(1, 99999)
-        self.adv_timeout.setValue(3600)
-        self._add_form_row(form, "超时秒数 (--timeout):", self.adv_timeout)
-
-        self.adv_slot_sim = QDoubleSpinBox()
-        self.adv_slot_sim.setRange(0, 1.0)
-        self.adv_slot_sim.setSingleStep(0.05)
-        self.adv_slot_sim.setValue(0.1)
-        self._add_form_row(form, "槽位提示相似度 (--slot-prompt-similarity):", self.adv_slot_sim)
-
-        self.adv_slots = QCheckBox()
-        self.adv_slots.setChecked(True)
-        self._add_form_row(form, "槽位API (--slots):", self.adv_slots)
-
-        self.adv_metrics = QCheckBox()
-        self._add_form_row(form, "Prometheus指标 (--metrics):", self.adv_metrics)
-
-        self.adv_props = QCheckBox()
-        self._add_form_row(form, "属性端点 (--props):", self.adv_props)
-
-        ssl_key_row, self.adv_ssl_key = self._make_file_row("file", "PEM Files (*.pem *.key)")
-        self._add_form_row(form, "SSL密钥 (--ssl-key-file):", ssl_key_row)
-
-        ssl_cert_row, self.adv_ssl_cert = self._make_file_row("file", "PEM Files (*.pem *.crt)")
-        self._add_form_row(form, "SSL证书 (--ssl-cert-file):", ssl_cert_row)
-
-        api_key_file_row, self.adv_api_key_file = self._make_file_row("file", "All Files (*)")
-        self._add_form_row(form, "API密钥文件 (--api-key-file):", api_key_file_row)
-
-        self.adv_webui_config = QLineEdit()
-        self.adv_webui_config.setPlaceholderText(t("JSON格式的WebUI配置"))
-        self._add_form_row(form, "WebUI配置JSON (--webui-config):", self.adv_webui_config)
-
-        self.adv_sse_ping = QSpinBox()
-        self.adv_sse_ping.setRange(0, 99999)
-        self.adv_sse_ping.setValue(30)
-        self.adv_sse_ping.setToolTip(t("-1 = 禁用"))
-        self._add_form_row(form, "SSE心跳间隔 (--sse-ping-interval):", self.adv_sse_ping)
-
-        self.adv_cors_origins = QLineEdit()
-        self.adv_cors_origins.setText("*")
-        self._add_form_row(form, "CORS来源 (--cors-origins):", self.adv_cors_origins)
-
-        self.adv_cors_methods = QLineEdit()
-        self.adv_cors_methods.setText("GET, POST, DELETE, OPTIONS")
-        self._add_form_row(form, "CORS方法 (--cors-methods):", self.adv_cors_methods)
-
-        self.adv_cors_headers = QLineEdit()
-        self.adv_cors_headers.setText("*")
-        self._add_form_row(form, "CORS头 (--cors-headers):", self.adv_cors_headers)
-
-        self.adv_cors_credentials = QCheckBox()
-        self.adv_cors_credentials.setChecked(True)
-        self._add_form_row(form, "CORS凭据 (--cors-credentials):", self.adv_cors_credentials)
-
-        models_dir_row, self.adv_models_dir = self._make_file_row("dir")
-        self._add_form_row(form, "模型目录 (--models-dir):", models_dir_row)
-
-        models_preset_row, self.adv_models_preset = self._make_file_row("file", "INI Files (*.ini)")
-        self._add_form_row(form, "模型预设 (--models-preset):", models_preset_row)
-
-        self.adv_tools_runtime = QLineEdit()
-        self.adv_tools_runtime.setPlaceholderText("docker:<image>, podman:<image>, ssh:<target>")
-        self._add_form_row(form, "工具运行时 (--tools-runtime):", self.adv_tools_runtime)
-
-        mcp_cfg_row, self.adv_mcp_servers_config = self._make_file_row("file", "JSON Files (*.json)")
-        self._add_form_row(form, "MCP服务器配置 (--mcp-servers-config):", mcp_cfg_row)
-
-        self.adv_mcp_servers_json = QLineEdit()
-        self.adv_mcp_servers_json.setPlaceholderText('{"servers": {...}}')
-        self._add_form_row(form, "MCP服务器JSON (--mcp-servers-json):", self.adv_mcp_servers_json)
-
-        self.adv_agent = QCheckBox()
-        self._add_form_row(form, "Agent模式 (--agent):", self.adv_agent)
-
-        self.adv_slot_save_path = QLineEdit()
-        self.adv_slot_save_path.setPlaceholderText(t("槽位KV缓存保存路径"))
-        slot_save_row = QWidget()
-        slot_save_lay = QHBoxLayout(slot_save_row)
-        slot_save_lay.setContentsMargins(0, 0, 0, 0)
-        slot_save_btn = QPushButton(t("浏览"))
-        slot_save_btn.setFixedWidth(80)
-        self._browse_btns.append(slot_save_btn)
-        slot_save_btn.clicked.connect(lambda: self._browse_to_edit(self.adv_slot_save_path, mode="dir", title=t("选择目录")))
-        slot_save_lay.addWidget(self.adv_slot_save_path, 1)
-        slot_save_lay.addWidget(slot_save_btn)
-        self._add_form_row(form, "槽位保存路径 (--slot-save-path):", slot_save_row)
-
-        self.adv_media_path = QLineEdit()
-        self.adv_media_path.setPlaceholderText(t("本地媒体文件目录"))
-        media_row = QWidget()
-        media_lay = QHBoxLayout(media_row)
-        media_lay.setContentsMargins(0, 0, 0, 0)
-        media_btn = QPushButton(t("浏览"))
-        media_btn.setFixedWidth(80)
-        self._browse_btns.append(media_btn)
-        media_btn.clicked.connect(lambda: self._browse_to_edit(self.adv_media_path, mode="dir", title=t("选择目录")))
-        media_lay.addWidget(self.adv_media_path, 1)
-        media_lay.addWidget(media_btn)
-        self._add_form_row(form, "媒体路径 (--media-path):", media_row)
-
-        self.adv_lora_init_without_apply = QCheckBox()
-        self._add_form_row(form, "LoRA延迟应用 (--lora-init-without-apply):", self.adv_lora_init_without_apply)
-
-        self.adv_models_max = QSpinBox()
-        self.adv_models_max.setRange(0, 64)
-        self.adv_models_max.setValue(4)
-        self._add_form_row(form, "最大模型数 (--models-max):", self.adv_models_max)
-
-        self.adv_models_autoload = QCheckBox()
-        self.adv_models_autoload.setChecked(True)
-        self._add_form_row(form, "自动加载模型 (--models-autoload):", self.adv_models_autoload)
-
-        self.adv_sleep_idle = QSpinBox()
-        self.adv_sleep_idle.setRange(-1, 99999)
-        self.adv_sleep_idle.setValue(-1)
-        self._add_form_row(form, "空闲休眠秒 (--sleep-idle-seconds):", self.adv_sleep_idle)
-
-        scroll.setWidget(content)
-        tab_layout = QVBoxLayout(tab)
-        tab_layout.addWidget(scroll)
-        return tab
-
-    def _create_chat_tab(self):
-        tab = QWidget()
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        content = QWidget()
-        form = QFormLayout(content)
-        form.setSpacing(8)
-
-        self.adv_jinja = QCheckBox()
-        self.adv_jinja.setChecked(True)
-        self._add_form_row(form, "Jinja模板 (--jinja):", self.adv_jinja)
-
-        self.adv_chat_template = QComboBox()
-        self.adv_chat_template.addItems([""] + self._chat_templates)
-        self.adv_chat_template.setEditable(True)
-        self._add_form_row(form, "聊天模板 (--chat-template):", self.adv_chat_template)
-
-        chat_file_row, self.adv_chat_template_file = self._make_file_row("file", "Jinja Files (*.jinja *.j2)")
-        self._add_form_row(form, "模板文件 (--chat-template-file):", chat_file_row)
-
-        kwargs_row, self.adv_chat_kwargs = self._make_text_row('{"key": "value"}')
-        self._add_form_row(form, "模板参数 (--chat-template-kwargs):", kwargs_row)
-
-        self.adv_skip_chat = QCheckBox()
-        self._add_form_row(form, "跳过聊天解析 (--skip-chat-parsing):", self.adv_skip_chat)
-
-        self.adv_prefill = QCheckBox()
-        self.adv_prefill.setChecked(True)
-        self._add_form_row(form, "预填充助手 (--prefill-assistant):", self.adv_prefill)
-
-        self.adv_reasoning = QComboBox()
-        self.adv_reasoning.addItems(["on", "off", "auto"])
-        self.adv_reasoning.setCurrentText("auto")
-        self._add_form_row(form, "推理模式 (--reasoning):", self.adv_reasoning)
-
-        self.adv_reasoning_fmt = QComboBox()
-        self.adv_reasoning_fmt.addItems(["none", "deepseek", "deepseek-legacy", "auto"])
-        self.adv_reasoning_fmt.setCurrentText("auto")
-        self._add_form_row(form, "推理格式 (--reasoning-format):", self.adv_reasoning_fmt)
-
-        self.adv_reasoning_budget = QSpinBox()
-        self.adv_reasoning_budget.setRange(-1, 99999)
-        self.adv_reasoning_budget.setValue(-1)
-        self._add_form_row(form, "推理预算 (--reasoning-budget):", self.adv_reasoning_budget)
-
-        self.adv_reasoning_budget_msg = QLineEdit()
-        self._add_form_row(form, "推理预算消息 (--reasoning-budget-message):", self.adv_reasoning_budget_msg)
-
-        self.adv_reasoning_preserve = QCheckBox()
-        self._add_form_row(form, "保留推理痕迹 (--reasoning-preserve):", self.adv_reasoning_preserve)
-
-        scroll.setWidget(content)
-        tab_layout = QVBoxLayout(tab)
-        tab_layout.addWidget(scroll)
-        return tab
-
-    def _create_advanced_tab(self):
-        tab = QWidget()
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        content = QWidget()
-        form = QFormLayout(content)
-        form.setSpacing(8)
-
-        self.adv_rope_scaling = QComboBox()
-        self.adv_rope_scaling.addItems(["none", "linear", "yarn"])
-        self._add_form_row(form, "RoPE缩放 (--rope-scaling):", self.adv_rope_scaling)
-
-        self.adv_rope_scale = QDoubleSpinBox()
-        self.adv_rope_scale.setRange(0, 100)
-        self.adv_rope_scale.setSingleStep(0.1)
-        self.adv_rope_scale.setValue(0)
-        self._add_form_row(form, "RoPE缩放因子 (--rope-scale):", self.adv_rope_scale)
-
-        self.adv_rope_freq_base = QDoubleSpinBox()
-        self.adv_rope_freq_base.setRange(0, 999999)
-        self.adv_rope_freq_base.setValue(0)
-        self._add_form_row(form, "RoPE频率基 (--rope-freq-base):", self.adv_rope_freq_base)
-
-        self.adv_rope_freq_scale = QDoubleSpinBox()
-        self.adv_rope_freq_scale.setRange(0, 10)
-        self.adv_rope_freq_scale.setSingleStep(0.1)
-        self.adv_rope_freq_scale.setValue(0)
-        self._add_form_row(form, "RoPE频率缩放 (--rope-freq-scale):", self.adv_rope_freq_scale)
-
-        self.adv_yarn_orig_ctx = QSpinBox()
-        self.adv_yarn_orig_ctx.setRange(0, 999999)
-        self.adv_yarn_orig_ctx.setValue(0)
-        self._add_form_row(form, "YaRN原始上下文 (--yarn-orig-ctx):", self.adv_yarn_orig_ctx)
-
-        self.adv_yarn_ext = QDoubleSpinBox()
-        self.adv_yarn_ext.setRange(-1.0, 1.0)
-        self.adv_yarn_ext.setSingleStep(0.1)
-        self.adv_yarn_ext.setValue(-1.0)
-        self._add_form_row(form, "YaRN扩展因子 (--yarn-ext-factor):", self.adv_yarn_ext)
-
-        self.adv_yarn_attn = QDoubleSpinBox()
-        self.adv_yarn_attn.setRange(-1.0, 2.0)
-        self.adv_yarn_attn.setSingleStep(0.1)
-        self.adv_yarn_attn.setValue(-1.0)
-        self._add_form_row(form, "YaRN注意力因子 (--yarn-attn-factor):", self.adv_yarn_attn)
-
-        self.adv_yarn_beta_slow = QDoubleSpinBox()
-        self.adv_yarn_beta_slow.setRange(-1.0, 2.0)
-        self.adv_yarn_beta_slow.setSingleStep(0.1)
-        self.adv_yarn_beta_slow.setValue(-1.0)
-        self._add_form_row(form, "YaRN Beta慢 (--yarn-beta-slow):", self.adv_yarn_beta_slow)
-
-        self.adv_yarn_beta_fast = QDoubleSpinBox()
-        self.adv_yarn_beta_fast.setRange(-1.0, 2.0)
-        self.adv_yarn_beta_fast.setSingleStep(0.1)
-        self.adv_yarn_beta_fast.setValue(-1.0)
-        self._add_form_row(form, "YaRN Beta快 (--yarn-beta-fast):", self.adv_yarn_beta_fast)
-
-        self.adv_embedding = QCheckBox()
-        self._add_form_row(form, "嵌入模式 (--embedding):", self.adv_embedding)
-
-        self.adv_rerank = QCheckBox()
-        self._add_form_row(form, "重排模式 (--rerank):", self.adv_rerank)
-
-        self.adv_pooling = QComboBox()
-        self.adv_pooling.addItems(["none", "mean", "cls", "last", "rank"])
-        self._add_form_row(form, "池化类型 (--pooling):", self.adv_pooling)
-
-        self.adv_embd_normalize = QSpinBox()
-        self.adv_embd_normalize.setRange(-1, 10)
-        self.adv_embd_normalize.setValue(2)
-        self._add_form_row(form, "嵌入归一化 (--embd-normalize):", self.adv_embd_normalize)
-
-        self.adv_verbose = QCheckBox()
-        self._add_form_row(form, "详细输出 (--verbose):", self.adv_verbose)
-
-        self.adv_log_verbosity = QComboBox()
-        self.adv_log_verbosity.addItems(["0 (generic)", "1 (error)", "2 (warning)", "3 (info)", "4 (trace)", "5 (debug)"])
-        self.adv_log_verbosity.setCurrentIndex(3)
-        self._add_form_row(form, "日志详细度 (--log-verbosity):", self.adv_log_verbosity)
-
-        self.adv_log_colors = QComboBox()
-        self.adv_log_colors.addItems(["on", "off", "auto"])
-        self.adv_log_colors.setCurrentText("auto")
-        self._add_form_row(form, "日志颜色 (--log-colors):", self.adv_log_colors)
-
-        log_file_row, self.adv_log_file = self._make_file_row("file", "Text Files (*.txt *.log)")
-        self._add_form_row(form, "日志文件 (--log-file):", log_file_row)
-
-        self.adv_log_disable = QCheckBox()
-        self._add_form_row(form, "禁用日志 (--log-disable):", self.adv_log_disable)
-
-        log_prompts_dir_row, self.adv_log_prompts_dir = self._make_file_row("dir")
-        self._add_form_row(form, "提示词日志目录 (--log-prompts-dir):", log_prompts_dir_row)
-
-        self.adv_log_prefix = QCheckBox()
-        self._add_form_row(form, "日志前缀 (--log-prefix):", self.adv_log_prefix)
-
-        self.adv_log_timestamps = QCheckBox()
-        self._add_form_row(form, "日志时间戳 (--log-timestamps):", self.adv_log_timestamps)
-
-        self.adv_offline = QCheckBox()
-        self._add_form_row(form, "离线模式 (--offline):", self.adv_offline)
-
-        self.adv_special = QCheckBox()
-        self._add_form_row(form, "特殊Token (--special):", self.adv_special)
-
-        self.adv_reverse_prompt = QLineEdit()
-        self._add_form_row(form, "反向提示词 (--reverse-prompt):", self.adv_reverse_prompt)
-
-        self.adv_spm_infill = QCheckBox()
-        self._add_form_row(form, "SPM填充 (--spm-infill):", self.adv_spm_infill)
-
-        extra_row, self.adv_extra_args = self._make_text_row(t("额外参数，每行一个"))
-        self._add_form_row(form, "额外参数:", extra_row)
-
-        scroll.setWidget(content)
-        tab_layout = QVBoxLayout(tab)
-        tab_layout.addWidget(scroll)
-        return tab
+    def _read_param(self, p):
+        w = getattr(self, p.wattr)
+        kind = p.widget
+        if kind == "list":
+            return [w.item(i).text() for i in range(w.count())]
+        if kind == "checklist":
+            return [w.item(i).text() for i in range(w.count())
+                    if w.item(i).checkState() == Qt.CheckState.Checked]
+        if kind == "combo_index":
+            return w.currentIndex()
+        if kind == "mtext":
+            return w.toPlainText()
+        if kind == "text" and p.value == "join":
+            return [s.strip() for s in w.text().split(",") if s.strip()]
+        if kind == "spin" or kind == "dspin":
+            return w.value()
+        if kind == "check":
+            return w.isChecked()
+        # text / file / password / dir / dir_text / combo / combo_edit
+        return w.currentText() if kind in ("combo", "combo_edit") else w.text()
+
+    def _write_param(self, p, val):
+        w = getattr(self, p.wattr)
+        kind = p.widget
+        if kind == "list":
+            w.clear()
+            for item in val:
+                w.addItem(item)
+        elif kind == "checklist":
+            for i in range(w.count()):
+                item = w.item(i)
+                item.setCheckState(
+                    Qt.CheckState.Checked if item.text() in val else Qt.CheckState.Unchecked)
+        elif kind == "combo_index":
+            w.setCurrentIndex(val)
+        elif kind == "mtext":
+            w.setPlainText(val)
+        elif kind == "text" and p.value == "join":
+            w.setText(", ".join(str(x) for x in val))
+        elif kind == "check":
+            w.setChecked(val)
+        elif kind in ("spin", "dspin"):
+            w.setValue(val)
+        elif kind == "combo":
+            w.setCurrentText(val)
+        elif kind == "combo_edit":
+            if p.value == "ngl":
+                # Composite: editable combo + helper spinbox. The combo is
+                # the source of truth (get_values reads currentText).
+                val = str(val)
+                idx = w.findText(val)
+                self.adv_ngl_spin.blockSignals(True)
+                if idx >= 0:
+                    w.setCurrentIndex(idx)
+                else:
+                    w.setEditText(val)
+                try:
+                    self.adv_ngl_spin.setValue(int(val))
+                except (ValueError, TypeError):
+                    self.adv_ngl_spin.setValue(0)
+                self.adv_ngl_spin.blockSignals(False)
+            elif p.value in ("ngl_edit", "combo_edit"):
+                val = str(val)
+                idx = w.findText(val)
+                if idx >= 0:
+                    w.setCurrentIndex(idx)
+                else:
+                    w.setEditText(val)
+            else:
+                w.setCurrentText(val)
+        else:  # text / file / password / dir / dir_text
+            # fit_target may hold a float default; the line edit needs a str.
+            if p.key == "fit_target":
+                w.setText(str(val))
+            else:
+                w.setText(val)
 
     def get_values(self):
-        v = {}
-        v["model"] = self.adv_model.text()
-        v["mmproj"] = self.adv_mmproj.text()
-        v["lora"] = [self.adv_lora_list.item(i).text() for i in range(self.adv_lora_list.count())]
-        v["lora_scaled"] = [s.strip() for s in self.adv_lora_scaled.text().split(",") if s.strip()]
-        v["control_vector"] = [self.adv_cv_list.item(i).text() for i in range(self.adv_cv_list.count())]
-        v["control_vector_scaled"] = [s.strip() for s in self.adv_cv_scaled.text().split(",") if s.strip()]
-        v["control_vector_layer_range"] = self.adv_cv_layer_range.text()
-        v["mmproj_auto"] = self.adv_mmproj_auto.isChecked()
-        v["mmproj_offload"] = self.adv_mmproj_offload.isChecked()
-        v["hf_repo"] = self.adv_hf_repo.text()
-        v["hf_file"] = self.adv_hf_file.text()
-        v["hf_token"] = self.adv_hf_token.text()
-        v["model_url"] = self.adv_model_url.text()
-        v["docker_repo"] = self.adv_docker_repo.text()
-        v["mmproj_url"] = self.adv_mmproj_url.text()
-        v["image_min_tokens"] = self.adv_image_min_tokens.value()
-        v["image_max_tokens"] = self.adv_image_max_tokens.value()
-        v["mtmd_batch_max_tokens"] = self.adv_mtmd_batch_tokens.value()
-        v["alias"] = self.adv_alias.text()
-        v["tags"] = self.adv_tags.text()
-        v["ctx_size"] = self.adv_ctx_size.value()
-        v["batch_size"] = self.adv_batch_size.value()
-        v["ubatch_size"] = self.adv_ubatch_size.value()
-        v["n_predict"] = self.adv_n_predict.value()
-        v["keep"] = self.adv_keep.value()
-        v["cache_prompt"] = self.adv_cache_prompt.isChecked()
-        v["cache_reuse"] = self.adv_cache_reuse.value()
-        v["cache_ram"] = self.adv_cache_ram.value()
-        v["context_shift"] = self.adv_context_shift.isChecked()
-        v["kv_offload"] = self.adv_kv_offload.isChecked()
-        v["kv_unified"] = self.adv_kv_unified.isChecked()
-        v["cache_type_k"] = self.adv_cache_type_k.currentText()
-        v["cache_type_v"] = self.adv_cache_type_v.currentText()
-        v["swa_full"] = self.adv_swa_full.isChecked()
-        v["escape"] = self.adv_escape.isChecked()
-        v["defrag_thold"] = self.adv_defrag_thold.value()
-        v["cache_idle_slots"] = self.adv_cache_idle_slots.isChecked()
-        v["ctx_checkpoints"] = self.adv_ctx_checkpoints.value()
-        v["checkpoint_min_step"] = self.adv_checkpoint_min_step.value()
-        v["temp"] = self.adv_temp.value()
-        v["top_k"] = self.adv_top_k.value()
-        v["top_p"] = self.adv_top_p.value()
-        v["min_p"] = self.adv_min_p.value()
-        v["typical_p"] = self.adv_typical_p.value()
-        v["top_n_sigma"] = self.adv_top_n_sigma.value()
-        v["xtc_probability"] = self.adv_xtc_prob.value()
-        v["xtc_threshold"] = self.adv_xtc_thresh.value()
-        v["repeat_penalty"] = self.adv_repeat_penalty.value()
-        v["presence_penalty"] = self.adv_presence_penalty.value()
-        v["frequency_penalty"] = self.adv_freq_penalty.value()
-        v["dry_multiplier"] = self.adv_dry_mult.value()
-        v["dry_base"] = self.adv_dry_base.value()
-        v["dry_allowed_length"] = self.adv_dry_len.value()
-        v["dry_penalty_last_n"] = self.adv_dry_penalty_last_n.value()
-        v["dry_sequence_breaker"] = self.adv_dry_seq_breaker.text()
-        v["adaptive_target"] = self.adv_adaptive_target.value()
-        v["adaptive_decay"] = self.adv_adaptive_decay.value()
-        v["repeat_last_n"] = self.adv_repeat_last_n.value()
-        v["seed"] = self.adv_seed.value()
-        v["mirostat"] = self.adv_mirostat.currentIndex()
-        v["mirostat_lr"] = self.adv_mirostat_lr.value()
-        v["mirostat_ent"] = self.adv_mirostat_ent.value()
-        v["dynatemp_range"] = self.adv_dynatemp_range.value()
-        v["dynatemp_exp"] = self.adv_dynatemp_exp.value()
-        v["grammar"] = self.adv_grammar.text()
-        v["json_schema"] = self.adv_json_schema.toPlainText()
-        v["ignore_eos"] = self.adv_ignore_eos.isChecked()
-        v["backend_sampling"] = self.adv_backend_sampling.isChecked()
-        v["samplers"] = self.adv_samplers.text()
-        v["sampler_seq"] = self.adv_sampler_seq.text()
-        v["logit_bias"] = self.adv_logit_bias.text()
-        v["grammar_file"] = self.adv_grammar_file.text()
-        v["json_schema_file"] = self.adv_json_schema_file.text()
-        v["n_gpu_layers"] = self.adv_ngl.currentText()
-        v["device"] = self.adv_device.text()
-        v["load_mode"] = self.adv_load_mode.currentText()
-        v["split_mode"] = self.adv_split_mode.currentText()
-        v["tensor_split"] = self.adv_tensor_split.text()
-        v["main_gpu"] = self.adv_main_gpu.value()
-        v["threads"] = self.adv_threads.value()
-        v["threads_batch"] = self.adv_threads_batch.value()
-        v["threads_http"] = self.adv_threads_http.value()
-        v["cpu_mask"] = self.adv_cpu_mask.text()
-        v["cpu_range"] = self.adv_cpu_range.text()
-        v["cpu_strict"] = self.adv_cpu_strict.value()
-        v["cpu_mask_batch"] = self.adv_cpu_mask_batch.text()
-        v["cpu_range_batch"] = self.adv_cpu_range_batch.text()
-        v["cpu_strict_batch"] = self.adv_cpu_strict_batch.value()
-        v["poll"] = self.adv_poll.value()
-        v["poll_batch"] = self.adv_poll_batch.value()
-        v["prio"] = self.adv_prio.currentText()
-        v["rpc"] = self.adv_rpc.text()
-        v["flash_attn"] = self.adv_flash_attn.currentText()
-        v["mmap"] = self.adv_mmap.isChecked()
-        v["mlock"] = self.adv_mlock.isChecked()
-        v["no_host"] = self.adv_no_host.isChecked()
-        v["repack"] = self.adv_repack.isChecked()
-        v["fit"] = self.adv_fit.currentText()
-        v["fit_target"] = self.adv_fit_target.text()
-        v["fit_ctx"] = self.adv_fit_ctx.value()
-        v["check_tensors"] = self.adv_check_tensors.isChecked()
-        v["n_cpu_moe"] = self.adv_n_cpu_moe.value()
-        v["override_tensor"] = self.adv_override_tensor.text()
-        v["override_kv"] = self.adv_override_kv.text()
-        v["direct_io"] = self.adv_direct_io.isChecked()
-        v["draft_model"] = self.adv_draft_model.text()
-        v["spec_draft_hf"] = self.adv_spec_draft_hf.text()
-        v["threads_draft"] = self.adv_threads_draft.value()
-        v["threads_batch_draft"] = self.adv_threads_batch_draft.value()
-        v["spec_draft_cpu_mask"] = self.adv_spec_draft_cpu_mask.text()
-        v["spec_draft_cpu_range"] = self.adv_spec_draft_cpu_range.text()
-        v["spec_draft_cpu_strict"] = self.adv_spec_draft_cpu_strict.value()
-        v["spec_draft_prio"] = self.adv_spec_draft_prio.currentText()
-        v["spec_draft_poll"] = self.adv_spec_draft_poll.value()
-        v["spec_draft_cpu_mask_batch"] = self.adv_spec_draft_cpu_mask_batch.text()
-        v["spec_draft_cpu_strict_batch"] = self.adv_spec_draft_cpu_strict_batch.value()
-        v["spec_draft_prio_batch"] = self.adv_spec_draft_prio_batch.currentText()
-        v["spec_draft_poll_batch"] = self.adv_spec_draft_poll_batch.value()
-        v["device_draft"] = self.adv_device_draft.text()
-        v["n_gpu_layers_draft"] = self.adv_n_gpu_layers_draft.currentText()
-        v["cpu_moe_draft"] = self.adv_cpu_moe_draft.isChecked()
-        v["n_cpu_moe_draft"] = self.adv_n_cpu_moe_draft.value()
-        v["cache_type_k_draft"] = self.adv_cache_type_k_draft.currentText()
-        v["cache_type_v_draft"] = self.adv_cache_type_v_draft.currentText()
-        v["draft_max"] = self.adv_draft_max.value()
-        v["draft_min"] = self.adv_draft_min.value()
-        v["draft_p_min"] = self.adv_draft_p_min.value()
-        v["spec_draft_p_split"] = self.adv_spec_draft_p_split.value()
-        v["spec_type"] = self.adv_spec_type.currentText()
-        v["spec_ngram_size_n"] = self.adv_spec_ngram_n.value()
-        v["spec_ngram_size_m"] = self.adv_spec_ngram_m.value()
-        v["spec_ngram_min_hits"] = self.adv_spec_ngram_min_hits.value()
-        v["spec_draft_backend_sampling"] = self.adv_spec_draft_backend_sampling.isChecked()
-        v["override_tensor_draft"] = self.adv_override_tensor_draft.text()
-        v["lookup_cache_static"] = self.adv_lookup_static.text()
-        v["lookup_cache_dynamic"] = self.adv_lookup_dynamic.text()
-        v["spec_ngram_mod_n_min"] = self.adv_spec_ngram_mod_n_min.value()
-        v["spec_ngram_mod_n_max"] = self.adv_spec_ngram_mod_n_max.value()
-        v["spec_ngram_mod_n_match"] = self.adv_spec_ngram_mod_n_match.value()
-        v["spec_ngram_map_k_size_n"] = self.adv_spec_ngram_mapk_n.value()
-        v["spec_ngram_map_k_size_m"] = self.adv_spec_ngram_mapk_m.value()
-        v["spec_ngram_map_k_min_hits"] = self.adv_spec_ngram_mapk_min_hits.value()
-        v["spec_ngram_map_k4v_size_n"] = self.adv_spec_ngram_mapk4v_n.value()
-        v["spec_ngram_map_k4v_size_m"] = self.adv_spec_ngram_mapk4v_m.value()
-        v["spec_ngram_map_k4v_min_hits"] = self.adv_spec_ngram_mapk4v_min_hits.value()
-        v["numa"] = self.adv_numa.currentText()
-        v["warmup"] = self.adv_warmup.isChecked()
-        v["perf"] = self.adv_perf.isChecked()
-        v["host"] = self.adv_host.text()
-        v["port"] = self.adv_port.value()
-        v["reuse_port"] = self.adv_reuse_port.isChecked()
-        v["api_key"] = self.adv_api_key.text()
-        v["api_prefix"] = self.adv_api_prefix.text()
-        v["path"] = self.adv_path.text()
-        v["webui"] = self.adv_webui.isChecked()
-        v["webui_config_file"] = self.adv_webui_cfg.text()
-        v["webui_mcp_proxy"] = self.adv_webui_mcp.isChecked()
-        v["tools"] = [self.adv_tools_list.item(i).text() for i in range(self.adv_tools_list.count()) if self.adv_tools_list.item(i).checkState() == Qt.CheckState.Checked]
-        v["cont_batching"] = self.adv_cont_batching.isChecked()
-        v["parallel"] = self.adv_parallel.value()
-        v["timeout"] = self.adv_timeout.value()
-        v["slot_prompt_similarity"] = self.adv_slot_sim.value()
-        v["slots"] = self.adv_slots.isChecked()
-        v["metrics"] = self.adv_metrics.isChecked()
-        v["props"] = self.adv_props.isChecked()
-        v["ssl_key_file"] = self.adv_ssl_key.text()
-        v["ssl_cert_file"] = self.adv_ssl_cert.text()
-        v["api_key_file"] = self.adv_api_key_file.text()
-        v["webui_config"] = self.adv_webui_config.text()
-        v["sse_ping_interval"] = self.adv_sse_ping.value()
-        v["cors_origins"] = self.adv_cors_origins.text()
-        v["cors_methods"] = self.adv_cors_methods.text()
-        v["cors_headers"] = self.adv_cors_headers.text()
-        v["cors_credentials"] = self.adv_cors_credentials.isChecked()
-        v["models_dir"] = self.adv_models_dir.text()
-        v["models_preset"] = self.adv_models_preset.text()
-        v["tools_runtime"] = self.adv_tools_runtime.text()
-        v["mcp_servers_config"] = self.adv_mcp_servers_config.text()
-        v["mcp_servers_json"] = self.adv_mcp_servers_json.text()
-        v["agent"] = self.adv_agent.isChecked()
-        v["slot_save_path"] = self.adv_slot_save_path.text()
-        v["media_path"] = self.adv_media_path.text()
-        v["lora_init_without_apply"] = self.adv_lora_init_without_apply.isChecked()
-        v["models_max"] = self.adv_models_max.value()
-        v["models_autoload"] = self.adv_models_autoload.isChecked()
-        v["sleep_idle_seconds"] = self.adv_sleep_idle.value()
-        v["jinja"] = self.adv_jinja.isChecked()
-        v["chat_template"] = self.adv_chat_template.currentText()
-        v["chat_template_file"] = self.adv_chat_template_file.text()
-        v["chat_template_kwargs"] = self.adv_chat_kwargs.toPlainText()
-        v["skip_chat_parsing"] = self.adv_skip_chat.isChecked()
-        v["prefill_assistant"] = self.adv_prefill.isChecked()
-        v["reasoning"] = self.adv_reasoning.currentText()
-        v["reasoning_format"] = self.adv_reasoning_fmt.currentText()
-        v["reasoning_budget"] = self.adv_reasoning_budget.value()
-        v["reasoning_budget_message"] = self.adv_reasoning_budget_msg.text()
-        v["reasoning_preserve"] = self.adv_reasoning_preserve.isChecked()
-        v["special"] = self.adv_special.isChecked()
-        v["reverse_prompt"] = self.adv_reverse_prompt.text()
-        v["spm_infill"] = self.adv_spm_infill.isChecked()
-        v["rope_scaling"] = self.adv_rope_scaling.currentText()
-        v["rope_scale"] = self.adv_rope_scale.value()
-        v["rope_freq_base"] = self.adv_rope_freq_base.value()
-        v["rope_freq_scale"] = self.adv_rope_freq_scale.value()
-        v["yarn_orig_ctx"] = self.adv_yarn_orig_ctx.value()
-        v["yarn_ext_factor"] = self.adv_yarn_ext.value()
-        v["yarn_attn_factor"] = self.adv_yarn_attn.value()
-        v["yarn_beta_slow"] = self.adv_yarn_beta_slow.value()
-        v["yarn_beta_fast"] = self.adv_yarn_beta_fast.value()
-        v["embedding"] = self.adv_embedding.isChecked()
-        v["rerank"] = self.adv_rerank.isChecked()
-        v["pooling"] = self.adv_pooling.currentText()
-        v["embd_normalize"] = self.adv_embd_normalize.value()
-        v["cpu_moe"] = self.adv_cpu_moe.isChecked()
-        v["op_offload"] = self.adv_op_offload.isChecked()
-        v["verbose"] = self.adv_verbose.isChecked()
-        v["log_verbosity"] = self.adv_log_verbosity.currentIndex()
-        v["log_colors"] = self.adv_log_colors.currentText()
-        v["log_file"] = self.adv_log_file.text()
-        v["log_disable"] = self.adv_log_disable.isChecked()
-        v["log_prompts_dir"] = self.adv_log_prompts_dir.text()
-        v["log_prefix"] = self.adv_log_prefix.isChecked()
-        v["log_timestamps"] = self.adv_log_timestamps.isChecked()
-        v["offline"] = self.adv_offline.isChecked()
-        v["extra_args"] = self.adv_extra_args.toPlainText()
-        return v
+        return {p.key: self._read_param(p) for p in UI_PARAMS
+                if p.wattr is not None}
 
     def set_values(self, values):
         values = dict(values)
@@ -1483,486 +389,34 @@ class AdvancedPanel(QWidget):
                     logger.warning("忽略无效的预设值: %s=%r", key, values[key])
 
     def _set_values_impl(self, values):
-        values = dict(values)
-        if "model" in values:
-            self.adv_model.setText(values["model"])
-        if "mmproj" in values:
-            self.adv_mmproj.setText(values["mmproj"])
-        if "lora" in values:
-            self.adv_lora_list.clear()
-            for item in values["lora"]:
-                self.adv_lora_list.addItem(item)
-        if "lora_scaled" in values:
-            self.adv_lora_scaled.setText(", ".join(str(x) for x in values["lora_scaled"]))
-        if "control_vector" in values:
-            self.adv_cv_list.clear()
-            for item in values["control_vector"]:
-                self.adv_cv_list.addItem(item)
-        if "control_vector_scaled" in values:
-            self.adv_cv_scaled.setText(", ".join(str(x) for x in values["control_vector_scaled"]))
-        if "control_vector_layer_range" in values:
-            self.adv_cv_layer_range.setText(values["control_vector_layer_range"])
-        if "mmproj_auto" in values:
-            self.adv_mmproj_auto.setChecked(values["mmproj_auto"])
-        if "mmproj_offload" in values:
-            self.adv_mmproj_offload.setChecked(values["mmproj_offload"])
-        if "hf_repo" in values:
-            self.adv_hf_repo.setText(values["hf_repo"])
-        if "hf_file" in values:
-            self.adv_hf_file.setText(values["hf_file"])
-        if "hf_token" in values:
-            self.adv_hf_token.setText(values["hf_token"])
-        if "model_url" in values:
-            self.adv_model_url.setText(values["model_url"])
-        if "docker_repo" in values:
-            self.adv_docker_repo.setText(values["docker_repo"])
-        if "mmproj_url" in values:
-            self.adv_mmproj_url.setText(values["mmproj_url"])
-        if "image_min_tokens" in values:
-            self.adv_image_min_tokens.setValue(values["image_min_tokens"])
-        if "image_max_tokens" in values:
-            self.adv_image_max_tokens.setValue(values["image_max_tokens"])
-        if "mtmd_batch_max_tokens" in values:
-            self.adv_mtmd_batch_tokens.setValue(values["mtmd_batch_max_tokens"])
-        if "alias" in values:
-            self.adv_alias.setText(values["alias"])
-        if "tags" in values:
-            self.adv_tags.setText(values["tags"])
-        if "ctx_size" in values:
-            self.adv_ctx_size.setValue(values["ctx_size"])
-        if "batch_size" in values:
-            self.adv_batch_size.setValue(values["batch_size"])
-        if "ubatch_size" in values:
-            self.adv_ubatch_size.setValue(values["ubatch_size"])
-        if "n_predict" in values:
-            self.adv_n_predict.setValue(values["n_predict"])
-        if "keep" in values:
-            self.adv_keep.setValue(values["keep"])
-        if "cache_prompt" in values:
-            self.adv_cache_prompt.setChecked(values["cache_prompt"])
-        if "cache_reuse" in values:
-            self.adv_cache_reuse.setValue(values["cache_reuse"])
-        if "cache_ram" in values:
-            self.adv_cache_ram.setValue(values["cache_ram"])
-        if "context_shift" in values:
-            self.adv_context_shift.setChecked(values["context_shift"])
-        if "kv_offload" in values:
-            self.adv_kv_offload.setChecked(values["kv_offload"])
-        if "kv_unified" in values:
-            self.adv_kv_unified.setChecked(values["kv_unified"])
-        if "cache_type_k" in values:
-            self.adv_cache_type_k.setCurrentText(values["cache_type_k"])
-        if "cache_type_v" in values:
-            self.adv_cache_type_v.setCurrentText(values["cache_type_v"])
-        if "swa_full" in values:
-            self.adv_swa_full.setChecked(values["swa_full"])
-        if "escape" in values:
-            self.adv_escape.setChecked(values["escape"])
-        if "defrag_thold" in values:
-            self.adv_defrag_thold.setValue(values["defrag_thold"])
-        if "cache_idle_slots" in values:
-            self.adv_cache_idle_slots.setChecked(values["cache_idle_slots"])
-        if "ctx_checkpoints" in values:
-            self.adv_ctx_checkpoints.setValue(values["ctx_checkpoints"])
-        if "checkpoint_min_step" in values:
-            self.adv_checkpoint_min_step.setValue(values["checkpoint_min_step"])
-        if "temp" in values:
-            self.adv_temp.setValue(values["temp"])
-        if "top_k" in values:
-            self.adv_top_k.setValue(values["top_k"])
-        if "top_p" in values:
-            self.adv_top_p.setValue(values["top_p"])
-        if "min_p" in values:
-            self.adv_min_p.setValue(values["min_p"])
-        if "typical_p" in values:
-            self.adv_typical_p.setValue(values["typical_p"])
-        if "top_n_sigma" in values:
-            self.adv_top_n_sigma.setValue(values["top_n_sigma"])
-        if "xtc_probability" in values:
-            self.adv_xtc_prob.setValue(values["xtc_probability"])
-        if "xtc_threshold" in values:
-            self.adv_xtc_thresh.setValue(values["xtc_threshold"])
-        if "repeat_penalty" in values:
-            self.adv_repeat_penalty.setValue(values["repeat_penalty"])
-        if "presence_penalty" in values:
-            self.adv_presence_penalty.setValue(values["presence_penalty"])
-        if "frequency_penalty" in values:
-            self.adv_freq_penalty.setValue(values["frequency_penalty"])
-        if "dry_multiplier" in values:
-            self.adv_dry_mult.setValue(values["dry_multiplier"])
-        if "dry_base" in values:
-            self.adv_dry_base.setValue(values["dry_base"])
-        if "dry_allowed_length" in values:
-            self.adv_dry_len.setValue(values["dry_allowed_length"])
-        if "dry_penalty_last_n" in values:
-            self.adv_dry_penalty_last_n.setValue(values["dry_penalty_last_n"])
-        if "dry_sequence_breaker" in values:
-            self.adv_dry_seq_breaker.setText(values["dry_sequence_breaker"])
-        if "adaptive_target" in values:
-            self.adv_adaptive_target.setValue(values["adaptive_target"])
-        if "adaptive_decay" in values:
-            self.adv_adaptive_decay.setValue(values["adaptive_decay"])
-        if "repeat_last_n" in values:
-            self.adv_repeat_last_n.setValue(values["repeat_last_n"])
-        if "seed" in values:
-            self.adv_seed.setValue(values["seed"])
-        if "mirostat" in values:
-            self.adv_mirostat.setCurrentIndex(values["mirostat"])
-        if "mirostat_lr" in values:
-            self.adv_mirostat_lr.setValue(values["mirostat_lr"])
-        if "mirostat_ent" in values:
-            self.adv_mirostat_ent.setValue(values["mirostat_ent"])
-        if "dynatemp_range" in values:
-            self.adv_dynatemp_range.setValue(values["dynatemp_range"])
-        if "dynatemp_exp" in values:
-            self.adv_dynatemp_exp.setValue(values["dynatemp_exp"])
-        if "grammar" in values:
-            self.adv_grammar.setText(values["grammar"])
-        if "json_schema" in values:
-            self.adv_json_schema.setPlainText(values["json_schema"])
-        if "ignore_eos" in values:
-            self.adv_ignore_eos.setChecked(values["ignore_eos"])
-        if "backend_sampling" in values:
-            self.adv_backend_sampling.setChecked(values["backend_sampling"])
-        if "samplers" in values:
-            self.adv_samplers.setText(values["samplers"])
-        if "sampler_seq" in values:
-            self.adv_sampler_seq.setText(values["sampler_seq"])
-        if "logit_bias" in values:
-            self.adv_logit_bias.setText(values["logit_bias"])
-        if "grammar_file" in values:
-            self.adv_grammar_file.setText(values["grammar_file"])
-        if "json_schema_file" in values:
-            self.adv_json_schema_file.setText(values["json_schema_file"])
-        if "n_gpu_layers" in values:
-            val = str(values["n_gpu_layers"])
-            idx = self.adv_ngl.findText(val)
-            self.adv_ngl_spin.blockSignals(True)
-            if idx >= 0:
-                self.adv_ngl.setCurrentIndex(idx)
-            else:
-                self.adv_ngl.setEditText(val)
-            try:
-                self.adv_ngl_spin.setValue(int(val))
-            except (ValueError, TypeError):
-                self.adv_ngl_spin.setValue(0)
-            self.adv_ngl_spin.blockSignals(False)
-        if "device" in values:
-            self.adv_device.setText(values["device"])
-        if "load_mode" in values:
-            self.adv_load_mode.setCurrentText(values["load_mode"])
-        if "split_mode" in values:
-            self.adv_split_mode.setCurrentText(values["split_mode"])
-        if "tensor_split" in values:
-            self.adv_tensor_split.setText(values["tensor_split"])
-        if "main_gpu" in values:
-            self.adv_main_gpu.setValue(values["main_gpu"])
-        if "threads" in values:
-            self.adv_threads.setValue(values["threads"])
-        if "threads_batch" in values:
-            self.adv_threads_batch.setValue(values["threads_batch"])
-        if "threads_http" in values:
-            self.adv_threads_http.setValue(values["threads_http"])
-        if "cpu_mask" in values:
-            self.adv_cpu_mask.setText(values["cpu_mask"])
-        if "cpu_range" in values:
-            self.adv_cpu_range.setText(values["cpu_range"])
-        if "cpu_strict" in values:
-            self.adv_cpu_strict.setValue(values["cpu_strict"])
-        if "cpu_mask_batch" in values:
-            self.adv_cpu_mask_batch.setText(values["cpu_mask_batch"])
-        if "cpu_range_batch" in values:
-            self.adv_cpu_range_batch.setText(values["cpu_range_batch"])
-        if "cpu_strict_batch" in values:
-            self.adv_cpu_strict_batch.setValue(values["cpu_strict_batch"])
-        if "poll" in values:
-            self.adv_poll.setValue(values["poll"])
-        if "poll_batch" in values:
-            self.adv_poll_batch.setValue(values["poll_batch"])
-        if "prio" in values:
-            self.adv_prio.setCurrentText(values["prio"])
-        if "rpc" in values:
-            self.adv_rpc.setText(values["rpc"])
-        if "flash_attn" in values:
-            self.adv_flash_attn.setCurrentText(values["flash_attn"])
-        if "mmap" in values:
-            self.adv_mmap.setChecked(values["mmap"])
-        if "mlock" in values:
-            self.adv_mlock.setChecked(values["mlock"])
-        if "no_host" in values:
-            self.adv_no_host.setChecked(values["no_host"])
-        if "repack" in values:
-            self.adv_repack.setChecked(values["repack"])
-        if "fit" in values:
-            self.adv_fit.setCurrentText(values["fit"])
-        if "fit_target" in values:
-            self.adv_fit_target.setText(str(values["fit_target"]))
-        if "fit_ctx" in values:
-            self.adv_fit_ctx.setValue(values["fit_ctx"])
-        if "check_tensors" in values:
-            self.adv_check_tensors.setChecked(values["check_tensors"])
-        if "n_cpu_moe" in values:
-            self.adv_n_cpu_moe.setValue(values["n_cpu_moe"])
-        if "override_tensor" in values:
-            self.adv_override_tensor.setText(values["override_tensor"])
-        if "override_kv" in values:
-            self.adv_override_kv.setText(values["override_kv"])
-        if "direct_io" in values:
-            self.adv_direct_io.setChecked(values["direct_io"])
-        if "draft_model" in values:
-            self.adv_draft_model.setText(values["draft_model"])
-        if "spec_draft_hf" in values:
-            self.adv_spec_draft_hf.setText(values["spec_draft_hf"])
-        if "threads_draft" in values:
-            self.adv_threads_draft.setValue(values["threads_draft"])
-        if "threads_batch_draft" in values:
-            self.adv_threads_batch_draft.setValue(values["threads_batch_draft"])
-        if "spec_draft_cpu_mask" in values:
-            self.adv_spec_draft_cpu_mask.setText(values["spec_draft_cpu_mask"])
-        if "spec_draft_cpu_range" in values:
-            self.adv_spec_draft_cpu_range.setText(values["spec_draft_cpu_range"])
-        if "spec_draft_cpu_strict" in values:
-            self.adv_spec_draft_cpu_strict.setValue(values["spec_draft_cpu_strict"])
-        if "spec_draft_prio" in values:
-            self.adv_spec_draft_prio.setCurrentText(values["spec_draft_prio"])
-        if "spec_draft_poll" in values:
-            self.adv_spec_draft_poll.setValue(values["spec_draft_poll"])
-        if "spec_draft_cpu_mask_batch" in values:
-            self.adv_spec_draft_cpu_mask_batch.setText(values["spec_draft_cpu_mask_batch"])
-        if "spec_draft_cpu_strict_batch" in values:
-            self.adv_spec_draft_cpu_strict_batch.setValue(values["spec_draft_cpu_strict_batch"])
-        if "spec_draft_prio_batch" in values:
-            self.adv_spec_draft_prio_batch.setCurrentText(values["spec_draft_prio_batch"])
-        if "spec_draft_poll_batch" in values:
-            self.adv_spec_draft_poll_batch.setValue(values["spec_draft_poll_batch"])
-        if "device_draft" in values:
-            self.adv_device_draft.setText(values["device_draft"])
-        if "n_gpu_layers_draft" in values:
-            val = str(values["n_gpu_layers_draft"])
-            idx = self.adv_n_gpu_layers_draft.findText(val)
-            if idx >= 0:
-                self.adv_n_gpu_layers_draft.setCurrentIndex(idx)
-            else:
-                self.adv_n_gpu_layers_draft.setEditText(val)
-        if "cpu_moe_draft" in values:
-            self.adv_cpu_moe_draft.setChecked(values["cpu_moe_draft"])
-        if "n_cpu_moe_draft" in values:
-            self.adv_n_cpu_moe_draft.setValue(values["n_cpu_moe_draft"])
-        if "cache_type_k_draft" in values:
-            self.adv_cache_type_k_draft.setCurrentText(values["cache_type_k_draft"])
-        if "cache_type_v_draft" in values:
-            self.adv_cache_type_v_draft.setCurrentText(values["cache_type_v_draft"])
-        if "draft_max" in values:
-            self.adv_draft_max.setValue(values["draft_max"])
-        if "draft_min" in values:
-            self.adv_draft_min.setValue(values["draft_min"])
-        if "draft_p_min" in values:
-            self.adv_draft_p_min.setValue(values["draft_p_min"])
-        if "spec_draft_p_split" in values:
-            self.adv_spec_draft_p_split.setValue(values["spec_draft_p_split"])
-        if "spec_type" in values:
-            self.adv_spec_type.setCurrentText(values["spec_type"])
-        if "spec_ngram_size_n" in values:
-            self.adv_spec_ngram_n.setValue(values["spec_ngram_size_n"])
-        if "spec_ngram_size_m" in values:
-            self.adv_spec_ngram_m.setValue(values["spec_ngram_size_m"])
-        if "spec_ngram_min_hits" in values:
-            self.adv_spec_ngram_min_hits.setValue(values["spec_ngram_min_hits"])
-        if "spec_draft_backend_sampling" in values:
-            self.adv_spec_draft_backend_sampling.setChecked(values["spec_draft_backend_sampling"])
-        if "override_tensor_draft" in values:
-            self.adv_override_tensor_draft.setText(values["override_tensor_draft"])
-        if "lookup_cache_static" in values:
-            self.adv_lookup_static.setText(values["lookup_cache_static"])
-        if "lookup_cache_dynamic" in values:
-            self.adv_lookup_dynamic.setText(values["lookup_cache_dynamic"])
-        if "spec_ngram_mod_n_min" in values:
-            self.adv_spec_ngram_mod_n_min.setValue(values["spec_ngram_mod_n_min"])
-        if "spec_ngram_mod_n_max" in values:
-            self.adv_spec_ngram_mod_n_max.setValue(values["spec_ngram_mod_n_max"])
-        if "spec_ngram_mod_n_match" in values:
-            self.adv_spec_ngram_mod_n_match.setValue(values["spec_ngram_mod_n_match"])
-        if "spec_ngram_map_k_size_n" in values:
-            self.adv_spec_ngram_mapk_n.setValue(values["spec_ngram_map_k_size_n"])
-        if "spec_ngram_map_k_size_m" in values:
-            self.adv_spec_ngram_mapk_m.setValue(values["spec_ngram_map_k_size_m"])
-        if "spec_ngram_map_k_min_hits" in values:
-            self.adv_spec_ngram_mapk_min_hits.setValue(values["spec_ngram_map_k_min_hits"])
-        if "spec_ngram_map_k4v_size_n" in values:
-            self.adv_spec_ngram_mapk4v_n.setValue(values["spec_ngram_map_k4v_size_n"])
-        if "spec_ngram_map_k4v_size_m" in values:
-            self.adv_spec_ngram_mapk4v_m.setValue(values["spec_ngram_map_k4v_size_m"])
-        if "spec_ngram_map_k4v_min_hits" in values:
-            self.adv_spec_ngram_mapk4v_min_hits.setValue(values["spec_ngram_map_k4v_min_hits"])
-        if "numa" in values:
-            self.adv_numa.setCurrentText(values["numa"])
-        if "warmup" in values:
-            self.adv_warmup.setChecked(values["warmup"])
-        if "perf" in values:
-            self.adv_perf.setChecked(values["perf"])
-        if "host" in values:
-            self.adv_host.setText(values["host"])
-        if "port" in values:
-            self.adv_port.setValue(values["port"])
-        if "reuse_port" in values:
-            self.adv_reuse_port.setChecked(values["reuse_port"])
-        if "api_key" in values:
-            self.adv_api_key.setText(values["api_key"])
-        if "api_prefix" in values:
-            self.adv_api_prefix.setText(values["api_prefix"])
-        if "path" in values:
-            self.adv_path.setText(values["path"])
-        if "webui" in values:
-            self.adv_webui.setChecked(values["webui"])
-        if "webui_config_file" in values:
-            self.adv_webui_cfg.setText(values["webui_config_file"])
-        if "webui_mcp_proxy" in values:
-            self.adv_webui_mcp.setChecked(values["webui_mcp_proxy"])
-        if "tools" in values:
-            for i in range(self.adv_tools_list.count()):
-                item = self.adv_tools_list.item(i)
-                item.setCheckState(Qt.CheckState.Checked if item.text() in values["tools"] else Qt.CheckState.Unchecked)
-        if "cont_batching" in values:
-            self.adv_cont_batching.setChecked(values["cont_batching"])
-        if "parallel" in values:
-            self.adv_parallel.setValue(values["parallel"])
-        if "timeout" in values:
-            self.adv_timeout.setValue(values["timeout"])
-        if "slot_prompt_similarity" in values:
-            self.adv_slot_sim.setValue(values["slot_prompt_similarity"])
-        if "slots" in values:
-            self.adv_slots.setChecked(values["slots"])
-        if "metrics" in values:
-            self.adv_metrics.setChecked(values["metrics"])
-        if "props" in values:
-            self.adv_props.setChecked(values["props"])
-        if "ssl_key_file" in values:
-            self.adv_ssl_key.setText(values["ssl_key_file"])
-        if "ssl_cert_file" in values:
-            self.adv_ssl_cert.setText(values["ssl_cert_file"])
-        if "api_key_file" in values:
-            self.adv_api_key_file.setText(values["api_key_file"])
-        if "webui_config" in values:
-            self.adv_webui_config.setText(values["webui_config"])
-        if "sse_ping_interval" in values:
-            self.adv_sse_ping.setValue(values["sse_ping_interval"])
-        if "cors_origins" in values:
-            self.adv_cors_origins.setText(values["cors_origins"])
-        if "cors_methods" in values:
-            self.adv_cors_methods.setText(values["cors_methods"])
-        if "cors_headers" in values:
-            self.adv_cors_headers.setText(values["cors_headers"])
-        if "cors_credentials" in values:
-            self.adv_cors_credentials.setChecked(values["cors_credentials"])
-        if "models_dir" in values:
-            self.adv_models_dir.setText(values["models_dir"])
-        if "models_preset" in values:
-            self.adv_models_preset.setText(values["models_preset"])
-        if "tools_runtime" in values:
-            self.adv_tools_runtime.setText(values["tools_runtime"])
-        if "mcp_servers_config" in values:
-            self.adv_mcp_servers_config.setText(values["mcp_servers_config"])
-        if "mcp_servers_json" in values:
-            self.adv_mcp_servers_json.setText(values["mcp_servers_json"])
-        if "agent" in values:
-            self.adv_agent.setChecked(values["agent"])
-        if "slot_save_path" in values:
-            self.adv_slot_save_path.setText(values["slot_save_path"])
-        if "media_path" in values:
-            self.adv_media_path.setText(values["media_path"])
-        if "lora_init_without_apply" in values:
-            self.adv_lora_init_without_apply.setChecked(values["lora_init_without_apply"])
-        if "models_max" in values:
-            self.adv_models_max.setValue(values["models_max"])
-        if "models_autoload" in values:
-            self.adv_models_autoload.setChecked(values["models_autoload"])
-        if "sleep_idle_seconds" in values:
-            self.adv_sleep_idle.setValue(values["sleep_idle_seconds"])
-        if "jinja" in values:
-            self.adv_jinja.setChecked(values["jinja"])
-        if "chat_template" in values:
-            idx = self.adv_chat_template.findText(values["chat_template"])
-            if idx >= 0:
-                self.adv_chat_template.setCurrentIndex(idx)
-            else:
-                self.adv_chat_template.setEditText(values["chat_template"])
-        if "chat_template_file" in values:
-            self.adv_chat_template_file.setText(values["chat_template_file"])
-        if "chat_template_kwargs" in values:
-            self.adv_chat_kwargs.setPlainText(values["chat_template_kwargs"])
-        if "skip_chat_parsing" in values:
-            self.adv_skip_chat.setChecked(values["skip_chat_parsing"])
-        if "prefill_assistant" in values:
-            self.adv_prefill.setChecked(values["prefill_assistant"])
-        if "reasoning" in values:
-            self.adv_reasoning.setCurrentText(values["reasoning"])
-        if "reasoning_format" in values:
-            self.adv_reasoning_fmt.setCurrentText(values["reasoning_format"])
-        if "reasoning_budget" in values:
-            self.adv_reasoning_budget.setValue(values["reasoning_budget"])
-        if "reasoning_budget_message" in values:
-            self.adv_reasoning_budget_msg.setText(values["reasoning_budget_message"])
-        if "reasoning_preserve" in values:
-            self.adv_reasoning_preserve.setChecked(values["reasoning_preserve"])
-        if "special" in values:
-            self.adv_special.setChecked(values["special"])
-        if "reverse_prompt" in values:
-            self.adv_reverse_prompt.setText(values["reverse_prompt"])
-        if "spm_infill" in values:
-            self.adv_spm_infill.setChecked(values["spm_infill"])
-        if "rope_scaling" in values:
-            self.adv_rope_scaling.setCurrentText(values["rope_scaling"])
-        if "rope_scale" in values:
-            self.adv_rope_scale.setValue(values["rope_scale"])
-        if "rope_freq_base" in values:
-            self.adv_rope_freq_base.setValue(values["rope_freq_base"])
-        if "rope_freq_scale" in values:
-            self.adv_rope_freq_scale.setValue(values["rope_freq_scale"])
-        if "yarn_orig_ctx" in values:
-            self.adv_yarn_orig_ctx.setValue(values["yarn_orig_ctx"])
-        if "yarn_ext_factor" in values:
-            self.adv_yarn_ext.setValue(values["yarn_ext_factor"])
-        if "yarn_attn_factor" in values:
-            self.adv_yarn_attn.setValue(values["yarn_attn_factor"])
-        if "yarn_beta_slow" in values:
-            self.adv_yarn_beta_slow.setValue(values["yarn_beta_slow"])
-        if "yarn_beta_fast" in values:
-            self.adv_yarn_beta_fast.setValue(values["yarn_beta_fast"])
-        if "embedding" in values:
-            self.adv_embedding.setChecked(values["embedding"])
-        if "rerank" in values:
-            self.adv_rerank.setChecked(values["rerank"])
-        if "pooling" in values:
-            self.adv_pooling.setCurrentText(values["pooling"])
-        if "embd_normalize" in values:
-            self.adv_embd_normalize.setValue(values["embd_normalize"])
-        if "cpu_moe" in values:
-            self.adv_cpu_moe.setChecked(values["cpu_moe"])
-        if "op_offload" in values:
-            self.adv_op_offload.setChecked(values["op_offload"])
-        if "verbose" in values:
-            self.adv_verbose.setChecked(values["verbose"])
-        if "log_verbosity" in values:
-            self.adv_log_verbosity.setCurrentIndex(values["log_verbosity"])
-        if "log_colors" in values:
-            self.adv_log_colors.setCurrentText(values["log_colors"])
-        if "log_file" in values:
-            self.adv_log_file.setText(values["log_file"])
-        if "log_disable" in values:
-            self.adv_log_disable.setChecked(values["log_disable"])
-        if "log_prompts_dir" in values:
-            self.adv_log_prompts_dir.setText(values["log_prompts_dir"])
-        if "log_prefix" in values:
-            self.adv_log_prefix.setChecked(values["log_prefix"])
-        if "log_timestamps" in values:
-            self.adv_log_timestamps.setChecked(values["log_timestamps"])
-        if "offline" in values:
-            self.adv_offline.setChecked(values["offline"])
-        if "extra_args" in values:
-            self.adv_extra_args.setPlainText(values["extra_args"])
+        for key, val in values.items():
+            p = PARAMS_BY_KEY.get(key)
+            if p is None or p.wattr is None:
+                continue  # unknown key or schema-only param (prio_batch)
+            self._write_param(p, val)
 
-    def reset(self):
-        self.set_values(dict(self._defaults))
+    def set_gpu_info(self, devices):
+        """E8: render detected GPU devices (or CPU-only) in the GPU/perf tab."""
+        self._gpu_devices = list(devices or [])
+        self._render_gpu_info()
+
+    def _render_gpu_info(self):
+        label = getattr(self, "gpu_info_label", None)
+        if label is None:
+            return
+        devs = getattr(self, "_gpu_devices", None)
+        if devs is None:
+            return  # probe not finished yet
+        if not devs:
+            label.setText(t("仅 CPU（未检测到 GPU 设备）"))
+            label.setToolTip(t("未检测到 GPU 设备"))
+        else:
+            parts = [f"{d['name']} ({round(d['total_mib'] / 1024)}GB)" for d in devs]
+            label.setText(t("检测到 {n}× GPU: {names}", n=len(devs), names=" + ".join(parts)))
+            label.setToolTip("\n".join(
+                f"{d['index']}: {d['name']} (total {d['total_mib']:,} MiB, "
+                f"free {d['free_mib']:,} MiB)" for d in devs))
+        label.setVisible(True)
 
     def retranslate_ui(self):
         # Tab titles
@@ -1982,22 +436,23 @@ class AdvancedPanel(QWidget):
         for key, lbl in self._section_labels:
             lbl.setText(f"<b>{t(key)}</b>")
 
-        # Mirostat combo
-        idx = self.adv_mirostat.currentIndex()
-        self.adv_mirostat.clear()
-        self.adv_mirostat.addItems([t("禁用") + " (0)", "Mirostat (1)", "Mirostat 2.0 (2)"])
-        self.adv_mirostat.setCurrentIndex(idx)
+        # Combo item lists with translatable text (mirostat)
+        for p in UI_PARAMS:
+            if (p.widget in ("combo", "combo_index") and p.items
+                    and any(self._CJK_RE.search(i) for i in p.items)):
+                w = getattr(self, p.wattr)
+                idx = w.currentIndex()
+                w.clear()
+                w.addItems(self._t_items(p.items))
+                w.setCurrentIndex(idx)
 
-        # Placeholders
-        self.adv_model.setPlaceholderText(t("选择或输入模型文件路径"))
-        self.adv_mmproj.setPlaceholderText(t("选择或输入视觉投影模型路径"))
-        self.adv_alias.setPlaceholderText(t("模型的自定义名称"))
-        self.adv_tags.setPlaceholderText(t("逗号分隔的标签列表"))
-        self.adv_sampler_seq.setPlaceholderText(t("简化采样器序列"))
-        self.adv_webui_config.setPlaceholderText(t("JSON格式的WebUI配置"))
-        self.adv_slot_save_path.setPlaceholderText(t("槽位KV缓存保存路径"))
-        self.adv_media_path.setPlaceholderText(t("本地媒体文件目录"))
-        self.adv_extra_args.setPlaceholderText(t("额外参数，每行一个"))
+        # Placeholders (schema strings containing CJK are translated;
+        # ASCII-only placeholders pass through unchanged)
+        for p in UI_PARAMS:
+            if p.placeholder and self._CJK_RE.search(p.placeholder):
+                w = getattr(self, p.wattr)
+                w.setPlaceholderText(t(p.placeholder))
+        self._render_gpu_info()
 
         # Buttons
         for btn in self._browse_btns:

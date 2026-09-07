@@ -30,6 +30,10 @@ class BasicPanel(QWidget):
         # construction-time hardcoded values.
         self.set_values(dict(d))
 
+    def set_defaults(self, defaults):
+        """Update the defaults baseline (live-parsed defaults arriving after startup, plan A10)."""
+        self._defaults = dict(defaults)
+
     def _setup_ui(self):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(4, 4, 4, 4)
@@ -53,23 +57,24 @@ class BasicPanel(QWidget):
         self.model_combo = QComboBox()
         self.model_combo.setEditable(True)
         row1.addWidget(self.model_combo)
-        model_browse_btn = QPushButton("...")
-        model_browse_btn.setFixedWidth(36)
-        model_browse_btn.clicked.connect(self._browse_model)
-        row1.addWidget(model_browse_btn)
+        # C4: previously a hardcoded English-only string, now goes through t()
+        self._btn_browse_model = QPushButton(t("..."))
+        self._btn_browse_model.setFixedWidth(36)
+        self._btn_browse_model.clicked.connect(self._browse_model)
+        row1.addWidget(self._btn_browse_model)
         layout.addLayout(row1)
 
         row2 = QHBoxLayout()
-        self._lbl_mmproj = QLabel("mmproj:")
+        self._lbl_mmproj = QLabel(t("mmproj:"))
         self._lbl_mmproj.setFixedWidth(56)
         row2.addWidget(self._lbl_mmproj)
         self.mmproj_combo = QComboBox()
         self.mmproj_combo.setEditable(True)
         row2.addWidget(self.mmproj_combo)
-        mmproj_browse_btn = QPushButton("...")
-        mmproj_browse_btn.setFixedWidth(36)
-        mmproj_browse_btn.clicked.connect(self._browse_mmproj)
-        row2.addWidget(mmproj_browse_btn)
+        self._btn_browse_mmproj = QPushButton(t("..."))
+        self._btn_browse_mmproj.setFixedWidth(36)
+        self._btn_browse_mmproj.clicked.connect(self._browse_mmproj)
+        row2.addWidget(self._btn_browse_mmproj)
         layout.addLayout(row2)
 
         row3 = QHBoxLayout()
@@ -110,6 +115,11 @@ class BasicPanel(QWidget):
             row3.addWidget(btn)
         row3.addStretch()
         layout.addLayout(row3)
+        # E8: detected GPU devices (from the `--list-devices` probe)
+        self.gpu_info_label = QLabel("")
+        self.gpu_info_label.setStyleSheet("color: #6b7280; font-size: 11px;")
+        self.gpu_info_label.setVisible(False)
+        layout.addWidget(self.gpu_info_label)
         return self._model_group
 
     def _create_sampling_group(self):
@@ -133,7 +143,7 @@ class BasicPanel(QWidget):
         layout.addLayout(row1)
 
         row2 = QHBoxLayout()
-        self._lbl_top_p = QLabel("Top-P:")
+        self._lbl_top_p = QLabel(t("Top-P:"))
         row2.addWidget(self._lbl_top_p)
         self.top_p_slider = QSlider(Qt.Orientation.Horizontal)
         self.top_p_slider.setRange(0, 100)
@@ -145,7 +155,7 @@ class BasicPanel(QWidget):
         row2.addWidget(self.top_p_slider)
         row2.addWidget(self.top_p_label)
         row2.addSpacing(12)
-        self._lbl_top_k = QLabel("Top-K:")
+        self._lbl_top_k = QLabel(t("Top-K:"))
         row2.addWidget(self._lbl_top_k)
         self.top_k_spin = QSpinBox()
         self.top_k_spin.setRange(0, 200)
@@ -153,7 +163,7 @@ class BasicPanel(QWidget):
         self.top_k_spin.setFixedWidth(60)
         row2.addWidget(self.top_k_spin)
         row2.addSpacing(12)
-        self._lbl_min_p = QLabel("Min-P:")
+        self._lbl_min_p = QLabel(t("Min-P:"))
         row2.addWidget(self._lbl_min_p)
         self.min_p_slider = QSlider(Qt.Orientation.Horizontal)
         self.min_p_slider.setRange(0, 100)
@@ -207,11 +217,11 @@ class BasicPanel(QWidget):
         self.parallel_spin.setFixedWidth(60)
         layout.addWidget(self.parallel_spin)
         layout.addSpacing(12)
-        self.chk_webui = QCheckBox("WebUI")
+        self.chk_webui = QCheckBox(t("WebUI"))
         self.chk_webui.setChecked(True)
         layout.addWidget(self.chk_webui)
         layout.addSpacing(12)
-        self.chk_verbose = QCheckBox("Verbose")
+        self.chk_verbose = QCheckBox(t("Verbose"))
         self.chk_verbose.setChecked(False)
         layout.addWidget(self.chk_verbose)
         layout.addStretch()
@@ -226,7 +236,8 @@ class BasicPanel(QWidget):
         self.flash_attn_combo.addItems(["auto", "on", "off"])
         self.flash_attn_combo.setCurrentText("auto")
         self.flash_attn_combo.setFixedWidth(78)
-        layout.addWidget(QLabel("FlashAttn:"))
+        self._lbl_flash_attn = QLabel(t("FlashAttn:"))
+        layout.addWidget(self._lbl_flash_attn)
         layout.addWidget(self.flash_attn_combo)
         layout.addSpacing(12)
         self.reasoning_combo = QComboBox()
@@ -290,6 +301,29 @@ class BasicPanel(QWidget):
 
     def _on_repeat_penalty_changed(self, value):
         self.repeat_penalty_label.setText(f"{value / 100:.2f}")
+
+    def set_gpu_info(self, devices):
+        """E8: render detected GPU devices (or CPU-only) next to the ngl control."""
+        self._gpu_devices = list(devices or [])
+        self._render_gpu_info()
+
+    def _render_gpu_info(self):
+        label = getattr(self, "gpu_info_label", None)
+        if label is None:
+            return
+        devs = getattr(self, "_gpu_devices", None)
+        if devs is None:
+            return  # probe not finished yet
+        if not devs:
+            label.setText(t("仅 CPU（未检测到 GPU 设备）"))
+            label.setToolTip(t("未检测到 GPU 设备"))
+        else:
+            parts = [f"{d['name']} ({round(d['total_mib'] / 1024)}GB)" for d in devs]
+            label.setText(t("检测到 {n}× GPU: {names}", n=len(devs), names=" + ".join(parts)))
+            label.setToolTip("\n".join(
+                f"{d['index']}: {d['name']} (total {d['total_mib']:,} MiB, "
+                f"free {d['free_mib']:,} MiB)" for d in devs))
+        label.setVisible(True)
 
     def get_values(self):
         return {
@@ -386,9 +420,6 @@ class BasicPanel(QWidget):
         if "draft_max" in values:
             self.draft_max_spin.setValue(values["draft_max"])
 
-    def reset(self):
-        self.set_values(dict(self._defaults))
-
     def retranslate_ui(self):
         self._model_group.setTitle(t("🧠 模型设置"))
         self._lbl_model.setText(t("模型:"))
@@ -406,6 +437,16 @@ class BasicPanel(QWidget):
         self._lbl_parallel.setText(t("并行:"))
         self._toggles_group.setTitle(t("⚡ 快捷开关"))
         self._lbl_reasoning.setText(t("推理:"))
+        self._lbl_flash_attn.setText(t("FlashAttn:"))
+        self.chk_webui.setText(t("WebUI"))
+        self.chk_verbose.setText(t("Verbose"))
+        self._lbl_mmproj.setText(t("mmproj:"))
+        self._lbl_top_p.setText(t("Top-P:"))
+        self._lbl_top_k.setText(t("Top-K:"))
+        self._lbl_min_p.setText(t("Min-P:"))
+        self._btn_browse_model.setText(t("..."))
+        self._btn_browse_mmproj.setText(t("..."))
         self._lbl_split_mode.setText(t("分割模式:"))
         self._lbl_spec_type.setText(t("投机类型:"))
         self._lbl_draft_max.setText(t("草稿Token:"))
+        self._render_gpu_info()

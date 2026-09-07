@@ -16,3 +16,6 @@ build/
 # Reference docs
 gguf.md
 verbose.txt
+
+# Local agent session data
+.pi/

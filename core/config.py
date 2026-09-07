@@ -20,6 +20,9 @@ def _sanitize_preset_name(name: str) -> str:
 CONFIG_DIR = Path.home() / ".llama-cpp-launcher"
 PRESETS_DIR = CONFIG_DIR / "presets"
 SETTINGS_FILE = CONFIG_DIR / "settings.json"
+# E3: full (un-truncated) log of the most recent server run
+LOGS_DIR = CONFIG_DIR / "logs"
+LAST_RUN_LOG = LOGS_DIR / "last_run.log"
 
 _dirs_initialized = False
 
@@ -73,37 +76,114 @@ def load_language() -> str:
     return _load_settings().get("language", "zh")
 
 
+def save_ui_prefs(prefs: dict):
+    """E2: persist window geometry/mode/tabs/splitter ratio (small JSON-safe dict)."""
+    settings = _load_settings()
+    settings["ui"] = prefs
+    _save_settings(settings)
+
+
+def load_ui_prefs() -> dict:
+    prefs = _load_settings().get("ui")
+    return prefs if isinstance(prefs, dict) else {}
+
+
+# E5: light/dark theme, persisted in settings.json
+
+def load_theme() -> str:
+    return "dark" if _load_settings().get("theme") == "dark" else "light"
+
+
+def save_theme(theme: str):
+    settings = _load_settings()
+    settings["theme"] = "dark" if theme == "dark" else "light"
+    _save_settings(settings)
+
+
+# E1: configurable llama-server path.
+# Resolution order: explicit path in settings.json (if the file still exists)
+# > shutil.which("llama-server") (i.e. PATH, the previous behavior) > bare
+# "llama-server" (last resort, so errors surface the same way as before).
+_server_path_cache = None
+
+
+def load_server_path() -> str:
+    return _load_settings().get("server_path", "") or ""
+
+
+def save_server_path(path: str):
+    global _server_path_cache
+    settings = _load_settings()
+    settings["server_path"] = path
+    _save_settings(settings)
+    _server_path_cache = None  # invalidate so every caller sees the new path
+
+
+def get_server_path() -> str:
+    """Resolve the llama-server executable path (E1), cached.
+
+    Called on the command-preview tick (300ms) and from the startup worker,
+    so the result is cached and only invalidated by save_server_path().
+    """
+    global _server_path_cache
+    if _server_path_cache is not None:
+        return _server_path_cache
+    explicit = load_server_path()
+    if explicit:
+        if Path(explicit).is_file():
+            _server_path_cache = explicit
+            return explicit
+        logger.warning("Configured llama-server path no longer exists: %s — falling back to PATH", explicit)
+    found = shutil.which("llama-server")
+    _server_path_cache = found if found else "llama-server"
+    return _server_path_cache
+
+
 def refresh_defaults(defaults):
     global DEFAULT_PRESET
     DEFAULT_PRESET = defaults
 
 
 class ConfigManager:
+    """Preset JSON IO (plan C3).
+
+    Deliberately stateless about parameter values: MainWindow.params is the
+    single source of truth. Presets are passed in / returned as plain dicts;
+    the only state kept here is the defaults baseline (used to store just the
+    diff on save and to merge against on load).
+    """
+
     def __init__(self, defaults=None):
         self._defaults = defaults or dict(DEFAULT_PRESET)
-        self.current = dict(self._defaults)
 
     @property
     def defaults(self):
         return self._defaults
 
-    def set(self, key, value):
-        self.current[key] = value
+    def set_defaults(self, defaults):
+        """Replace the defaults baseline (live-parsed defaults arriving after startup, plan A10)."""
+        self._defaults = dict(defaults)
 
-    def get(self, key, default=None):
-        return self.current.get(key, default)
-
-    def reset(self):
-        self.current = dict(self._defaults)
-
-    def save_preset(self, name):
+    def save_preset(self, name, params):
+        """Save a params dict as a preset (only the diff vs. defaults is stored)."""
         _ensure_dirs()
         name = _sanitize_preset_name(name)
         path = PRESETS_DIR / f"{name}.json"
+        # E6: overwriting a preset keeps its original creation time
+        created = datetime.now().isoformat()
+        if path.exists():
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    old = json.load(f)
+                if isinstance(old.get("created"), str) and old["created"]:
+                    created = old["created"]
+            except (OSError, IOError, json.JSONDecodeError):
+                pass
         data = {
             "name": name,
-            "created": datetime.now().isoformat(),
-            "params": {k: v for k, v in self.current.items()
+            "version": 1,  # A9: schema version for future preset migrations
+            "created": created,
+            "params": {k: v for k, v in params.items()
                        if v != self._defaults.get(k)},
         }
         try:
@@ -134,10 +214,11 @@ class ConfigManager:
         if "checkpoint_every_n_tokens" in params and "checkpoint_min_step" not in params:
             params["checkpoint_min_step"] = params.pop("checkpoint_every_n_tokens")
         params.pop("ctx_size_draft", None)
+        # C3: return the merged params instead of mutating self.current —
+        # MainWindow.params is the single source of truth
         merged = dict(self._defaults)
         merged.update(params)
-        self.current = merged
-        return True
+        return merged
 
     def delete_preset(self, name):
         name = _sanitize_preset_name(name)
@@ -155,7 +236,16 @@ class ConfigManager:
         presets = []
         for f in PRESETS_DIR.glob("*.json"):
             try:
+                # E6: the JSON's own created field is the source of truth;
+                # mtime is only a fallback for hand-edited/legacy files
                 created = datetime.fromtimestamp(f.stat().st_mtime).isoformat()
+                try:
+                    with open(f, "r", encoding="utf-8") as fh:
+                        data = json.load(fh)
+                    if isinstance(data.get("created"), str) and data["created"]:
+                        created = data["created"]
+                except (OSError, IOError, json.JSONDecodeError):
+                    pass
             except (FileNotFoundError, OSError):
                 continue
             presets.append({

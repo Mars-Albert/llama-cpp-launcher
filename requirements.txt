@@ -1,1 +1,2 @@
-PyQt6
+# D5: pinned — the app is tested against exactly this runtime
+PyQt6==6.11.0

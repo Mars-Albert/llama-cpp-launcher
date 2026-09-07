@@ -9,7 +9,6 @@ from core.i18n import t
 
 class ModelScanner(QThread):
     scan_finished = pyqtSignal(list, list, list)
-    scan_progress = pyqtSignal(str)
 
     def __init__(self, search_dir):
         super().__init__()
@@ -156,16 +155,17 @@ class ModelBrowser(QWidget):
             self.status_label.setText(t("未扫描"))
 
     def auto_select_mmproj(self, model_path):
+        # A6: only auto-select when the names actually match. The previous
+        # fallback (first mmproj in the folder) silently attached --mmproj to
+        # plain text models. No match -> hint only, never auto-fill.
         if not model_path:
             return
         model_name = Path(model_path).stem.lower()
-        fallback = None
         for mmproj in self.mmprojs:
-            mmproj_name = Path(mmproj).stem.lower()
-            if model_name in mmproj_name:
+            if model_name in Path(mmproj).stem.lower():
                 self.mmproj_selected.emit(mmproj)
                 return
-            if fallback is None and "mmproj" in mmproj_name:
-                fallback = mmproj
-        if fallback is not None:
-            self.mmproj_selected.emit(fallback)
+        if self.mmprojs:
+            self.status_label.setText(
+                t("未发现匹配的 mmproj，可手动选择 {n_mmprojs} 个", n_mmprojs=len(self.mmprojs))
+            )

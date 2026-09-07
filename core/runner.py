@@ -1,9 +1,15 @@
 import logging
 
 from PyQt6.QtCore import QObject, pyqtSignal, QProcess, QTimer
+from core.config import get_server_path
 from core.i18n import t
 
 logger = logging.getLogger(__name__)
+
+# B3: readiness phrases are at most 24 chars ("starting the main loop"); a
+# 200-char rolling lowercase tail spots them across chunk boundaries without
+# re-joining and re-lowercasing the whole 8KB buffer on every output chunk.
+_READY_TAIL_LEN = 200
 
 
 class ServerRunner(QObject):
@@ -24,6 +30,7 @@ class ServerRunner(QObject):
         self._log_parts: list[str] = []
         self._log_buffer_len = 0
         self._max_log_buffer = 8000
+        self._ready_tail = ""
         self._is_stopping = False
         self._kill_timer = QTimer(self)
         self._kill_timer.setSingleShot(True)
@@ -40,20 +47,24 @@ class ServerRunner(QObject):
     def start(self, args, work_dir=None):
         if self._is_running or self._is_stopping:
             return
-        cmd = "llama-server"
+        # E1: configured path > PATH > bare name (see core.config)
+        cmd = get_server_path()
         self.process.setProgram(cmd)
         self.process.setArguments(args)
         if work_dir:
             self.process.setWorkingDirectory(work_dir)
         self._log_parts.clear()
         self._log_buffer_len = 0
+        self._ready_tail = ""
         self._is_running = True
         self._is_ready = False
         self._was_stopped_intentionally = False
         self.process.start()
         if self.process.state() == QProcess.ProcessState.NotRunning:
             self._is_running = False
-            self.error_occurred.emit(t("启动 llama-server 失败。请确保它在系统 PATH 中。"))
+            self.error_occurred.emit(
+                t("启动 llama-server 失败（{server_path}）。请检查路径是否正确，或确保它在系统 PATH 中。",
+                  server_path=cmd))
         else:
             self.state_changed.emit("starting")
 
@@ -103,8 +114,8 @@ class ServerRunner(QObject):
                 while self._log_buffer_len > self._max_log_buffer and len(self._log_parts) > 1:
                     removed = self._log_parts.pop(0)
                     self._log_buffer_len -= len(removed)
-            lower = "".join(self._log_parts).lower()
-            if "starting the main loop" in lower or "server is listening" in lower or "listening on http" in lower:
+            self._ready_tail = (self._ready_tail + text.lower())[-_READY_TAIL_LEN:]
+            if "starting the main loop" in self._ready_tail or "server is listening" in self._ready_tail or "listening on http" in self._ready_tail:
                 self._is_ready = True
                 self.server_ready.emit()
                 self.state_changed.emit("running")
@@ -128,6 +139,7 @@ class ServerRunner(QObject):
         self._is_stopping = False
         self._log_parts.clear()
         self._log_buffer_len = 0
+        self._ready_tail = ""
         if self._was_stopped_intentionally:
             self.state_changed.emit("stopped")
         elif exit_code != 0:

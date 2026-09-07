@@ -97,6 +97,19 @@ def _read_metadata_kv(f):
     return key, value, vtype
 
 
+# Top-level tensor module prefixes, longest first (avoids prefix conflicts like
+# "output" matching "output_norm"). Precomputed once — B5: the per-tensor
+# sorted() inside _classify_tensor cost a re-sort for every tensor in the file.
+_KNOWN_MODULES = sorted([
+    "token_embd", "pos_embd", "output_norm", "output",
+    "attn_q", "attn_k", "attn_v", "attn_qkv", "attn_output",
+    "attn_norm", "attn_norm_2",
+    "ffn_gate_inp", "ffn_gate_exp", "ffn_down_exp", "ffn_up_exp",
+    "ffn_norm", "ffn_up", "ffn_gate", "ffn_down",
+    "ssm_in", "ssm_conv1d", "ssm_x", "ssm_a", "ssm_d", "ssm_dt", "ssm_out",
+], key=len, reverse=True)
+
+
 def _classify_tensor(name):
     """Extract layer number and module name from tensor name."""
     layer = None
@@ -109,15 +122,6 @@ def _classify_tensor(name):
             pass
         module = parts[2] if len(parts) > 2 else None
     else:
-        # Top-level tensors — sorted by length descending to avoid prefix conflicts
-        _KNOWN_MODULES = sorted([
-            "token_embd", "pos_embd", "output_norm", "output",
-            "attn_q", "attn_k", "attn_v", "attn_qkv", "attn_output",
-            "attn_norm", "attn_norm_2",
-            "ffn_gate_inp", "ffn_gate_exp", "ffn_down_exp", "ffn_up_exp",
-            "ffn_norm", "ffn_up", "ffn_gate", "ffn_down",
-            "ssm_in", "ssm_conv1d", "ssm_x", "ssm_a", "ssm_d", "ssm_dt", "ssm_out",
-        ], key=len, reverse=True)
         for m in _KNOWN_MODULES:
             if name.startswith(m):
                 module = m

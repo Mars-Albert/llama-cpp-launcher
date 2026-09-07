@@ -68,11 +68,6 @@ def _cache_key(path, file_size, mtime_ns):
     return (str(path), file_size, mtime_ns)
 
 
-def clear_parse_cache():
-    """Clear the GGUF parse cache to free memory."""
-    _parse_cache.clear()
-
-
 # 对话框关闭时仍在解析的 worker：模块级持引用，防止 QThread 对象
 # 在运行中被销毁（销毁运行中的 QThread 会直接崩进程），结束后自动清理
 _active_workers: set = set()
@@ -87,29 +82,35 @@ class MetadataTableModel(QAbstractTableModel):
 
     def __init__(self):
         super().__init__()
-        self._data = []  # list of (key, type_str, preview, full_value_str)
+        # rows: (key, type_str, preview, raw_value); the full string is computed
+        # lazily on first access (B7 — a 150k-token array used to be json.dumps'd
+        # eagerly into a multi-MB string per row just for the copy action)
+        self._data = []
+        self._full_cache = {}
 
     def load(self, metadata: dict):
         self.beginResetModel()
         self._data = []
+        self._full_cache = {}
         for key, value in sorted(metadata.items()):
-            vtype, preview, full_str = self._format_value(value)
-            self._data.append((key, vtype, preview, full_str))
+            vtype, preview = self._format_value(value)
+            self._data.append((key, vtype, preview, value))
         self.endResetModel()
 
     def _format_value(self, value):
+        """Return (type_str, preview) for a metadata value."""
         if isinstance(value, bool):
-            return "bool", str(value), str(value)
+            return "bool", str(value)
         elif isinstance(value, int):
-            return "int", str(value), str(value)
+            return "int", str(value)
         elif isinstance(value, float):
-            return "float", f"{value:.6g}", str(value)
+            return "float", f"{value:.6g}"
         elif isinstance(value, str):
             preview = value[:120] + "..." if len(value) > 120 else value
-            return "string", preview, value
+            return "string", preview
         elif isinstance(value, list):
             if not value:
-                return "array[]", "[]", "[]"
+                return "array[]", "[]"
             elem_type = type(value[0]).__name__
             if isinstance(value[0], str):
                 preview = f'array[string], len={len(value)}, preview={value[:3]}'
@@ -119,10 +120,21 @@ class MetadataTableModel(QAbstractTableModel):
                 preview = f'array[{elem_type}], len={len(value)}, preview={value[:5]}'
             else:
                 preview = f'array[{elem_type}], len={len(value)}'
-            full_str = json.dumps(value, ensure_ascii=False, default=str)
-            return f"array[{elem_type}]", preview, full_str
+            return f"array[{elem_type}]", preview
         else:
-            return type(value).__name__, str(value)[:120], str(value)
+            return type(value).__name__, str(value)[:120]
+
+    def _full_str(self, value):
+        """Full string form of a metadata value (identical to the old eager form)."""
+        if isinstance(value, list):
+            if not value:
+                return "[]"
+            return json.dumps(value, ensure_ascii=False, default=str)
+        if isinstance(value, str):
+            return value
+        if isinstance(value, (bool, int, float)):
+            return str(value)
+        return str(value)
 
     def rowCount(self, parent=QModelIndex()):
         return len(self._data)
@@ -135,7 +147,7 @@ class MetadataTableModel(QAbstractTableModel):
             return None
         row = index.row()
         col = index.column()
-        key, vtype, preview, _full_str = self._data[row]
+        key, vtype, preview, _value = self._data[row]
 
         if role == Qt.ItemDataRole.DisplayRole:
             return [key, vtype, preview][col]
@@ -158,7 +170,11 @@ class MetadataTableModel(QAbstractTableModel):
         return None
 
     def get_row_json(self, row):
-        key, vtype, _preview, full_str = self._data[row]
+        key, vtype, _preview, value = self._data[row]
+        # B7: compute the (potentially multi-MB) string on first access only
+        full_str = self._full_cache.get(row)
+        if full_str is None:
+            full_str = self._full_cache[row] = self._full_str(value)
         return {"key": key, "type": vtype, "value": full_str}
 
     def get_all_json(self):
@@ -355,6 +371,12 @@ class GGUFInspectorDialog(QDialog):
 
         # Top bar
         top = QHBoxLayout()
+
+        # E4: open any GGUF file into the selector
+        self._btn_open = QPushButton(t("📂 打开..."))
+        self._btn_open.setToolTip(t("打开任意 GGUF 文件加入列表"))
+        self._btn_open.clicked.connect(self._open_file_dialog)
+        top.addWidget(self._btn_open)
 
         # Model selector
         self._model_selector = QComboBox()
@@ -650,6 +672,29 @@ class GGUFInspectorDialog(QDialog):
             return
         self.setWindowTitle(f"GGUF Inspector — {Path(path).name}")
         self._try_cache_or_parse()
+
+    def _open_file_dialog(self):
+        """E4: let the user open any .gguf file into the file list."""
+        start_dir = str(Path(self._path).parent) if self._path else ""
+        # Qt file-dialog filters use a literal ';;' syntax — keep the
+        # filter un-translated (see plan constraint)
+        path, _ = QFileDialog.getOpenFileName(
+            self, t("打开 GGUF 文件"), start_dir, "GGUF Files (*.gguf)"
+        )
+        if path:
+            self._add_file_option(path)
+
+    def _add_file_option(self, path):
+        # Dedupe against existing entries by resolved path (the same file
+        # may already be here as model or mmproj)
+        resolved = str(Path(path).resolve())
+        for i, (_label, existing) in enumerate(self._file_options):
+            if str(Path(existing).resolve()) == resolved:
+                self._model_selector.setCurrentIndex(i)
+                return
+        self._file_options.append((Path(path).name, path))
+        self._model_selector.addItem(Path(path).name)
+        self._model_selector.setCurrentIndex(len(self._file_options) - 1)
 
     def _start_parse(self):
         if self._worker and self._worker.isRunning():

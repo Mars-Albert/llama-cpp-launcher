@@ -24,7 +24,12 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install pyinstaller
+          # D5: pinned — packaging behavior must not drift between releases
+          pip install pyinstaller==6.22.2
+          pip install pytest
+
+      - name: Run tests
+        run: python -m pytest tests/ -q
 
       - name: Extract version from tag
         id: version
