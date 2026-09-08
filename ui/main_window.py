@@ -14,9 +14,10 @@ from PyQt6.QtWidgets import (
     QCheckBox, QGroupBox, QTabWidget, QTextEdit,
     QDialog, QDialogButtonBox, QFormLayout, QLineEdit, QToolButton
 )
-from PyQt6.QtCore import Qt, QTimer, QThread, pyqtSignal
+from PyQt6.QtCore import Qt, QTimer, QThread, pyqtSignal, QPoint
 from PyQt6.QtGui import (QAction, QFont, QTextOption, QIcon, QPixmap, QPainter,
-                         QColor, QTextCursor, QTextDocument, QKeySequence, QShortcut)
+                         QColor, QTextCursor, QTextDocument, QKeySequence, QShortcut,
+                         QImage, QPolygon, QPen)
 
 from core.config import (
     ConfigManager, save_scan_path, load_scan_path, save_language,
@@ -24,7 +25,7 @@ from core.config import (
     save_ui_prefs, load_ui_prefs,
     load_theme, save_theme,
     load_last_preset, save_last_preset,
-    LOGS_DIR, LAST_RUN_LOG,
+    CONFIG_DIR, LOGS_DIR, LAST_RUN_LOG,
 )
 from core.constants import (
     WINDOW_WIDTH, WINDOW_HEIGHT, MIN_WINDOW_WIDTH, MIN_WINDOW_HEIGHT,
@@ -40,6 +41,105 @@ from ui.model_browser import ModelBrowser
 from ui.basic_panel import BasicPanel
 from ui.advanced_panel import AdvancedPanel
 from ui.gguf_inspector import GGUFInspectorDialog
+
+
+def _ensure_arrow_image(direction: str, color: str) -> Path:
+    """Return a cached PNG of a small triangle arrow in *color*.
+
+    Qt Style Sheets cannot render the CSS border-triangle trick on
+    ``QComboBox::down-arrow`` / ``QSpinBox::up-arrow`` subcontrols —
+    once QSS takes over, native triangles are not drawn (borders draw a
+    rectangle, and unstyled spinbox arrows are simply missing). So the
+    arrows are real images, generated once per color and cached in
+    CONFIG_DIR (same dir as logs/settings).
+
+    ``direction`` is ``"up"`` or ``"down"``. The down triangle keeps the
+    legacy ``combo_arrow_*.png`` filename so existing caches are reused.
+    """
+    hex_color = color.lstrip("#").lower()
+    name = "combo_arrow" if direction == "down" else "spin_arrow_up"
+    path = CONFIG_DIR / f"{name}_{hex_color}.png"
+    if path.exists():
+        return path
+    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    img = QImage(12, 8, QImage.Format.Format_ARGB32)
+    img.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(img)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.setBrush(QColor(color))
+    if direction == "down":
+        painter.drawPolygon(QPolygon([QPoint(1, 1), QPoint(11, 1), QPoint(6, 7)]))
+    else:
+        painter.drawPolygon(QPolygon([QPoint(6, 1), QPoint(1, 7), QPoint(11, 7)]))
+    painter.end()
+    img.save(str(path))
+    return path
+
+
+def _ensure_check_image() -> Path:
+    """Return a cached white checkmark PNG for checked checkboxes.
+
+    Same limitation as the arrow images: once QSS styles
+    ``QCheckBox::indicator``, the native checkmark is not drawn, so a
+    checked box needs an explicit image. White works for both themes
+    because the checked background is the same blue in each.
+    """
+    path = CONFIG_DIR / "checkbox_check_white.png"
+    if path.exists():
+        return path
+    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    img = QImage(12, 12, QImage.Format.Format_ARGB32)
+    img.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(img)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    pen = QPen(QColor("#ffffff"), 2)
+    pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+    pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+    painter.setPen(pen)
+    painter.drawPolyline(QPolygon([QPoint(2, 6), QPoint(5, 9), QPoint(10, 2)]))
+    painter.end()
+    img.save(str(path))
+    return path
+
+
+# Always-dark scrollbar QSS shared by the log and runtime-info panels
+# (those areas stay dark in both app themes; E3/E5). Previously this block
+# was copy-pasted inline twice; keeping one copy so fixes land in both.
+_DARK_SCROLLBAR_QSS = """
+            QScrollBar:vertical {
+                background: #1e1e2e;
+                width: 10px;
+                border-radius: 5px;
+            }
+            QScrollBar::handle:vertical {
+                background: #585b70;
+                border-radius: 5px;
+                min-height: 30px;
+            }
+            QScrollBar::handle:vertical:hover {
+                background: #6c7086;
+            }
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+                height: 0;
+            }
+            QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
+                width: 0;
+            }
+            QScrollBar:horizontal {
+                background: #1e1e2e;
+                height: 10px;
+                border-radius: 5px;
+            }
+            QScrollBar::handle:horizontal {
+                background: #585b70;
+                border-radius: 5px;
+                min-width: 30px;
+            }
+            QScrollBar::handle:horizontal:hover {
+                background: #6c7086;
+            }
+        """
 
 
 class _StartupInfoWorker(QThread):
@@ -389,36 +489,7 @@ class MainWindow(QMainWindow):
                 border: none;
                 padding: 4px;
             }
-            QScrollBar:vertical {
-                background: #1e1e2e;
-                width: 10px;
-                border-radius: 5px;
-            }
-            QScrollBar::handle:vertical {
-                background: #585b70;
-                border-radius: 5px;
-                min-height: 30px;
-            }
-            QScrollBar::handle:vertical:hover {
-                background: #6c7086;
-            }
-            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
-                height: 0;
-            }
-            QScrollBar:horizontal {
-                background: #1e1e2e;
-                height: 10px;
-                border-radius: 5px;
-            }
-            QScrollBar::handle:horizontal {
-                background: #585b70;
-                border-radius: 5px;
-                min-width: 30px;
-            }
-            QScrollBar::handle:horizontal:hover {
-                background: #6c7086;
-            }
-        """)
+        """ + _DARK_SCROLLBAR_QSS)
         self.log_output.document().setMaximumBlockCount(LOG_MAX_BLOCK_COUNT)
 
         log_tab = QWidget()
@@ -462,10 +533,10 @@ class MainWindow(QMainWindow):
         self._log_level_boxes = {}
         filter_box = QHBoxLayout()
         filter_box.setSpacing(8)
-        for lvl, tip in (("D", t("调试")), ("I", t("信息")), ("W", t("警告")), ("E", t("错误"))):
-            box = QCheckBox(lvl)
+        for lvl, name in (("D", t("调试")), ("I", t("信息")), ("W", t("警告")), ("E", t("错误"))):
+            box = QCheckBox(name)
             box.setChecked(True)
-            box.setToolTip(tip)
+            box.setToolTip(name)
             box.toggled.connect(self._on_log_level_toggled)
             filter_box.addWidget(box)
             self._log_level_boxes[lvl] = box
@@ -500,36 +571,7 @@ class MainWindow(QMainWindow):
                 border: none;
                 padding: 8px;
             }
-            QScrollBar:vertical {
-                background: #1e1e2e;
-                width: 10px;
-                border-radius: 5px;
-            }
-            QScrollBar::handle:vertical {
-                background: #585b70;
-                border-radius: 5px;
-                min-height: 30px;
-            }
-            QScrollBar::handle:vertical:hover {
-                background: #6c7086;
-            }
-            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
-                height: 0;
-            }
-            QScrollBar:horizontal {
-                background: #1e1e2e;
-                height: 10px;
-                border-radius: 5px;
-            }
-            QScrollBar::handle:horizontal {
-                background: #585b70;
-                border-radius: 5px;
-                min-width: 30px;
-            }
-            QScrollBar::handle:horizontal:hover {
-                background: #6c7086;
-            }
-        """)
+        """ + _DARK_SCROLLBAR_QSS)
         self.info_display.setHtml(empty_info_html())
 
         self.tab_widget.addTab(log_tab, t("📄 日志输出"))
@@ -1987,8 +2029,9 @@ class MainWindow(QMainWindow):
         self.btn_log_search_prev.setToolTip(t("上一个"))
         self.btn_log_search_next.setToolTip(t("下一个"))
         self.btn_log_search_close.setToolTip(t("关闭搜索"))
-        for lvl, tip in (("D", t("调试")), ("I", t("信息")), ("W", t("警告")), ("E", t("错误"))):
-            self._log_level_boxes[lvl].setToolTip(tip)
+        for lvl, name in (("D", t("调试")), ("I", t("信息")), ("W", t("警告")), ("E", t("错误"))):
+            self._log_level_boxes[lvl].setText(name)
+            self._log_level_boxes[lvl].setToolTip(name)
         self.tab_widget.setTabText(0, t("📄 日志输出"))
         self.tab_widget.setTabText(1, t("📊 运行信息"))
 
@@ -2128,8 +2171,22 @@ class MainWindow(QMainWindow):
         which are replaced after the fact (QSS braces make str.format unsafe).
         """
         palette = MainWindow._THEME_PALETTES[theme]
+        tokens = dict(palette)
+
+        def _img(direction: str) -> str:
+            # Qt QSS cannot draw CSS border-triangles on arrow subcontrols,
+            # so every arrow is a generated PNG; forward slashes + quotes
+            # keep Windows paths safe inside url().
+            return 'url("{}")'.format(
+                str(_ensure_arrow_image(direction, palette["combo_arrow"])).replace("\\", "/"))
+
+        tokens["combo_arrow_img"] = _img("down")
+        tokens["spin_up_img"] = _img("up")
+        tokens["spin_down_img"] = _img("down")
+        tokens["check_img"] = 'url("{}")'.format(
+            str(_ensure_check_image()).replace("\\", "/"))
         qss = MainWindow._THEME_TEMPLATE
-        for key, value in palette.items():
+        for key, value in tokens.items():
             qss = qss.replace("@@" + key + "@@", value)
         return qss
 
@@ -2140,6 +2197,7 @@ class MainWindow(QMainWindow):
             "pressed_bg": "#d8dce0", "sub_border": "#b0b8c0",
             "sb_hover": "#8a9098", "combo_arrow": "#333",
             "slider_rim": "#ffffff", "tab_sel_bg": "#ffffff",
+            "table_alt": "#f2f5f9",
             "start_dis_bg": "#c8d8c8", "start_dis_fg": "#8a9a8a",
             "stop_dis_bg": "#d8c8c8", "stop_dis_fg": "#9a8a8a",
             "webui_dis_bg": "#c8d0d8", "webui_dis_fg": "#8a9098",
@@ -2151,6 +2209,7 @@ class MainWindow(QMainWindow):
             "pressed_bg": "#313244", "sub_border": "#45475a",
             "sb_hover": "#585b70", "combo_arrow": "#cdd6f4",
             "slider_rim": "#1e1e2e", "tab_sel_bg": "#1e1e2e",
+            "table_alt": "#1f1f2e",
             "start_dis_bg": "#2e3d34", "start_dis_fg": "#748a7c",
             "stop_dis_bg": "#3d2e2e", "stop_dis_fg": "#8a7474",
             "webui_dis_bg": "#2e333d", "webui_dis_fg": "#6b7280",
@@ -2231,6 +2290,10 @@ class MainWindow(QMainWindow):
                 padding: 4px 8px;
                 selection-background-color: #3b82f6;
             }
+            QTextEdit#inspectText {
+                font-family: Consolas, monospace;
+                font-size: 12px;
+            }
             QSpinBox, QDoubleSpinBox {
                 background: @@field_bg@@;
                 color: @@text@@;
@@ -2251,11 +2314,35 @@ class MainWindow(QMainWindow):
                 width: 28px;
             }
             QComboBox::down-arrow {
-                image: none;
-                border-left: 5px solid transparent;
-                border-right: 5px solid transparent;
-                border-top: 6px solid @@combo_arrow@@;
-                margin-right: 4px;
+                image: @@combo_arrow_img@@;
+            }
+            QSpinBox::up-button, QDoubleSpinBox::up-button {
+                subcontrol-origin: border;
+                subcontrol-position: top right;
+                width: 22px;
+                border-left: 1px solid @@border@@;
+                border-bottom: 1px solid @@border@@;
+                border-top-right-radius: 5px;
+                background: @@field_bg@@;
+            }
+            QSpinBox::down-button, QDoubleSpinBox::down-button {
+                subcontrol-origin: border;
+                subcontrol-position: bottom right;
+                width: 22px;
+                border-left: 1px solid @@border@@;
+                border-top: 1px solid @@border@@;
+                border-bottom-right-radius: 5px;
+                background: @@field_bg@@;
+            }
+            QSpinBox::up-button:hover, QDoubleSpinBox::up-button:hover,
+            QSpinBox::down-button:hover, QDoubleSpinBox::down-button:hover {
+                background: @@hover_bg@@;
+            }
+            QSpinBox::up-arrow, QDoubleSpinBox::up-arrow {
+                image: @@spin_up_img@@;
+            }
+            QSpinBox::down-arrow, QDoubleSpinBox::down-arrow {
+                image: @@spin_down_img@@;
             }
             QComboBox QAbstractItemView {
                 background-color: @@field_bg@@;
@@ -2280,6 +2367,31 @@ class MainWindow(QMainWindow):
             QPushButton:pressed {
                 background: @@pressed_bg@@;
             }
+            QPushButton:disabled {
+                background: @@field_bg@@;
+                color: @@muted@@;
+                border-color: @@border@@;
+            }
+            QToolButton {
+                background: @@field_bg@@;
+                color: @@text@@;
+                border: 1px solid @@border@@;
+                border-radius: 6px;
+                padding: 4px 10px;
+                font-size: 12px;
+            }
+            QToolButton:hover {
+                background: @@hover_bg@@;
+                border-color: #3b82f6;
+            }
+            QToolButton:pressed {
+                background: @@pressed_bg@@;
+            }
+            QToolButton:disabled {
+                background: @@field_bg@@;
+                color: @@muted@@;
+                border-color: @@border@@;
+            }
             QCheckBox {
                 color: @@text@@;
                 spacing: 6px;
@@ -2299,6 +2411,7 @@ class MainWindow(QMainWindow):
                 background-color: #3b82f6;
                 border-color: #2563eb;
                 color: #ffffff;
+                image: @@check_img@@;
             }
             QGroupBox {
                 font-weight: bold;
@@ -2334,6 +2447,32 @@ class MainWindow(QMainWindow):
             }
             QListWidget::item:hover {
                 background-color: @@hover_bg@@;
+            }
+            QTableWidget, QTableView {
+                background-color: @@field_bg@@;
+                alternate-background-color: @@table_alt@@;
+                color: @@text@@;
+                border: 1px solid @@border@@;
+                border-radius: 6px;
+                gridline-color: @@border@@;
+                selection-background-color: #3b82f6;
+                selection-color: #ffffff;
+            }
+            QHeaderView::section {
+                background-color: @@hover_bg@@;
+                color: @@text@@;
+                border: none;
+                border-right: 1px solid @@border@@;
+                border-bottom: 1px solid @@border@@;
+                padding: 4px 8px;
+                font-size: 12px;
+                font-weight: bold;
+            }
+            QTableCornerButton::section {
+                background-color: @@hover_bg@@;
+                border: none;
+                border-right: 1px solid @@border@@;
+                border-bottom: 1px solid @@border@@;
             }
             QTabWidget::pane {
                 border: 1px solid @@border@@;
@@ -2443,6 +2582,9 @@ class MainWindow(QMainWindow):
             QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
                 height: 0;
             }
+            QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
+                width: 0;
+            }
             QScrollBar:horizontal {
                 background: @@win_bg@@;
                 height: 12px;
@@ -2456,6 +2598,25 @@ class MainWindow(QMainWindow):
             }
             QScrollBar::handle:horizontal:hover {
                 background: @@sb_hover@@;
+            }
+            QProgressBar {
+                background-color: @@field_bg@@;
+                color: @@text@@;
+                border: 1px solid @@border@@;
+                border-radius: 6px;
+                text-align: center;
+                min-height: 16px;
+            }
+            QProgressBar::chunk {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #60a5fa, stop:1 #3b82f6);
+                border-radius: 5px;
+            }
+            QToolTip {
+                background-color: @@field_bg@@;
+                color: @@text@@;
+                border: 1px solid @@border@@;
+                border-radius: 4px;
+                padding: 4px 8px;
             }
         """
 

@@ -262,7 +262,7 @@ _EN = {
     "Module": "Module",
     "级别": "Level",
     "检查项": "Check",
-    "信息": "Message",
+    "信息": "Info",
     "ID": "ID",
     "Token": "Token",
     "Score": "Score",

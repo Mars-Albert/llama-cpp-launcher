@@ -24,6 +24,45 @@ from core.constants import PARSE_CACHE_MAX
 from gguf.parser import parse_gguf
 from gguf.models import GGUFInfo
 from gguf.ggml_types import GGML_TYPES
+from core.config import load_theme
+
+# ---------------------------------------------------------------------------
+# HTML palettes for the inspector's rich-text tabs (overview / stats /
+# tokenizer / filename) and the diagnostics level colors. The QTextEdit
+# frames follow the app theme QSS, but the embedded HTML carries its own
+# colors, so both themes need a palette. "dark" keeps the original
+# Catppuccin values (pixel-identical to the legacy inline styles).
+# ---------------------------------------------------------------------------
+_HTML_PALETTES = {
+    "dark": {
+        "section_bg": "#313244", "section_fg": "#cdd6f4",
+        "row_even": "#262637", "row_odd": "#1e1e2e",
+        "label": "#9399b2", "value": "#cdd6f4", "value_hi": "#a6e3a1",
+        "muted": "#585b70",
+        "bar_fill": "#7aa2f7", "bar_empty": "#45475a",
+        "table_header_bg": "#45475a", "table_header_fg": "#cdd6f4",
+        "code_bg": "#181825", "code_border": "#313244", "code_fg": "#cdd6f4",
+        "filename_fg": "#f9e2af",
+        "badge_text": "#1e1e2e",
+        "accent": "#7aa2f7", "ok": "#a6e3a1", "bad": "#f38ba8",
+        "warn": "#fab387", "yellow": "#f9e2af", "teal": "#94e2d5",
+        "blue": "#89b4fa", "purple": "#cba6f7",
+    },
+    "light": {
+        "section_bg": "#e8ecf0", "section_fg": "#1a1a2e",
+        "row_even": "#f4f6fa", "row_odd": "#ffffff",
+        "label": "#6b7280", "value": "#1a1a2e", "value_hi": "#15803d",
+        "muted": "#9ca3af",
+        "bar_fill": "#3b82f6", "bar_empty": "#d1d5db",
+        "table_header_bg": "#e5e7eb", "table_header_fg": "#1a1a2e",
+        "code_bg": "#f6f8fa", "code_border": "#d0d4dc", "code_fg": "#1a1a2e",
+        "filename_fg": "#b45309",
+        "badge_text": "#ffffff",
+        "accent": "#3b82f6", "ok": "#16a34a", "bad": "#ef4444",
+        "warn": "#d97706", "yellow": "#ca8a04", "teal": "#0d9488",
+        "blue": "#2563eb", "purple": "#7c3aed",
+    },
+}
 
 
 # ---------------------------------------------------------------------------
@@ -336,6 +375,13 @@ class GGUFInspectorDialog(QDialog):
     def __init__(self, file_path, launcher_params=None, parent=None):
         super().__init__(parent)
         self._path = file_path
+        # HTML palette for the rich-text tabs; the dialog is modal, so
+        # the app theme cannot change while it is open. Follow the
+        # parent window's live theme when it has one, else the
+        # persisted setting.
+        parent_theme = getattr(self.parent(), "theme", None)
+        theme = parent_theme if parent_theme in ("light", "dark") else load_theme()
+        self._h = _HTML_PALETTES[theme]
         self._info: GGUFInfo | None = None
         self._launcher_params = launcher_params or {}
         self._worker: GGUFParseWorker | None = None
@@ -432,11 +478,9 @@ class GGUFInspectorDialog(QDialog):
 
         self._overview_text = QTextEdit()
         self._overview_text.setReadOnly(True)
-        self._overview_text.setStyleSheet(
-            "QTextEdit { background: #1e1e2e; color: #cdd6f4; "
-            "font-family: Consolas, monospace; font-size: 12px; "
-            "border: 1px solid #313244; border-radius: 4px; padding: 8px; }"
-        )
+        # Themed via QTextEdit#inspectText in the app QSS (monospace only;
+        # colors/borders follow the active theme).
+        self._overview_text.setObjectName("inspectText")
         layout.addWidget(self._overview_text)
         return w
 
@@ -449,11 +493,7 @@ class GGUFInspectorDialog(QDialog):
 
         self._stats_text = QTextEdit()
         self._stats_text.setReadOnly(True)
-        self._stats_text.setStyleSheet(
-            "QTextEdit { background: #1e1e2e; color: #cdd6f4; "
-            "font-family: Consolas, monospace; font-size: 12px; "
-            "border: 1px solid #313244; border-radius: 4px; padding: 8px; }"
-        )
+        self._stats_text.setObjectName("inspectText")
         layout.addWidget(self._stats_text)
         return w
 
@@ -494,29 +534,8 @@ class GGUFInspectorDialog(QDialog):
         self._meta_table.customContextMenuRequested.connect(self._meta_context_menu)
         self._meta_table.horizontalHeader().setStretchLastSection(True)
         self._meta_table.verticalHeader().setVisible(False)
-        self._meta_table.setStyleSheet("""
-            QTableView {
-                background-color: #ffffff;
-                alternate-background-color: #f0f4f8;
-                color: #1a1a2e;
-                gridline-color: #e2e8f0;
-                border: 1px solid #d1d5db;
-                border-radius: 4px;
-                font-size: 13px;
-            }
-            QTableView::item:selected {
-                background-color: #bfdbfe;
-                color: #1a1a2e;
-            }
-            QTableView QHeaderView::section {
-                background-color: #e2e8f0;
-                color: #1a1a2e;
-                border: none;
-                border-bottom: 2px solid #94a3b8;
-                padding: 6px 8px;
-                font-weight: bold;
-            }
-        """)
+        # No widget-level stylesheet: tables inherit the app theme QSS
+        # (a hardcoded light stylesheet here would win over the dark theme).
         layout.addWidget(self._meta_table, 1)
 
         return w
@@ -560,29 +579,7 @@ class GGUFInspectorDialog(QDialog):
         self._tensor_table.customContextMenuRequested.connect(self._tensor_context_menu)
         self._tensor_table.horizontalHeader().setStretchLastSection(True)
         self._tensor_table.verticalHeader().setVisible(False)
-        self._tensor_table.setStyleSheet("""
-            QTableView {
-                background-color: #ffffff;
-                alternate-background-color: #f0f4f8;
-                color: #1a1a2e;
-                gridline-color: #e2e8f0;
-                border: 1px solid #d1d5db;
-                border-radius: 4px;
-                font-size: 13px;
-            }
-            QTableView::item:selected {
-                background-color: #bfdbfe;
-                color: #1a1a2e;
-            }
-            QTableView QHeaderView::section {
-                background-color: #e2e8f0;
-                color: #1a1a2e;
-                border: none;
-                border-bottom: 2px solid #94a3b8;
-                padding: 6px 8px;
-                font-weight: bold;
-            }
-        """)
+        # Styled via the app theme QSS (see MainWindow._THEME_TEMPLATE).
         layout.addWidget(self._tensor_table, 1)
 
         # Stats
@@ -601,11 +598,7 @@ class GGUFInspectorDialog(QDialog):
 
         self._tokenizer_text = QTextEdit()
         self._tokenizer_text.setReadOnly(True)
-        self._tokenizer_text.setStyleSheet(
-            "QTextEdit { background: #1e1e2e; color: #cdd6f4; "
-            "font-family: Consolas, monospace; font-size: 12px; "
-            "border: 1px solid #313244; border-radius: 4px; padding: 8px; }"
-        )
+        self._tokenizer_text.setObjectName("inspectText")
         layout.addWidget(self._tokenizer_text, 1)
 
         return w
@@ -619,11 +612,7 @@ class GGUFInspectorDialog(QDialog):
 
         self._filename_text = QTextEdit()
         self._filename_text.setReadOnly(True)
-        self._filename_text.setStyleSheet(
-            "QTextEdit { background: #1e1e2e; color: #cdd6f4; "
-            "font-family: Consolas, monospace; font-size: 12px; "
-            "border: 1px solid #313244; border-radius: 4px; padding: 8px; }"
-        )
+        self._filename_text.setObjectName("inspectText")
         layout.addWidget(self._filename_text)
         return w
 
@@ -760,6 +749,85 @@ class GGUFInspectorDialog(QDialog):
     # ------------------------------------------------------------------
     # Populate tabs
     # ------------------------------------------------------------------
+    # ------------------------------------------------------------------
+    # Theme-aware HTML helpers (colors from _HTML_PALETTES)
+    # ------------------------------------------------------------------
+
+    def _badge_html(self, val, key="accent"):
+        h = self._h
+        return (
+            f'<span style="background:{h[key]};color:{h["badge_text"]};'
+            f'padding:2px 8px;border-radius:3px;font-weight:bold;">{val}</span>'
+        )
+
+    def _section_html(self, title, icon=""):
+        h = self._h
+        label = f"{icon} {title}" if icon else title
+        return (
+            f'<div style="background:{h["section_bg"]};color:{h["section_fg"]};'
+            f'padding:6px 12px;border-radius:4px;font-weight:bold;font-size:13px;'
+            f'margin-top:12px;margin-bottom:4px;">{label}</div>'
+        )
+
+    def _kv_table_html(self, rows, label_width=200):
+        """rows: list of (label, value, [highlight])"""
+        h = self._h
+        html = '<table style="border-collapse:collapse;width:100%;">'
+        for i, (label, value, *rest) in enumerate(rows):
+            highlight = rest[0] if rest else False
+            bg = h["row_even"] if i % 2 == 0 else h["row_odd"]
+            val_style = (
+                f"color:{h['value_hi']};font-weight:bold;"
+                if highlight else f"color:{h['value']};"
+            )
+            html += (
+                f'<tr style="background:{bg};">'
+                f'<td style="padding:3px 12px;color:{h["label"]};'
+                f'width:{label_width}px;white-space:nowrap;">{label}</td>'
+                f'<td style="padding:3px 12px;{val_style}">{value}</td>'
+                f'</tr>'
+            )
+        html += '</table>'
+        return html
+
+    def _data_table_html(self, headers, rows):
+        """Styled data table with header row."""
+        h = self._h
+        html = '<table style="border-collapse:collapse;width:100%;font-size:11px;">'
+        html += (
+            f"<tr style=\"background:{h['table_header_bg']};"
+            f"color:{h['table_header_fg']};\">"
+        )
+        for hdr in headers:
+            html += (
+                f'<td style="padding:4px 10px;font-weight:bold;'
+                f'white-space:nowrap;">{hdr}</td>'
+            )
+        html += '</tr>'
+        for i, row in enumerate(rows):
+            bg = h["row_even"] if i % 2 == 0 else h["row_odd"]
+            html += f'<tr style="background:{bg};">'
+            for cell in row:
+                html += (
+                    f'<td style="padding:3px 10px;color:{h["value"]};'
+                    f'white-space:nowrap;">{cell}</td>'
+                )
+            html += '</tr>'
+        html += '</table>'
+        return html
+
+    def _bar_html(self, value, max_value, width=20, fill="█", empty="░"):
+        """Unicode bar chart."""
+        h = self._h
+        if max_value <= 0:
+            return ""
+        ratio = min(value / max_value, 1.0)
+        filled = int(ratio * width)
+        return (
+            f'<span style="color:{h["bar_fill"]};">{fill * filled}</span>'
+            f'<span style="color:{h["bar_empty"]};"'
+            f'>{empty * (width - filled)}</span>'
+        )
 
     def _populate_all_tabs(self):
         if not self._info:
@@ -787,68 +855,41 @@ class GGUFInspectorDialog(QDialog):
                 return f"array[{len(v)}]"
             return str(v) if v else default
 
-        def _badge(val, color="#7aa2f7"):
-            return f'<span style="background:{color};color:#1e1e2e;padding:2px 8px;border-radius:3px;font-weight:bold;">{val}</span>'
-
-        def _section(title, icon=""):
-            label = f"{icon} {title}" if icon else title
-            return (
-                f'<div style="background:#313244;color:#cdd6f4;padding:6px 12px;'
-                f'border-radius:4px;font-weight:bold;font-size:13px;margin-top:12px;margin-bottom:4px;">'
-                f'{label}</div>'
-            )
-
-        def _kv_table(rows):
-            """rows: list of (label, value, [highlight])"""
-            html = '<table style="border-collapse:collapse;width:100%;">'
-            for i, (label, value, *rest) in enumerate(rows):
-                highlight = rest[0] if rest else False
-                bg = "#262637" if i % 2 == 0 else "#1e1e2e"
-                val_style = "color:#a6e3a1;font-weight:bold;" if highlight else "color:#cdd6f4;"
-                html += (
-                    f'<tr style="background:{bg};">'
-                    f'<td style="padding:3px 12px;color:#9399b2;width:200px;white-space:nowrap;">{label}</td>'
-                    f'<td style="padding:3px 12px;{val_style}">{value}</td>'
-                    f'</tr>'
-                )
-            html += '</table>'
-            return html
-
         parts = []
 
         # File Info
-        parts.append(_section(t("文件信息"), "\U0001F4C1"))
+        parts.append(self._section_html(t("文件信息"), "\U0001F4C1"))
         try:
             mtime = datetime.fromtimestamp(os.stat(info.path).st_mtime).isoformat()
         except OSError:
             mtime = "—"
-        parts.append(_kv_table([
+        parts.append(self._kv_table_html([
             (t("文件名"), Path(info.path).name),
-            (t("路径"), f'<span style="color:#9399b2;font-size:11px;">{info.path}</span>'),
-            (t("文件大小"), _badge(f"{info.file_size / (1024**3):.2f} GB")),
+            (t("路径"), f'<span style="color:{self._h["label"]};font-size:11px;">{info.path}</span>'),
+            (t("文件大小"), self._badge_html(f"{info.file_size / (1024**3):.2f} GB")),
             (t("修改时间"), mtime),
             (t("GGUF 版本"), str(info.header.version)),
-            (t("张量数量"), _badge(f"{info.header.tensor_count:,}")),
+            (t("张量数量"), self._badge_html(f"{info.header.tensor_count:,}")),
             (t("元数据 KV 数量"), str(info.header.metadata_kv_count)),
             (t("张量数据偏移"), f"{info.tensor_data_offset:,}"),
             (t("对齐"), str(info.alignment)),
         ]))
 
         # Model Identity
-        parts.append(_section(t("模型标识"), "\U0001F916"))
+        parts.append(self._section_html(t("模型标识"), "\U0001F916"))
         id_rows = []
         for key in ["general.name", "general.architecture", "general.basename",
                      "general.size_label", "general.version", "general.author",
                      "general.organization", "general.license", "general.repo_url"]:
             val = _meta(key)
             if val != "—":
-                id_rows.append((key, _badge(val) if key == "general.name" else val))
+                id_rows.append((key, self._badge_html(val) if key == "general.name" else val))
         if id_rows:
-            parts.append(_kv_table(id_rows))
+            parts.append(self._kv_table_html(id_rows))
 
         # Architecture
         if arch:
-            parts.append(_section(f"{t('架构')} ({arch})", "⚙️"))
+            parts.append(self._section_html(f"{t('架构')} ({arch})", "⚙️"))
             arch_keys = [
                 f"{arch}.context_length", f"{arch}.embedding_length",
                 f"{arch}.block_count", f"{arch}.feed_forward_length",
@@ -865,39 +906,39 @@ class GGUFInspectorDialog(QDialog):
                     short = key.replace(f"{arch}.", "")
                     arch_rows.append((short, val))
             if arch_rows:
-                parts.append(_kv_table(arch_rows))
+                parts.append(self._kv_table_html(arch_rows))
 
         # Quantization Summary
-        parts.append(_section(t("量化摘要"), "\U0001F4A0"))
+        parts.append(self._section_html(t("量化摘要"), "\U0001F4A0"))
         q_rows = [
             ("file_type", _meta("general.file_type")),
             ("quantization_version", _meta("general.quantization_version")),
-            (t("主导类型"), _badge(info.stats.dominant_type_name, "#f9e2af")),
+            (t("主导类型"), self._badge_html(info.stats.dominant_type_name, "yellow")),
         ]
         for tid, count in sorted(info.stats.tensor_type_counts.items()):
             type_name = GGML_TYPES.get(tid, f"UNKNOWN_{tid}")
             est = info.stats.tensor_type_sizes.get(tid, 0)
             q_rows.append((type_name, f"{count} {t('张量')}  ~{est/(1024**2):.1f} MB"))
-        parts.append(_kv_table(q_rows))
+        parts.append(self._kv_table_html(q_rows))
 
         # Tokenizer Summary
-        parts.append(_section(t("分词器摘要"), "\U0001F524"))
+        parts.append(self._section_html(t("分词器摘要"), "\U0001F524"))
         tokens = m.get("tokenizer.ggml.tokens")
         vocab_size = f"{len(tokens):,}" if isinstance(tokens, list) else "—"
         has_template = "tokenizer.chat_template" in m
         has_hf = "tokenizer.huggingface.json" in m
         t_rows = [
             (t("模型"), _meta("tokenizer.ggml.model")),
-            (t("词表大小"), _badge(vocab_size)),
+            (t("词表大小"), self._badge_html(vocab_size)),
             ("BOS token id", _meta("tokenizer.ggml.bos_token_id")),
             ("EOS token id", _meta("tokenizer.ggml.eos_token_id")),
             ("UNK token id", _meta("tokenizer.ggml.unknown_token_id")),
             ("SEP token id", _meta("tokenizer.ggml.separator_token_id")),
             ("PAD token id", _meta("tokenizer.ggml.padding_token_id")),
-            (t("聊天模板"), _badge(t("是"), "#a6e3a1") if has_template else _badge(t("否"), "#f38ba8")),
-            (t("HF 分词器 JSON"), _badge(t("是"), "#a6e3a1") if has_hf else _badge(t("否"), "#f38ba8")),
+            (t("聊天模板"), self._badge_html(t("是"), "ok") if has_template else self._badge_html(t("否"), "bad")),
+            (t("HF 分词器 JSON"), self._badge_html(t("是"), "ok") if has_hf else self._badge_html(t("否"), "bad")),
         ]
-        parts.append(_kv_table(t_rows))
+        parts.append(self._kv_table_html(t_rows))
 
         html = (
             '<div style="padding:4px;font-family:Consolas,monospace;font-size:12px;">'
@@ -933,116 +974,65 @@ class GGUFInspectorDialog(QDialog):
                 return f"{n/1e3:.1f}K"
             return str(n)
 
-        def _badge(val, color="#7aa2f7"):
-            return f'<span style="background:{color};color:#1e1e2e;padding:2px 8px;border-radius:3px;font-weight:bold;">{val}</span>'
-
-        def _section(title, icon=""):
-            label = f"{icon} {title}" if icon else title
-            return (
-                f'<div style="background:#313244;color:#cdd6f4;padding:6px 12px;'
-                f'border-radius:4px;font-weight:bold;font-size:13px;margin-top:12px;margin-bottom:4px;">'
-                f'{label}</div>'
-            )
-
-        def _bar(value, max_value, width=20, fill="█", empty="░"):
-            """Unicode bar chart."""
-            if max_value <= 0:
-                return ""
-            ratio = min(value / max_value, 1.0)
-            filled = int(ratio * width)
-            return f'<span style="color:#7aa2f7;">{fill * filled}</span><span style="color:#45475a;">{empty * (width - filled)}</span>'
-
-        def _kv_table(rows):
-            html = '<table style="border-collapse:collapse;width:100%;">'
-            for i, (label, value, *rest) in enumerate(rows):
-                highlight = rest[0] if rest else False
-                bg = "#262637" if i % 2 == 0 else "#1e1e2e"
-                val_style = "color:#a6e3a1;font-weight:bold;" if highlight else "color:#cdd6f4;"
-                html += (
-                    f'<tr style="background:{bg};">'
-                    f'<td style="padding:3px 12px;color:#9399b2;width:220px;white-space:nowrap;">{label}</td>'
-                    f'<td style="padding:3px 12px;{val_style}">{value}</td>'
-                    f'</tr>'
-                )
-            html += '</table>'
-            return html
-
-        def _data_table(headers, rows):
-            """Styled data table with header."""
-            html = '<table style="border-collapse:collapse;width:100%;font-size:11px;">'
-            # Header
-            html += '<tr style="background:#45475a;color:#cdd6f4;">'
-            for h in headers:
-                html += f'<td style="padding:4px 10px;font-weight:bold;white-space:nowrap;">{h}</td>'
-            html += '</tr>'
-            for i, row in enumerate(rows):
-                bg = "#262637" if i % 2 == 0 else "#1e1e2e"
-                html += f'<tr style="background:{bg};">'
-                for cell in row:
-                    html += f'<td style="padding:3px 10px;color:#cdd6f4;white-space:nowrap;">{cell}</td>'
-                html += '</tr>'
-            html += '</table>'
-            return html
-
         parts = []
 
         # File Size Breakdown
         meta_overhead = info.tensor_data_offset
         tensor_data = info.file_size - info.tensor_data_offset
         pct = (meta_overhead / info.file_size * 100) if info.file_size > 0 else 0
-        parts.append(_section(t("文件大小分析"), "\U0001F4BE"))
-        parts.append(_kv_table([
-            (t("总文件大小"), _badge(_fmt_bytes(info.file_size))),
+        parts.append(self._section_html(t("文件大小分析"), "\U0001F4BE"))
+        parts.append(self._kv_table_html(label_width=220, rows=[
+            (t("总文件大小"), self._badge_html(_fmt_bytes(info.file_size))),
             (t("元数据开销"), f"{_fmt_bytes(meta_overhead)} ({pct:.1f}%)"),
-            (t("张量数据"), _badge(_fmt_bytes(tensor_data), "#a6e3a1")),
+            (t("张量数据"), self._badge_html(_fmt_bytes(tensor_data), "ok")),
         ]))
 
         # Memory Footprint
         uncompressed = stats.total_params * 4
         estimated = stats.total_estimated_bytes
         ratio = uncompressed / estimated if estimated > 0 else 0
-        parts.append(_section(t("内存占用"), "\U0001F9E0"))
-        parts.append(_kv_table([
-            (t("磁盘估算"), _badge(_fmt_bytes(estimated))),
+        parts.append(self._section_html(t("内存占用"), "\U0001F9E0"))
+        parts.append(self._kv_table_html([
+            (t("磁盘估算"), self._badge_html(_fmt_bytes(estimated))),
             (t("未压缩 (F32)"), _fmt_bytes(uncompressed)),
-            (t("压缩比"), _badge(f"{ratio:.1f}x", "#f9e2af")),
+            (t("压缩比"), self._badge_html(f"{ratio:.1f}x", "yellow")),
         ]))
 
         # Quantization Distribution
         sorted_types = sorted(stats.tensor_type_counts.items(), key=lambda x: -x[1])
         if sorted_types:
             max_count = max(c for _, c in sorted_types)
-            parts.append(_section(t("量化分布"), "\U0001F4A0"))
+            parts.append(self._section_html(t("量化分布"), "\U0001F4A0"))
             q_rows = []
             for tid, count in sorted_types:
                 type_name = GGML_TYPES.get(tid, f"UNKNOWN_{tid}")
                 est = stats.tensor_type_sizes.get(tid, 0)
-                bar = _bar(count, max_count, width=25)
+                bar = self._bar_html(count, max_count, width=25)
                 q_rows.append([
                     f'<span style="font-weight:bold;">{type_name}</span>',
                     f'{bar}',
                     f'{count}',
                     f'~{_fmt_bytes(est)}',
                 ])
-            parts.append(_data_table([t("Type"), t("分布"), t("张量"), t("Est. Size")], q_rows))
+            parts.append(self._data_table_html([t("Type"), t("分布"), t("张量"), t("Est. Size")], q_rows))
 
         # Parameter Concentration
         sorted_tensors = sorted(tensors, key=lambda t: -t.n_params)
         total = stats.total_params
         if total > 0:
-            parts.append(_section(t("参数集中度"), "\U0001F4CA"))
+            parts.append(self._section_html(t("参数集中度"), "\U0001F4CA"))
             c_rows = []
             for n in [10, 20, 50, 100]:
                 cum = sum(t_obj.n_params for t_obj in sorted_tensors[:min(n, len(sorted_tensors))])
                 pct_val = cum / total * 100
-                bar = _bar(pct_val, 100, width=30)
+                bar = self._bar_html(pct_val, 100, width=30)
                 c_rows.append([
                     f'{t("Top {n}", n=n)}',
-                    _badge(_fmt_params(cum), "#f9e2af"),
+                    self._badge_html(_fmt_params(cum), "yellow"),
                     f'{bar}',
                     f'{pct_val:.1f}%',
                 ])
-            parts.append(_data_table([t("张量"), t("参数"), t("覆盖率"), ""], c_rows))
+            parts.append(self._data_table_html([t("张量"), t("参数"), t("覆盖率"), ""], c_rows))
 
         # Layer-wise Breakdown
         layer_data: dict[int, dict] = {}
@@ -1063,11 +1053,11 @@ class GGUFInspectorDialog(QDialog):
 
         if layer_data:
             max_layer_params = max(d["params"] for d in layer_data.values())
-            parts.append(_section(t("逐层分析"), "\U0001F9E9"))
+            parts.append(self._section_html(t("逐层分析"), "\U0001F9E9"))
             l_rows = []
             for layer_idx in sorted(layer_data.keys()):
                 d = layer_data[layer_idx]
-                bar = _bar(d["params"], max_layer_params, width=20)
+                bar = self._bar_html(d["params"], max_layer_params, width=20)
                 l_rows.append([
                     f'<span style="font-weight:bold;">{layer_idx}</span>',
                     f'{d["count"]}',
@@ -1077,13 +1067,13 @@ class GGUFInspectorDialog(QDialog):
                 ])
             if non_block_count > 0:
                 l_rows.append([
-                    f'<span style="color:#9399b2;">{t("其他")}</span>',
+                    f'<span style="color:{self._h["label"]};">{t("其他")}</span>',
                     str(non_block_count),
                     _fmt_params(non_block_params),
                     '',
                     _fmt_bytes(non_block_bytes),
                 ])
-            parts.append(_data_table([t("Layer"), t("张量"), t("Params"), t("相对大小"), t("Est. Size")], l_rows))
+            parts.append(self._data_table_html([t("Layer"), t("张量"), t("Params"), t("相对大小"), t("Est. Size")], l_rows))
 
         # Module Breakdown
         module_data: dict[str, dict] = {}
@@ -1105,11 +1095,11 @@ class GGUFInspectorDialog(QDialog):
 
         if module_data:
             max_mod_params = max(d["params"] for d in module_data.values())
-            parts.append(_section(t("模块分析"), "\U0001F4E6"))
+            parts.append(self._section_html(t("模块分析"), "\U0001F4E6"))
             m_rows = []
             for mod_name in sorted(module_data.keys(), key=lambda k: -module_data[k]["params"]):
                 d = module_data[mod_name]
-                bar = _bar(d["params"], max_mod_params, width=20)
+                bar = self._bar_html(d["params"], max_mod_params, width=20)
                 m_rows.append([
                     f'<span style="font-weight:bold;">{mod_name}</span>',
                     f'{d["count"]}',
@@ -1119,33 +1109,33 @@ class GGUFInspectorDialog(QDialog):
                 ])
             if other_count > 0:
                 m_rows.append([
-                    f'<span style="color:#9399b2;">{t("其他")}</span>',
+                    f'<span style="color:{self._h["label"]};">{t("其他")}</span>',
                     str(other_count),
                     _fmt_params(other_params),
                     '',
                     _fmt_bytes(other_bytes),
                 ])
-            parts.append(_data_table([t("Module"), t("张量"), t("Params"), t("相对大小"), t("Est. Size")], m_rows))
+            parts.append(self._data_table_html([t("Module"), t("张量"), t("Params"), t("相对大小"), t("Est. Size")], m_rows))
 
         # Top 20 Largest Tensors
         top_tensors = sorted(tensors, key=lambda t: -(t.estimated_nbytes or 0))[:20]
         if top_tensors:
             max_top_bytes = top_tensors[0].estimated_nbytes or 1
-            parts.append(_section(t("最大的 20 个张量"), "\U0001F3AF"))
+            parts.append(self._section_html(t("最大的 20 个张量"), "\U0001F3AF"))
             t_rows = []
             for t_obj in top_tensors:
                 shape = " × ".join(str(d) for d in t_obj.dims)
                 name_short = t_obj.name if len(t_obj.name) <= 40 else "…" + t_obj.name[-37:]
-                bar = _bar(t_obj.estimated_nbytes or 0, max_top_bytes, width=15)
+                bar = self._bar_html(t_obj.estimated_nbytes or 0, max_top_bytes, width=15)
                 t_rows.append([
                     f'<span style="font-size:10px;">{name_short}</span>',
-                    f'<span style="color:#9399b2;">{shape}</span>',
+                    f'<span style="color:{self._h["label"]};">{shape}</span>',
                     f'{t_obj.type_name}',
                     f'{_fmt_params(t_obj.n_params)}',
                     f'{bar}',
                     _fmt_bytes(t_obj.estimated_nbytes),
                 ])
-            parts.append(_data_table([t("Name"), t("Shape"), t("Type"), t("Params"), "", t("Est. Size")], t_rows))
+            parts.append(self._data_table_html([t("Name"), t("Shape"), t("Type"), t("Params"), "", t("Est. Size")], t_rows))
 
         # Tensor Shape Stats
         rank_counts: dict[int, int] = {}
@@ -1155,19 +1145,19 @@ class GGUFInspectorDialog(QDialog):
 
         if rank_counts:
             max_rank = max(rank_counts.values())
-            parts.append(_section(t("张量形状统计"), "\U0001F538"))
+            parts.append(self._section_html(t("张量形状统计"), "\U0001F538"))
             s_rows = []
             for rank in sorted(rank_counts.keys()):
                 count = rank_counts[rank]
                 pct_val = count / len(tensors) * 100 if tensors else 0
-                bar = _bar(count, max_rank, width=20)
+                bar = self._bar_html(count, max_rank, width=20)
                 s_rows.append([
                     f'{rank}D',
                     f'{bar}',
                     f'{count:,}',
                     f'{pct_val:.1f}%',
                 ])
-            parts.append(_data_table([t("排名"), "", t("数量"), t("百分比")], s_rows))
+            parts.append(self._data_table_html([t("排名"), "", t("数量"), t("百分比")], s_rows))
 
         html = (
             '<div style="padding:4px;font-family:Consolas,monospace;font-size:12px;">'
@@ -1221,51 +1211,25 @@ class GGUFInspectorDialog(QDialog):
     def _populate_tokenizer(self):
         m = self._info.metadata
 
-        def _badge(val, color="#7aa2f7"):
-            return f'<span style="background:{color};color:#1e1e2e;padding:2px 8px;border-radius:3px;font-weight:bold;">{val}</span>'
-
-        def _section(title, icon=""):
-            label = f"{icon} {title}" if icon else title
-            return (
-                f'<div style="background:#313244;color:#cdd6f4;padding:6px 12px;'
-                f'border-radius:4px;font-weight:bold;font-size:13px;margin-top:12px;margin-bottom:4px;">'
-                f'{label}</div>'
-            )
-
-        def _kv_table(rows):
-            html = '<table style="border-collapse:collapse;width:100%;">'
-            for i, (label, value, *rest) in enumerate(rows):
-                highlight = rest[0] if rest else False
-                bg = "#262637" if i % 2 == 0 else "#1e1e2e"
-                val_style = "color:#a6e3a1;font-weight:bold;" if highlight else "color:#cdd6f4;"
-                html += (
-                    f'<tr style="background:{bg};">'
-                    f'<td style="padding:3px 12px;color:#9399b2;width:200px;white-space:nowrap;">{label}</td>'
-                    f'<td style="padding:3px 12px;{val_style}">{value}</td>'
-                    f'</tr>'
-                )
-            html += '</table>'
-            return html
-
         parts = []
 
         # Tokenizer Info
-        parts.append(_section(t("分词器信息"), "\U0001F524"))
+        parts.append(self._section_html(t("分词器信息"), "\U0001F524"))
         tokens = m.get("tokenizer.ggml.tokens")
         merges = m.get("tokenizer.ggml.merges")
         has_hf = "tokenizer.huggingface.json" in m
         has_template = "tokenizer.chat_template" in m
-        parts.append(_kv_table([
-            (t("模型"), _badge(m.get("tokenizer.ggml.model", "—"))),
-            (t("词表大小"), _badge(f"{len(tokens):,}" if isinstance(tokens, list) else "—")),
+        parts.append(self._kv_table_html([
+            (t("模型"), self._badge_html(m.get("tokenizer.ggml.model", "—"))),
+            (t("词表大小"), self._badge_html(f"{len(tokens):,}" if isinstance(tokens, list) else "—")),
             (t("合并规则数"), f"{len(merges):,}" if isinstance(merges, list) else "—"),
             ("BOS token id", str(m.get("tokenizer.ggml.bos_token_id", "—"))),
             ("EOS token id", str(m.get("tokenizer.ggml.eos_token_id", "—"))),
             ("UNK token id", str(m.get("tokenizer.ggml.unknown_token_id", "—"))),
             ("SEP token id", str(m.get("tokenizer.ggml.separator_token_id", "—"))),
             ("PAD token id", str(m.get("tokenizer.ggml.padding_token_id", "—"))),
-            (t("HF 分词器 JSON"), _badge(t("是"), "#a6e3a1") if has_hf else _badge(t("否"), "#f38ba8")),
-            (t("聊天模板"), _badge(t("是"), "#a6e3a1") if has_template else _badge(t("否"), "#f38ba8")),
+            (t("HF 分词器 JSON"), self._badge_html(t("是"), "ok") if has_hf else self._badge_html(t("否"), "bad")),
+            (t("聊天模板"), self._badge_html(t("是"), "ok") if has_template else self._badge_html(t("否"), "bad")),
         ]))
 
         # Chat Template
@@ -1273,10 +1237,10 @@ class GGUFInspectorDialog(QDialog):
             template_str = str(m["tokenizer.chat_template"])
             # Escape HTML and wrap in a styled code block
             escaped = _html.escape(template_str)
-            parts.append(_section(t("聊天模板"), "\U0001F4AC"))
+            parts.append(self._section_html(t("聊天模板"), "\U0001F4AC"))
             parts.append(
-                f'<div style="background:#181825;border:1px solid #313244;border-radius:4px;'
-                f'padding:10px;font-family:Consolas,monospace;font-size:11px;color:#cdd6f4;'
+                f'<div style="background:{self._h["code_bg"]};border:1px solid {self._h["code_border"]};border-radius:4px;'
+                f'padding:10px;font-family:Consolas,monospace;font-size:11px;color:{self._h["code_fg"]};'
                 f'white-space:pre-wrap;word-break:break-all;max-height:300px;overflow-y:auto;">'
                 f'{escaped}</div>'
             )
@@ -1293,88 +1257,48 @@ class GGUFInspectorDialog(QDialog):
         fn = info.filename_info
         m = info.metadata
 
-        def _badge(val, color="#7aa2f7"):
-            return f'<span style="background:{color};color:#1e1e2e;padding:2px 8px;border-radius:3px;font-weight:bold;">{val}</span>'
-
-        def _section(title, icon=""):
-            label = f"{icon} {title}" if icon else title
-            return (
-                f'<div style="background:#313244;color:#cdd6f4;padding:6px 12px;'
-                f'border-radius:4px;font-weight:bold;font-size:13px;margin-top:12px;margin-bottom:4px;">'
-                f'{label}</div>'
-            )
-
-        def _kv_table(rows):
-            html = '<table style="border-collapse:collapse;width:100%;">'
-            for i, (label, value, *rest) in enumerate(rows):
-                highlight = rest[0] if rest else False
-                bg = "#262637" if i % 2 == 0 else "#1e1e2e"
-                val_style = "color:#a6e3a1;font-weight:bold;" if highlight else "color:#cdd6f4;"
-                html += (
-                    f'<tr style="background:{bg};">'
-                    f'<td style="padding:3px 12px;color:#9399b2;width:160px;white-space:nowrap;">{label}</td>'
-                    f'<td style="padding:3px 12px;{val_style}">{value}</td>'
-                    f'</tr>'
-                )
-            html += '</table>'
-            return html
-
-        def _data_table(headers, rows):
-            html = '<table style="border-collapse:collapse;width:100%;font-size:11px;">'
-            html += '<tr style="background:#45475a;color:#cdd6f4;">'
-            for h in headers:
-                html += f'<td style="padding:4px 10px;font-weight:bold;white-space:nowrap;">{h}</td>'
-            html += '</tr>'
-            for i, row in enumerate(rows):
-                bg = "#262637" if i % 2 == 0 else "#1e1e2e"
-                html += f'<tr style="background:{bg};">'
-                for cell in row:
-                    html += f'<td style="padding:3px 10px;color:#cdd6f4;white-space:nowrap;">{cell}</td>'
-                html += '</tr>'
-            html += '</table>'
-            return html
-
         parts = []
 
         # Full Filename
-        parts.append(_section(t("文件名"), "\U0001F4C4"))
+        parts.append(self._section_html(t("文件名"), "\U0001F4C4"))
         fname = _html.escape(Path(info.path).name)
         parts.append(
-            f'<div style="background:#181825;border:1px solid #313244;border-radius:4px;'
-            f'padding:8px 12px;font-family:Consolas,monospace;font-size:12px;color:#f9e2af;'
+            f'<div style="background:{self._h["code_bg"]};border:1px solid {self._h["code_border"]};border-radius:4px;'
+            f'padding:8px 12px;font-family:Consolas,monospace;font-size:12px;color:{self._h["filename_fg"]};'
             f'word-break:break-all;margin:4px 0;">{fname}</div>'
         )
 
         # Parsed Fields
         if fn and fn.parse_ok:
             mode = t("启发式") if fn.heuristic else t("严格")
-            parts.append(_section(f"{t('解析的文件名字段')} ({mode})", "🔍"))
+            parts.append(self._section_html(f"{t('解析的文件名字段')} ({mode})", "🔍"))
             if fn.heuristic:
                 parts.append(
-                    f'<div style="color:#fab387;font-size:11px;margin-bottom:4px;">'
+                    f'<div style="color:{self._h["warn"]};font-size:11px;margin-bottom:4px;">'
                     f'{t("文件名不完全符合命名规范 — 使用启发式回退解析。")}'
                     f'</div>'
                 )
-            parts.append(_kv_table([
-                ("Sidecar", _badge(fn.sidecar, "#94e2d5") if fn.sidecar else '<span style="color:#585b70;">—</span>'),
-                ("BaseName", _badge(fn.base_name, "#89b4fa") if fn.base_name else '<span style="color:#585b70;">—</span>'),
-                ("SizeLabel", _badge(fn.size_label, "#f9e2af") if fn.size_label else '<span style="color:#585b70;">—</span>'),
-                ("FineTune", fn.fine_tune or '<span style="color:#585b70;">—</span>'),
-                ("Version", _badge(fn.version, "#cba6f7") if fn.version else '<span style="color:#585b70;">—</span>'),
-                (t("编码"), _badge(fn.encoding, "#f38ba8") if fn.encoding else '<span style="color:#585b70;">—</span>'),
-                ("Type", _badge(fn.type, "#fab387") if fn.type else '<span style="color:#585b70;">—</span>'),
-                (t("分片"), fn.shard or '<span style="color:#585b70;">—</span>'),
+            dash = f'<span style="color:{self._h["muted"]};">—</span>'
+            parts.append(self._kv_table_html(label_width=160, rows=[
+                ("Sidecar", self._badge_html(fn.sidecar, "teal") if fn.sidecar else dash),
+                ("BaseName", self._badge_html(fn.base_name, "blue") if fn.base_name else dash),
+                ("SizeLabel", self._badge_html(fn.size_label, "yellow") if fn.size_label else dash),
+                ("FineTune", fn.fine_tune or dash),
+                ("Version", self._badge_html(fn.version, "purple") if fn.version else dash),
+                (t("编码"), self._badge_html(fn.encoding, "bad") if fn.encoding else dash),
+                ("Type", self._badge_html(fn.type, "warn") if fn.type else dash),
+                (t("分片"), fn.shard or dash),
             ]))
         else:
-            parts.append(_section(t("解析结果"), "❌"))
+            parts.append(self._section_html(t("解析结果"), "❌"))
             parts.append(
-                f'<div style="color:#f38ba8;padding:8px;">'
+                f'<div style="color:{self._h["bad"]};padding:8px;">'
                 f'{t("文件名不符合推荐的 GGUF 命名规范。")}'
                 f'</div>'
             )
 
         # Metadata Comparison
-        parts.append(_section(t("元数据对比"), "\U0001F504"))
+        parts.append(self._section_html(t("元数据对比"), "\U0001F504"))
         comparisons = [
             (t("BaseName vs general.basename"), fn.base_name if fn else None, m.get("general.basename")),
             (t("SizeLabel vs general.size_label"), fn.size_label if fn else None, m.get("general.size_label")),
@@ -1386,14 +1310,14 @@ class GGUFInspectorDialog(QDialog):
             fn_str = fn_val or "—"
             meta_str = meta_val or "—"
             match = fn_val and meta_val and fn_val.lower() == str(meta_val).lower()
-            status = _badge(t("匹配"), "#a6e3a1") if match else _badge(t("不匹配"), "#f38ba8")
+            status = self._badge_html(t("匹配"), "ok") if match else self._badge_html(t("不匹配"), "bad")
             cmp_rows.append([
                 f'{label}',
-                f'<span style="color:#9399b2;">{_html.escape(str(fn_str))}</span>',
-                f'<span style="color:#9399b2;">{_html.escape(str(meta_str))}</span>',
+                f'<span style="color:{self._h["label"]};">{_html.escape(str(fn_str))}</span>',
+                f'<span style="color:{self._h["label"]};">{_html.escape(str(meta_str))}</span>',
                 status,
             ])
-        parts.append(_data_table([t("对比"), t("文件名"), t("元数据"), ""], cmp_rows))
+        parts.append(self._data_table_html([t("对比"), t("文件名"), t("元数据"), ""], cmp_rows))
 
         html = (
             '<div style="padding:4px;font-family:Consolas,monospace;font-size:12px;">'
@@ -1414,16 +1338,17 @@ class GGUFInspectorDialog(QDialog):
             flash_attn=self._launcher_params.get("flash_attn", False),
         )
 
+        h = self._h
         level_colors = {
-            "error": QColor("#f38ba8"),
-            "warning": QColor("#fab387"),
-            "info": QColor("#a6e3a1"),
+            "error": QColor(h["bad"]),
+            "warning": QColor(h["warn"]),
+            "info": QColor(h["ok"]),
         }
 
         self._diag_table.setRowCount(len(diags))
         for i, d in enumerate(diags):
             level_item = QTableWidgetItem(d.level.upper())
-            level_item.setForeground(level_colors.get(d.level, QColor("#cdd6f4")))
+            level_item.setForeground(level_colors.get(d.level, QColor(h["value"])))
             self._diag_table.setItem(i, 0, level_item)
             self._diag_table.setItem(i, 1, QTableWidgetItem(d.title))
             self._diag_table.setItem(i, 2, QTableWidgetItem(d.message))
