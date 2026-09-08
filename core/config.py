@@ -111,6 +111,21 @@ def load_server_path() -> str:
     return _load_settings().get("server_path", "") or ""
 
 
+# Last-used preset: the launcher restores on startup the preset the user
+# last clicked 加载 for. The name lives in settings.json ("" = never loaded,
+# i.e. startup keeps the defaults — nothing to restore).
+
+def load_last_preset() -> str:
+    name = _load_settings().get("last_preset", "")
+    return name if isinstance(name, str) else ""
+
+
+def save_last_preset(name: str):
+    settings = _load_settings()
+    settings["last_preset"] = name
+    _save_settings(settings)
+
+
 def save_server_path(path: str):
     global _server_path_cache
     settings = _load_settings()
@@ -219,6 +234,35 @@ class ConfigManager:
         merged = dict(self._defaults)
         merged.update(params)
         return merged
+
+    def preset_stored_keys(self, name):
+        """Keys the preset explicitly stores (post-migration), or None.
+
+        None when the preset is missing/unreadable. Used at startup so a
+        restored preset's explicit values survive the live --help defaults
+        merge: keys the user deliberately set are protected, keys the preset
+        leaves to the defaults are free to adopt the live default.
+        """
+        name = _sanitize_preset_name(name)
+        path = PRESETS_DIR / f"{name}.json"
+        if not path.exists():
+            return None
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except (OSError, IOError, json.JSONDecodeError):
+            return None
+        params = data.get("params", {})
+        if not isinstance(params, dict):
+            return set()
+        keys = set(params.keys())
+        # Mirror load_preset()'s cross-version migration so the protected
+        # set matches the keys that actually end up in the merged params.
+        if "checkpoint_every_n_tokens" in keys and "checkpoint_min_step" not in keys:
+            keys.discard("checkpoint_every_n_tokens")
+            keys.add("checkpoint_min_step")
+        keys.discard("ctx_size_draft")
+        return keys
 
     def delete_preset(self, name):
         name = _sanitize_preset_name(name)

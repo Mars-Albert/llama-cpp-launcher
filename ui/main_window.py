@@ -23,6 +23,7 @@ from core.config import (
     get_server_path, save_server_path, load_server_path,
     save_ui_prefs, load_ui_prefs,
     load_theme, save_theme,
+    load_last_preset, save_last_preset,
     LOGS_DIR, LAST_RUN_LOG,
 )
 from core.constants import (
@@ -148,6 +149,9 @@ class MainWindow(QMainWindow):
         self.max_history = UNDO_HISTORY_MAX
         self._last_saved = dict(self.params)
         self._pending_snapshot = False
+        # Keys a startup-restored preset explicitly set; the live --help
+        # defaults merge must not overwrite them (see _apply_startup_defaults)
+        self._preset_protected_keys = set()
         self._applying_values = False
         self._pending_webui_url = None
         self._log_tail = ""
@@ -181,6 +185,7 @@ class MainWindow(QMainWindow):
         self.init_ui()
         self._connect_signals()
         self._restore_ui_state()
+        self._restore_last_preset()
         self._check_server_info()
 
     def init_ui(self):
@@ -342,6 +347,7 @@ class MainWindow(QMainWindow):
         self.version_label = QLabel(t("🔍 检测中..."))
         self.version_label.setStyleSheet("color: #6b7280; font-size: 12px;")
         self.version_label.setToolTip(t("llama.cpp 版本信息"))
+        self._version_base_tooltip = t("llama.cpp 版本信息")
         control_bar.addWidget(self.version_label)
 
         # E7: parameter-drift notice promoted from a tooltip to a clickable
@@ -1175,9 +1181,13 @@ class MainWindow(QMainWindow):
         name = self.preset_combo.currentText()
         if not name:
             return
-        # C3: load_preset returns the merged params (ConfigManager holds no state)
+        # C3: load_preset returns the merged params (ConfigManager holds no
+        # state); it returns False (not None) on failure, so guard both
         params = self.config.load_preset(name)
-        if params is not None:
+        if not params:
+            return
+        if isinstance(params, dict):
+            save_last_preset(name)  # remember for the next startup
             # A9: presets often travel between machines — clear machine-local
             # paths that do not exist here instead of starting with broken ones
             missing = []
@@ -1199,6 +1209,54 @@ class MainWindow(QMainWindow):
                       name=name, keys=", ".join(missing)), 8000)
             else:
                 self.statusBar().showMessage(t("已加载预设: {name}", name=name), 2000)
+
+    def _restore_last_preset(self):
+        """Restore the last loaded preset on startup (E9).
+
+        Silently skipped when no preset was ever loaded, the preset was
+        deleted, or loading fails — startup must never break on this. The
+        restored state is re-baselined (like _apply_startup_defaults) so it
+        is not an undoable step, and the keys the preset explicitly stored
+        are protected from the live --help defaults merge that runs when the
+        startup worker finishes.
+        """
+        try:
+            name = load_last_preset()
+            if not name:
+                return
+            if not any(p["name"] == name for p in self.config.list_presets()):
+                # Stale pointer: the preset was deleted (or hand-edited away)
+                save_last_preset("")
+                return
+            params = self.config.load_preset(name)
+            if not isinstance(params, dict):
+                return
+            # A9: presets often travel between machines — clear machine-local
+            # paths that do not exist here (same rule as _load_preset)
+            for key in ("model", "mmproj"):
+                path_val = params.get(key) or ""
+                if not path_val:
+                    continue
+                resolved = Path(path_val)
+                if not resolved.is_absolute():
+                    resolved = self.work_dir / resolved
+                if not resolved.exists():
+                    params[key] = ""
+            self._preset_protected_keys = (
+                self.config.preset_stored_keys(name) or set())
+            self._set_current_values(params)
+            # Re-baseline BEFORE the preview tick so the restored preset is
+            # the starting state, not an undoable step (plan A4 semantics)
+            self.params_history[0] = dict(self.params)
+            self._last_saved = dict(self.params)
+            self._pending_snapshot = False
+            self._undo_debounce.stop()
+            self.btn_undo.setEnabled(False)
+            self._update_cmd_preview()
+            self._refresh_presets(select_name=name)
+            self.statusBar().showMessage(t("已加载预设: {name}", name=name), 3000)
+        except Exception:
+            pass
 
     def _save_preset(self):
         # E6: save dialog with an optional "include model paths" switch
@@ -1277,6 +1335,9 @@ class MainWindow(QMainWindow):
         )
         if reply == QMessageBox.StandardButton.Yes:
             self.config.delete_preset(name)
+            if load_last_preset() == name:
+                # Drop the stale startup-restore pointer now, not next launch
+                save_last_preset("")
             self._refresh_presets()
             self.statusBar().showMessage(t("已删除预设: {name}", name=name), 2000)
 
@@ -1771,6 +1832,10 @@ class MainWindow(QMainWindow):
         self.advanced_panel.set_chat_templates(chat_templates)
         refresh_defaults(defaults)
         for key, value in defaults.items():
+            # A preset restored at startup explicitly set these keys — keep
+            # the user's values even when they equal the fallback default.
+            if key in self._preset_protected_keys:
+                continue
             if self.params.get(key, None) == orig_defaults.get(key, None):
                 self.params[key] = value
         if len(self.params_history) == 1:
@@ -1791,6 +1856,10 @@ class MainWindow(QMainWindow):
             tooltip = t("llama.cpp 版本信息") + f"\n{version_line}"
         self.version_label.setText(text)
         self.version_label.setStyleSheet("color: #16a34a; font-size: 12px; font-weight: bold;")
+        # Store the base separately: _validate_params() may run again once the
+        # live --help defaults arrive, and must rebuild from this base instead
+        # of appending to an already-augmented tooltip (duplication bug).
+        self._version_base_tooltip = tooltip
         self.version_label.setToolTip(tooltip)
         self._validate_params()
 
@@ -1826,11 +1895,13 @@ class MainWindow(QMainWindow):
         self._drift_missing = missing
         self._drift_changed = changed
         try:
+            # Rebuild from the stored base (not the live toolTip()) so repeated
+            # calls do not stack duplicate status sections.
             if not missing and not changed:
-                self.version_label.setToolTip(self.version_label.toolTip() + "\n\n" + t("✅ 所有参数与当前版本匹配"))
+                self.version_label.setToolTip(self._version_base_tooltip + "\n\n" + t("✅ 所有参数与当前版本匹配"))
                 self.version_label.setStyleSheet("color: #16a34a; font-size: 12px; font-weight: bold;")
             else:
-                tip = self.version_label.toolTip() + "\n\n" + t("⚠️ 参数差异提示:\n")
+                tip = self._version_base_tooltip + "\n\n" + t("⚠️ 参数差异提示:\n")
                 if missing:
                     tip += t("  以下参数在当前版本中不存在: {keys}", keys=', '.join(missing[:5])) + "\n"
                 if changed:
