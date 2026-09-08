@@ -9,7 +9,19 @@ logger = logging.getLogger(__name__)
 # B3: readiness phrases are at most 24 chars ("starting the main loop"); a
 # 200-char rolling lowercase tail spots them across chunk boundaries without
 # re-joining and re-lowercasing the whole 8KB buffer on every output chunk.
+# The phrase check MUST run on the untruncated region (previous tail + current
+# chunk): if we truncated first, text arriving in the SAME chunk right after a
+# phrase pushes the phrase out of the window before it is ever examined —
+# observed with current llama-server, where the "listening on" line is
+# immediately followed by two NOTICE lines (same burst), leaving the UI stuck
+# in "starting" forever. "listening on" (without the URL) stays stable across
+# the legacy and v9174+ srv log formats.
 _READY_TAIL_LEN = 200
+_READY_PHRASES = (
+    "starting the main loop",  # pre-srv builds
+    "server is listening",     # legacy builds
+    "listening on",            # current builds: "srv llama_server: listening on http://..."
+)
 
 
 class ServerRunner(QObject):
@@ -114,11 +126,14 @@ class ServerRunner(QObject):
                 while self._log_buffer_len > self._max_log_buffer and len(self._log_parts) > 1:
                     removed = self._log_parts.pop(0)
                     self._log_buffer_len -= len(removed)
-            self._ready_tail = (self._ready_tail + text.lower())[-_READY_TAIL_LEN:]
-            if "starting the main loop" in self._ready_tail or "server is listening" in self._ready_tail or "listening on http" in self._ready_tail:
+            low = text.lower()
+            if any(p in (self._ready_tail + low) for p in _READY_PHRASES):
                 self._is_ready = True
+                self._ready_tail = ""
                 self.server_ready.emit()
                 self.state_changed.emit("running")
+            else:
+                self._ready_tail = (self._ready_tail + low)[-_READY_TAIL_LEN:]
 
     def _read_stream(self, read_method):
         data = read_method().data()
