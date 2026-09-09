@@ -155,6 +155,7 @@
   4. **④ i18n 缺失检查**：`schema_i18n_strings()` 导出全部 schema 字符串，`tests/test_params_schema.py::test_schema_i18n_coverage` 强制含 CJK 的字符串必须有 `_EN` 条目（已实际抓到并修复 3 个旧缺口："禁用 (0)"、dry-sequence-breaker placeholder、spec-draft-override-tensor label）。
 - **附带**：`core/defaults.py` 的 `_FALLBACK_DEFAULTS` 与三张 `--help` 解析映射（`_VALUE_FLAG_MAP`/`_FLAG_MAP`/`_NEG_FLAG_MAP`）也由 schema 派生（`fallback_defaults()`/`help_flag_maps()`，parser 以字符串名传递避免循环导入）；`_FLAG_INDEX`（B4）逐键一致。
 - **验证**：新旧 UI 全量状态差分（225 控件 × 范围/步长/项目/占位符/tooltip/初始值/行序/tab 标题）0 差异，中英文 retranslate 同样 0 差异；CommandBuilder 对 1000 组随机值的 emit 差分 0 差异；get/set_values 对 20 组值字典 + 坏值字典差分 0 差异；245 测试全绿。
+- **后续（2026-09）tab 语义重分组**：原 7 tab（模型/上下文/采样/GPU/服务/聊天/高级）是早期按大类粗分，其中 GPU tab 达 77 行且混了 43 行投机解码参数。对照 llama.cpp 源码语义（`llama-server --help` 的 common/sampling/speculative/server-specific 分区、`common_params_sampling`/`common_params_speculative` 结构体、server README 的 Multimodal/Tools/MCP 章节）重分为 9 个 tab：模型（+来源+LoRA/控制向量+多模态）、上下文（+KV cache+RoPE/YaRN）、采样、GPU/性能（+CPU 线程/亲和/优先级）、**投机解码（新）**、服务（+embedding/rerank 模式+router）、**Agent/工具（新）**、聊天/推理、高级（只剩文本 IO+日志+extra_args）。参数键、emit、默认值全部不变，仅 `tab`/`row` 字段与 UI 顺序变化；持久化 tab 位置改用稳定键 `adv_tab_key`（`adv_tab` 索引仍兼容旧值）。
 
 ### C2. `main_window.py` 2774 行拆分 ✅
 - 拆出：

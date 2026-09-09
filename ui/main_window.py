@@ -1,9 +1,11 @@
 import html as html_mod
+import platform
 import re
 import shutil
 import socket
 import subprocess
 import webbrowser
+from importlib.metadata import version as pkg_version
 from pathlib import Path
 from datetime import datetime
 
@@ -14,7 +16,7 @@ from PyQt6.QtWidgets import (
     QCheckBox, QGroupBox, QTabWidget, QTextEdit,
     QDialog, QDialogButtonBox, QFormLayout, QLineEdit, QToolButton
 )
-from PyQt6.QtCore import Qt, QTimer, QThread, pyqtSignal, QPoint
+from PyQt6.QtCore import Qt, QTimer, QThread, pyqtSignal, QPoint, PYQT_VERSION_STR
 from PyQt6.QtGui import (QAction, QFont, QTextOption, QIcon, QPixmap, QPainter,
                          QColor, QTextCursor, QTextDocument, QKeySequence, QShortcut,
                          QImage, QPolygon, QPen)
@@ -36,11 +38,21 @@ from ui.log_parser import colorize_log_line, parse_log_line, line_level
 from ui.command_builder import CommandBuilder, quote_arg
 from ui.runtime_info import build_info_html, empty_info_html
 from core.runner import ServerRunner
+from core.params_schema import PARAMS_BY_KEY
 from core.i18n import t, get_language, set_language
 from ui.model_browser import ModelBrowser
 from ui.basic_panel import BasicPanel
 from ui.advanced_panel import AdvancedPanel
 from ui.gguf_inspector import GGUFInspectorDialog
+
+try:
+    # Single source of truth for the launcher version (build_config.py is
+    # rewritten by release CI to match the tag). The frozen exe bundles it
+    # via hiddenimports in llama_cpp_launcher.spec; the fallback only hits
+    # for exes built before it was bundled.
+    from build_config import VERSION as APP_VERSION
+except ImportError:
+    APP_VERSION = "dev"
 
 
 def _ensure_arrow_image(direction: str, color: str) -> Path:
@@ -289,7 +301,7 @@ class MainWindow(QMainWindow):
         self._check_server_info()
 
     def init_ui(self):
-        self.setWindowTitle("🦙 llama.cpp Launcher")
+        self.setWindowTitle(f"🦙 llama.cpp Launcher v{APP_VERSION}")
         self.resize(WINDOW_WIDTH, WINDOW_HEIGHT)
         self.setMinimumSize(MIN_WINDOW_WIDTH, MIN_WINDOW_HEIGHT)
         self._apply_theme()
@@ -1529,10 +1541,18 @@ class MainWindow(QMainWindow):
         if isinstance(prefs.get("mode"), int) and not isinstance(prefs.get("mode"), bool) \
                 and prefs["mode"] in (0, 1):
             self.mode_combo.setCurrentIndex(prefs["mode"])
-        adv_tab = prefs.get("adv_tab")
-        if isinstance(adv_tab, int) and not isinstance(adv_tab, bool) \
-                and 0 <= adv_tab < self.advanced_panel.tabs.count():
-            self.advanced_panel.tabs.setCurrentIndex(adv_tab)
+        # adv_tab_key (stable tab key) wins over adv_tab (index) — the tab
+        # order changed with the 9-tab semantic regrouping, so a saved index
+        # from an older version can point at the wrong tab.
+        tab_keys = self.advanced_panel.tab_keys()
+        adv_tab_key = prefs.get("adv_tab_key")
+        if isinstance(adv_tab_key, str) and adv_tab_key in tab_keys:
+            self.advanced_panel.tabs.setCurrentIndex(tab_keys.index(adv_tab_key))
+        else:
+            adv_tab = prefs.get("adv_tab")
+            if isinstance(adv_tab, int) and not isinstance(adv_tab, bool) \
+                    and 0 <= adv_tab < self.advanced_panel.tabs.count():
+                self.advanced_panel.tabs.setCurrentIndex(adv_tab)
         bot_tab = prefs.get("bottom_tab")
         if isinstance(bot_tab, int) and not isinstance(bot_tab, bool) \
                 and 0 <= bot_tab < self.tab_widget.count():
@@ -1546,6 +1566,7 @@ class MainWindow(QMainWindow):
             "splitter": [int(s) for s in self.splitter.sizes()],
             "mode": self.mode_combo.currentIndex(),
             "adv_tab": self.advanced_panel.tabs.currentIndex(),
+            "adv_tab_key": self.advanced_panel.current_tab_key(),
             "bottom_tab": self.tab_widget.currentIndex(),
         })
 
@@ -1651,29 +1672,46 @@ class MainWindow(QMainWindow):
         msg = QMessageBox(self)
         msg.setWindowTitle(t("关于"))
         msg.setIcon(QMessageBox.Icon.Information)
-        version_info = ""
+        # Version block: launcher version (build_config), runtime
+        # (Python / PyQt6), and the resolved llama-server binary + its
+        # self-reported version (fetched asynchronously at startup).
+        try:
+            pyqt_ver = pkg_version("PyQt6")
+        except Exception:
+            pyqt_ver = PYQT_VERSION_STR
+        try:
+            server_path = get_server_path()
+        except Exception:
+            server_path = "llama-server"
+        version_info = (
+            t("版本: {v}", v=f"v{APP_VERSION}") + "<br>"
+            + t("Python {p} · PyQt6 {q}",
+                p=platform.python_version(), q=pyqt_ver) + "<br>"
+            + t("llama-server: {path}", path=server_path) + "<br>"
+        )
         if getattr(self, "_server_version_line", ""):
-            version_info = t("当前 llama-server: {line}",
-                             line=self._server_version_line) + "<br><br>"
+            version_info += t("当前 llama-server: {line}",
+                              line=self._server_version_line) + "<br>"
+        version_info += "<br>"
         msg.setText(
-            "<b>🦙 llama.cpp Launcher</b><br><br>"
+            f"<b>🦙 llama.cpp Launcher v{APP_VERSION}</b><br><br>"
             + t("一个功能丰富的图形化 llama-server 启动器，帮助您轻松管理和运行 GGUF 格式的大语言模型。<br><br>")
             + version_info
             + t("<b>主要功能：</b><br>")
-            + t("📦 <b>模型管理</b> — 自动扫描本地 GGUF 模型，显示文件大小，快速选择模型和多模态投影（mmproj）<br>")
-            + t("⚙️ <b>基础/高级模式</b> — 基础模式提供常用参数快速调节，高级模式支持 100+ 参数精细调优<br>")
-            + t("🎲 <b>采样控制</b> — 温度、Top-P、Top-K、Min-P、重复惩罚、DRY、Mirostat 等完整采样参数<br>")
-            + t("🖥️ <b>GPU 优化</b> — 智能 GPU 层数分配、Flash Attention、KV Cache 卸载、多 GPU 张量分割<br>")
-            + t("💬 <b>聊天模板</b> — 支持 Jinja 模板引擎，自动检测模型聊天格式，支持推理模式（Reasoning）<br>")
-            + t("🌐 <b>服务管理</b> — 自定义主机/端口、API 密钥、SSL 加密、连续批处理、多槽位并发<br>")
-            + t("💾 <b>预设系统</b> — 保存、加载、导入/导出参数预设，快速切换不同模型配置<br>")
-            + t("📋 <b>命令预览</b> — 实时生成 llama-server 命令行，一键复制，方便脚本集成<br>")
-            + t("📊 <b>运行监控</b> — 实时日志解析（兼容新旧 llama.cpp 格式）、硬件信息展示、运行时间统计<br>")
-            + t("🔬 <b>GGUF 检查器</b> — 深度解析 GGUF 文件结构：元数据、张量信息、量化分布、逐层分析、文件名校验、诊断检查<br>")
-            + t("🌐 <b>国际化</b> — 支持中文/英文界面实时切换，无需重启<br>")
+            + t("📦 <b>模型管理</b> — 递归扫描并自动分类本地 GGUF 文件（模型 / mmproj / LoRA，含大小显示），自动匹配同名 mmproj；高级模式还支持 HuggingFace / Docker / URL 指定模型<br>")
+            + t("🎛️ <b>基础 / 高级模式</b> — 基础模式滑杆快调常用参数；高级模式 {tabs} 个标签页覆盖 {n} 个 llama-server 参数，每个参数均带 \"?\" 说明<br>",
+                tabs=len(AdvancedPanel._TAB_TITLES), n=len(PARAMS_BY_KEY))
+            + t("🖥️ <b>GPU / 性能</b> — 启动时自动检测 GPU 设备（型号 / 显存），GPU 层卸载、Flash Attention、KV Cache 卸载、多 GPU 张量分割<br>")
+            + t("🎲 <b>采样与投机解码</b> — 温度 / Top-P / Top-K / Min-P / 重复惩罚 / DRY / Mirostat 等完整采样参数；草稿模型、ngram、lookup cache 投机解码<br>")
+            + t("🌐 <b>服务管理</b> — 主机 / 端口、API 密钥、SSL、CORS、连续批处理、多槽位、router 与 embedding / rerank 模式<br>")
+            + t("🤖 <b>Agent / 工具与聊天</b> — 工具调用 / MCP 配置、聊天模板、推理（Reasoning）模式<br>")
+            + t("💾 <b>预设系统</b> — 保存 / 加载 / 导入 / 导出参数预设，记录创建时间、可选包含模型路径，启动时自动恢复上次使用的预设<br>")
+            + t("📋 <b>命令与日志</b> — 实时生成 llama-server 命令行一键复制；实时日志解析（兼容新旧格式）、Ctrl+F 搜索、级别过滤、完整日志导出<br>")
+            + t("🔬 <b>GGUF 检查器</b> — 概览 / 统计 / 元数据 / 张量 / 分词器 / 文件名 / 诊断共 7 个标签页，导出 JSON / CSV / Markdown，并可对照当前启动配置给出诊断<br>")
+            + t("🔗 <b>版本自适应</b> — 启动时从 llama-server --help 动态解析默认值与聊天模板，llama.cpp 升级自动跟随并提示参数差异<br>")
+            + t("🎨 <b>界面体验</b> — 浅色 / 深色主题、中 / 英文界面实时切换、窗口状态记忆、参数修改可撤销<br>")
             + "<br>"
             + t("<b>技术栈：</b> PyQt6 · Python · llama.cpp<br>")
-            + t("默认参数自动从 llama-server --help 动态获取，确保与您的版本完全匹配。")
         )
         msg.setStandardButtons(QMessageBox.StandardButton.Ok)
         msg.exec()
@@ -2078,12 +2116,20 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(t("就绪"))
 
     def _apply_theme(self):
-        """E5: apply the current theme to the window and to the application
-        (so top-level dialogs — GGUF inspector, path dialogs — follow it)."""
+        """E5: apply the current theme application-wide.
+
+        The sheet is applied at APPLICATION level only — deliberately NOT on
+        the main window. A stylesheet set on a parent widget changes how Qt
+        resolves styles for top-level child windows: with a window-level
+        sheet, the QComboBox popup container (QComboBoxPrivateContainer)
+        loses the global QWidget background rule and falls back to the
+        default light palette — a white ring around the dropdown in dark
+        mode. The app-level sheet covers the main window and every top-level
+        dialog (GGUF inspector, path dialogs) alike.
+        """
         qss = self._get_stylesheet(self.theme)
-        self.setStyleSheet(qss)
         # Theme-aware sheet for the bottom tabs (their inline QSS would
-        # otherwise override the app/window dark rules); init_ui() calls
+        # otherwise override the app dark rules); init_ui() calls
         # _apply_theme() before the tab widget exists, hence the guard
         tabs = getattr(self, "tab_widget", None)
         if tabs is not None:

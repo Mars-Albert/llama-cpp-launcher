@@ -6,12 +6,14 @@ from PyQt6.QtWidgets import (
     QTabWidget, QGroupBox, QComboBox, QSpinBox, QDoubleSpinBox,
     QLineEdit, QCheckBox, QTextEdit, QPushButton, QListWidget,
     QListWidgetItem, QFileDialog, QLabel, QAbstractItemView,
-    QScrollArea
+    QScrollArea, QToolButton
 )
 from PyQt6.QtCore import Qt
 from core.i18n import t
 from core.constants import DEFAULT_HOST, DEFAULT_PORT, MAIN_GPU_MAX
 from core.params_schema import PARAMS_BY_KEY, UI_PARAMS, tab_params
+from core.params_help import has_help
+from ui.param_help import make_help_button
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +45,16 @@ class AdvancedPanel(QWidget):
         """Update the defaults baseline (live-parsed defaults arriving after startup, plan A10)."""
         self._defaults = dict(defaults)
 
+    def tab_keys(self):
+        """Tab keys in UI order (stable identifiers for persistence)."""
+        return [k for k, _ in self._TAB_TITLES]
+
+    def current_tab_key(self):
+        """Key of the currently selected tab (or '' if none)."""
+        idx = self.tabs.currentIndex()
+        keys = self.tab_keys()
+        return keys[idx] if 0 <= idx < len(keys) else ""
+
     def set_chat_templates(self, templates):
         """Replace the chat-template list, preserving the current selection (plan A10)."""
         self._chat_templates = list(templates)
@@ -64,15 +76,34 @@ class AdvancedPanel(QWidget):
         self._browse_btns = []
         self._add_rm_btns = []
         self._section_labels = []
+        self._help_btns = []
         self.tabs = QTabWidget()
         for tab_key, tab_name in self._TAB_TITLES:
             self.tabs.addTab(self._create_tab(tab_key), t(tab_name))
         layout.addWidget(self.tabs)
 
-    def _add_form_row(self, form, label_key, widget):
+    def _add_form_row(self, form, label_key, widget, param_key=None,
+                      right_label=False):
+        """Add a label+widget row; if the param has an explanation, a small
+        "?" button is appended to the label (param help card on click)."""
         lbl = QLabel(t(label_key))
         self._form_labels[label_key] = lbl
-        form.addRow(lbl, widget)
+        btn = None
+        if param_key is not None and has_help(param_key):
+            btn = make_help_button(param_key, lambda: self._defaults)
+            self._help_btns.append(btn)
+        if btn is None:
+            form.addRow(lbl, widget)
+            return lbl
+        holder = QWidget()
+        hl = QHBoxLayout(holder)
+        hl.setContentsMargins(0, 0, 0, 0)
+        hl.setSpacing(2)
+        if right_label:
+            hl.addStretch()  # keep the model tab's right-aligned labels
+        hl.addWidget(lbl)
+        hl.addWidget(btn)
+        form.addRow(holder, widget)
         return lbl
 
     def _browse_to_edit(self, edit, mode="file", title=None, filter_str="GGUF Files (*.gguf)"):
@@ -85,11 +116,18 @@ class AdvancedPanel(QWidget):
 
     # -- C1: schema-driven UI construction ------------------------------
     #
-    # The seven tabs are built from core.params_schema: each Param carries
+    # The nine tabs are built from core.params_schema: each Param carries
     # its tab, row order, label, and the full widget definition (kind,
-    # range, items, placeholder, tooltip, browse dialog, ...). The two
-    # non-parameter rows (the E8 GPU-info label and the draft-model
-    # section label) are anchored after the parameter that precedes them.
+    # range, items, placeholder, tooltip, browse dialog, ...). The one
+    # non-parameter row (the E8 GPU-info label) is anchored after the
+    # parameter that precedes it (gpu tab, after tensor_split).
+    #
+    # Tab grouping follows the semantic structure of llama.cpp
+    # (common_params_sampling / common_params_speculative / mmproj /
+    # cpuparams, plus the server README's Multimodal/Tools/MCP sections):
+    # model (+sources+adapters+mmproj), context (+KV cache+RoPE/YaRN),
+    # sampling, gpu (+CPU threads/affinity), spec (speculative decoding),
+    # server, agent (tools/MCP), chat, advanced (logging/text I/O).
     #
     # The schema stores raw Chinese literals; t() is applied at build
     # time here (labels via _add_form_row, items/placeholders/tooltips
@@ -100,7 +138,9 @@ class AdvancedPanel(QWidget):
         ("context", "上下文"),
         ("sampling", "采样"),
         ("gpu", "GPU/性能"),
+        ("spec", "投机解码"),
         ("server", "服务"),
+        ("agent", "Agent/工具"),
         ("chat", "聊天/推理"),
         ("advanced", "高级"),
     )
@@ -136,10 +176,6 @@ class AdvancedPanel(QWidget):
                 self.gpu_info_label.setStyleSheet("color: #6b7280; font-size: 11px;")
                 self.gpu_info_label.setVisible(False)
                 form.addRow(self.gpu_info_label)
-            if tab_key == "gpu" and p.key == "op_offload":
-                draft_section_lbl = QLabel(f"<b>{t('--- 草稿模型 (投机解码) ---')}</b>")
-                self._section_labels.append(("--- 草稿模型 (投机解码) ---", draft_section_lbl))
-                form.addRow(draft_section_lbl)
         scroll.setWidget(content)
         tab_layout = QVBoxLayout(tab)
         tab_layout.addWidget(scroll)
@@ -151,7 +187,8 @@ class AdvancedPanel(QWidget):
         if widget is None:
             widget = row_widget
         setattr(self, p.wattr, widget)
-        self._add_form_row(form, p.label, row_widget)
+        self._add_form_row(form, p.label, row_widget, param_key=p.key,
+                           right_label=(p.tab == "model"))
 
     def _build_param_row(self, form, p):
         kind = p.widget
@@ -246,7 +283,8 @@ class AdvancedPanel(QWidget):
         if p.curtext:
             w.setCurrentText(p.curtext)
         setattr(self, p.wattr, w)
-        self._add_form_row(form, p.label, w)
+        self._add_form_row(form, p.label, w, param_key=p.key,
+                           right_label=(p.tab == "model"))
         if p.value != "ngl":
             return
         # ngl composite: the editable combo plus a helper spinbox; the
@@ -257,7 +295,7 @@ class AdvancedPanel(QWidget):
         spin.setToolTip(t("手动指定层数"))
         spin.valueChanged.connect(lambda v: w.setEditText(str(v)))
         self.adv_ngl_spin = spin
-        self._add_form_row(form, "手动指定层数:", spin)
+        self._add_form_row(form, "手动指定层数:", spin, param_key="n_gpu_layers")
 
     def _make_list_row(self, title, filter_str):
         w = QWidget()
@@ -419,14 +457,9 @@ class AdvancedPanel(QWidget):
         label.setVisible(True)
 
     def retranslate_ui(self):
-        # Tab titles
-        self.tabs.setTabText(0, t("模型"))
-        self.tabs.setTabText(1, t("上下文"))
-        self.tabs.setTabText(2, t("采样"))
-        self.tabs.setTabText(3, t("GPU/性能"))
-        self.tabs.setTabText(4, t("服务"))
-        self.tabs.setTabText(5, t("聊天/推理"))
-        self.tabs.setTabText(6, t("高级"))
+        # Tab titles (from _TAB_TITLES — same source as init_ui)
+        for i, (_, tab_name) in enumerate(self._TAB_TITLES):
+            self.tabs.setTabText(i, t(tab_name))
 
         # Form labels
         for key, lbl in self._form_labels.items():
@@ -453,6 +486,10 @@ class AdvancedPanel(QWidget):
                 w = getattr(self, p.wattr)
                 w.setPlaceholderText(t(p.placeholder))
         self._render_gpu_info()
+
+        # Help buttons (? tooltips)
+        for btn in self._help_btns:
+            btn.setToolTip(t("查看参数说明"))
 
         # Buttons
         for btn in self._browse_btns:

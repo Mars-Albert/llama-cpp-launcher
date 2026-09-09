@@ -12,6 +12,9 @@ a = Analysis(
     binaries=[],
     datas=[],
     hiddenimports=[
+        # Launcher version (ui/main_window.py imports APP_VERSION for the
+        # window title and the About dialog)
+        'build_config',
         'PyQt6.sip',
         'PyQt6.QtCore',
         'PyQt6.QtGui',

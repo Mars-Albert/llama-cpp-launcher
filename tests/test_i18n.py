@@ -59,6 +59,16 @@ def test_en_entries_are_nonempty():
     assert not empty, f"empty EN translations: {empty}"
 
 
+def test_advanced_tab_titles_translated():
+    # Tab titles are t()-ed via a loop (dynamic key), so the AST scan above
+    # cannot see the literals — pin _EN coverage of _TAB_TITLES explicitly.
+    import core.i18n as I
+    from ui.advanced_panel import AdvancedPanel
+
+    missing = [name for _, name in AdvancedPanel._TAB_TITLES if name not in I._EN]
+    assert not missing, f"tab titles missing from _EN: {missing}"
+
+
 def test_t_format_failure_falls_back_to_source():
     import core.i18n as I
 

@@ -59,14 +59,17 @@ def test_mainwindow_theme_and_toggle(tmp_path, monkeypatch):
     try:
         assert w.theme == "dark"
         assert w._theme_action.isChecked()
-        assert "#1e1e2e" in w.styleSheet()
-        # the application-level sheet follows the theme too (for dialogs)
+        # The sheet lives at application level only; a window-level sheet
+        # triggers a Qt quirk that reverts combo popup containers to the
+        # light palette (see _apply_theme docstring).
+        assert w.styleSheet() == ""
+        # the application-level sheet follows the theme (window + dialogs)
         assert "#1e1e2e" in app.styleSheet()
 
         w._theme_action.trigger()
         assert w.theme == "light"
         assert not w._theme_action.isChecked()
-        assert "#f0f2f5" in w.styleSheet()
+        assert "#f0f2f5" in app.styleSheet()
         assert CC.load_theme() == "light"  # persisted
 
         w._theme_action.trigger()
@@ -87,6 +90,35 @@ def test_theme_default_from_settings(tmp_path, monkeypatch):
     try:
         assert w.theme == "dark"
         assert w._theme_action.isChecked()
+    finally:
+        w.close()
+        app.setStyleSheet("")
+
+
+def test_combo_popup_container_follows_theme(tmp_path, monkeypatch):
+    """Regression: when a window-level stylesheet is present, Qt reverts the
+    QComboBox popup container (QComboBoxPrivateContainer) to the default
+    light palette — a white ring around the dark dropdown. The container
+    interior must render in a theme (dark) color, not white."""
+    app = _qapp()
+    monkeypatch.setattr(CC, "SETTINGS_FILE", tmp_path / "settings.json")
+    from core.defaults import _FALLBACK_DEFAULTS
+    w = MainWindow(work_dir=None, defaults=dict(_FALLBACK_DEFAULTS), theme="dark")
+    try:
+        w.show()
+        app.processEvents()
+        c = w.mode_combo
+        c.showPopup()
+        app.processEvents()
+        try:
+            cont = c.view().parent()
+            img = cont.grab().toImage()
+            px = img.pixelColor(3, 3)
+            # not the default light palette (white) background
+            assert not (px.red() > 200 and px.green() > 200 and px.blue() > 200), \
+                f"combo popup container fell back to the light palette: #{px.name()}"
+        finally:
+            c.hidePopup()
     finally:
         w.close()
         app.setStyleSheet("")

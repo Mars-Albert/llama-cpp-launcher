@@ -78,9 +78,9 @@ def test_emit_and_widget_fields():
 
 
 def test_rows_unique_and_contiguous_per_tab():
-    # Rows reserved for non-parameter rows (E8 GPU-info label and the
-    # draft-model section label, both on the gpu tab).
-    reserved = {"gpu": {5, 38}}
+    # Rows reserved for non-parameter rows (E8 GPU-info label on the gpu tab,
+    # anchored after tensor_split).
+    reserved = {"gpu": {5}}
     seen_tabs = set()
     for tab in TAB_ORDER:
         rows = [p.row for p in tab_params(tab)]

@@ -9,6 +9,7 @@ from PyQt6.QtCore import Qt
 from core.i18n import t
 from core.constants import DEFAULT_HOST, DEFAULT_PORT, CONTEXT_SIZE_PRESETS, MAIN_GPU_MAX
 from ui.advanced_panel import SPEC_TYPE_ITEMS
+from ui.param_help import make_help_button
 
 logger = logging.getLogger(__name__)
 
@@ -18,8 +19,19 @@ class BasicPanel(QWidget):
     def __init__(self, defaults=None, parent=None):
         super().__init__(parent)
         self._defaults = defaults or {}
+        self._help_btns = []
         self._setup_ui()
         self._apply_defaults()
+
+    def _add_help(self, layout, key):
+        """Append a small '?' help button to a row layout (no-op if the
+        parameter has no explanation yet)."""
+        from core.params_help import has_help
+        if not has_help(key):
+            return
+        btn = make_help_button(key, lambda: self._defaults)
+        self._help_btns.append(btn)
+        layout.addWidget(btn)
 
     def _apply_defaults(self):
         d = self._defaults
@@ -54,6 +66,7 @@ class BasicPanel(QWidget):
         self._lbl_model = QLabel(t("模型:"))
         self._lbl_model.setFixedWidth(56)
         row1.addWidget(self._lbl_model)
+        self._add_help(row1, "model")
         self.model_combo = QComboBox()
         self.model_combo.setEditable(True)
         row1.addWidget(self.model_combo)
@@ -68,6 +81,7 @@ class BasicPanel(QWidget):
         self._lbl_mmproj = QLabel(t("mmproj:"))
         self._lbl_mmproj.setFixedWidth(56)
         row2.addWidget(self._lbl_mmproj)
+        self._add_help(row2, "mmproj")
         self.mmproj_combo = QComboBox()
         self.mmproj_combo.setEditable(True)
         row2.addWidget(self.mmproj_combo)
@@ -80,6 +94,7 @@ class BasicPanel(QWidget):
         row3 = QHBoxLayout()
         self._lbl_ngl = QLabel(t("GPU层数:"))
         row3.addWidget(self._lbl_ngl)
+        self._add_help(row3, "n_gpu_layers")
         self.ngl_combo = QComboBox()
         self.ngl_combo.addItems(["auto", "all"])
         self.ngl_combo.setEditable(True)
@@ -96,6 +111,7 @@ class BasicPanel(QWidget):
         row3.addSpacing(12)
         self._lbl_ctx = QLabel(t("上下文:"))
         row3.addWidget(self._lbl_ctx)
+        self._add_help(row3, "ctx_size")
         self.ctx_spin = QSpinBox()
         self.ctx_spin.setRange(0, 999999)
         self.ctx_spin.setValue(0)
@@ -131,6 +147,7 @@ class BasicPanel(QWidget):
         row1 = QHBoxLayout()
         self._lbl_temp = QLabel(t("温度:"))
         row1.addWidget(self._lbl_temp)
+        self._add_help(row1, "temp")
         self.temp_slider = QSlider(Qt.Orientation.Horizontal)
         self.temp_slider.setRange(0, 200)
         self.temp_slider.setValue(80)
@@ -145,6 +162,7 @@ class BasicPanel(QWidget):
         row2 = QHBoxLayout()
         self._lbl_top_p = QLabel(t("Top-P:"))
         row2.addWidget(self._lbl_top_p)
+        self._add_help(row2, "top_p")
         self.top_p_slider = QSlider(Qt.Orientation.Horizontal)
         self.top_p_slider.setRange(0, 100)
         self.top_p_slider.setValue(95)
@@ -157,6 +175,7 @@ class BasicPanel(QWidget):
         row2.addSpacing(12)
         self._lbl_top_k = QLabel(t("Top-K:"))
         row2.addWidget(self._lbl_top_k)
+        self._add_help(row2, "top_k")
         self.top_k_spin = QSpinBox()
         self.top_k_spin.setRange(0, 200)
         self.top_k_spin.setValue(40)
@@ -165,6 +184,7 @@ class BasicPanel(QWidget):
         row2.addSpacing(12)
         self._lbl_min_p = QLabel(t("Min-P:"))
         row2.addWidget(self._lbl_min_p)
+        self._add_help(row2, "min_p")
         self.min_p_slider = QSlider(Qt.Orientation.Horizontal)
         self.min_p_slider.setRange(0, 100)
         self.min_p_slider.setValue(5)
@@ -179,6 +199,7 @@ class BasicPanel(QWidget):
         row3 = QHBoxLayout()
         self._lbl_repeat_penalty = QLabel(t("重复惩罚:"))
         row3.addWidget(self._lbl_repeat_penalty)
+        self._add_help(row3, "repeat_penalty")
         self.repeat_penalty_slider = QSlider(Qt.Orientation.Horizontal)
         self.repeat_penalty_slider.setRange(0, 200)
         self.repeat_penalty_slider.setValue(100)
@@ -199,10 +220,12 @@ class BasicPanel(QWidget):
         layout.setSpacing(12)
         self._lbl_host = QLabel(t("地址:"))
         layout.addWidget(self._lbl_host)
+        self._add_help(layout, "host")
         self.host_edit = QLineEdit(DEFAULT_HOST)
         self.host_edit.setFixedWidth(110)
         layout.addWidget(self.host_edit)
         layout.addWidget(QLabel(":"))
+        self._add_help(layout, "port")
         self.port_spin = QSpinBox()
         self.port_spin.setRange(1, 65535)
         self.port_spin.setValue(DEFAULT_PORT)
@@ -211,6 +234,7 @@ class BasicPanel(QWidget):
         layout.addSpacing(12)
         self._lbl_parallel = QLabel(t("并行:"))
         layout.addWidget(self._lbl_parallel)
+        self._add_help(layout, "parallel")
         self.parallel_spin = QSpinBox()
         self.parallel_spin.setRange(-1, 64)
         self.parallel_spin.setValue(1)
@@ -220,10 +244,12 @@ class BasicPanel(QWidget):
         self.chk_webui = QCheckBox(t("WebUI"))
         self.chk_webui.setChecked(True)
         layout.addWidget(self.chk_webui)
+        self._add_help(layout, "webui")
         layout.addSpacing(12)
         self.chk_verbose = QCheckBox(t("Verbose"))
         self.chk_verbose.setChecked(False)
         layout.addWidget(self.chk_verbose)
+        self._add_help(layout, "verbose")
         layout.addStretch()
         return self._server_group
 
@@ -238,6 +264,7 @@ class BasicPanel(QWidget):
         self.flash_attn_combo.setFixedWidth(78)
         self._lbl_flash_attn = QLabel(t("FlashAttn:"))
         layout.addWidget(self._lbl_flash_attn)
+        self._add_help(layout, "flash_attn")
         layout.addWidget(self.flash_attn_combo)
         layout.addSpacing(12)
         self.reasoning_combo = QComboBox()
@@ -246,6 +273,7 @@ class BasicPanel(QWidget):
         self.reasoning_combo.setFixedWidth(78)
         self._lbl_reasoning = QLabel(t("推理:"))
         layout.addWidget(self._lbl_reasoning)
+        self._add_help(layout, "reasoning")
         layout.addWidget(self.reasoning_combo)
         layout.addSpacing(12)
         self.split_mode_combo = QComboBox()
@@ -254,6 +282,7 @@ class BasicPanel(QWidget):
         self.split_mode_combo.setFixedWidth(78)
         self._lbl_split_mode = QLabel(t("分割模式:"))
         layout.addWidget(self._lbl_split_mode)
+        self._add_help(layout, "split_mode")
         layout.addWidget(self.split_mode_combo)
         layout.addSpacing(12)
         self.spec_type_combo = QComboBox()
@@ -262,6 +291,7 @@ class BasicPanel(QWidget):
         self.spec_type_combo.setFixedWidth(140)
         self._lbl_spec_type = QLabel(t("投机类型:"))
         layout.addWidget(self._lbl_spec_type)
+        self._add_help(layout, "spec_type")
         layout.addWidget(self.spec_type_combo)
         layout.addSpacing(12)
         self.draft_max_spin = QSpinBox()
@@ -270,6 +300,7 @@ class BasicPanel(QWidget):
         self.draft_max_spin.setFixedWidth(60)
         self._lbl_draft_max = QLabel(t("草稿Token:"))
         layout.addWidget(self._lbl_draft_max)
+        self._add_help(layout, "draft_max")
         layout.addWidget(self.draft_max_spin)
         layout.addStretch()
         return self._toggles_group
@@ -449,4 +480,6 @@ class BasicPanel(QWidget):
         self._lbl_split_mode.setText(t("分割模式:"))
         self._lbl_spec_type.setText(t("投机类型:"))
         self._lbl_draft_max.setText(t("草稿Token:"))
+        for btn in self._help_btns:
+            btn.setToolTip(t("查看参数说明"))
         self._render_gpu_info()
