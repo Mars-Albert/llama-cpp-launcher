@@ -88,6 +88,18 @@ def load_ui_prefs() -> dict:
     return prefs if isinstance(prefs, dict) else {}
 
 
+def save_ui_pref(key: str, value):
+    """E10: update a single 'ui' prefs entry without rewriting the rest
+    (e.g. quick_params changes are persisted immediately, not on close)."""
+    settings = _load_settings()
+    prefs = settings.get("ui")
+    if not isinstance(prefs, dict):
+        prefs = {}
+    prefs[key] = value
+    settings["ui"] = prefs
+    _save_settings(settings)
+
+
 # E5: light/dark theme, persisted in settings.json
 
 def load_theme() -> str:

@@ -100,6 +100,22 @@ class Param:
 P = Param
 
 # ---------------------------------------------------------------------------
+# Tab identity + display titles (Chinese source, t()-ed by consumers).
+# Shared by AdvancedPanel (tabs) and the E10 quick-toggles dialog (groups).
+# ---------------------------------------------------------------------------
+TAB_TITLES = (
+    ("model", "模型"),
+    ("context", "上下文"),
+    ("sampling", "采样"),
+    ("gpu", "GPU/性能"),
+    ("spec", "投机解码"),
+    ("server", "服务"),
+    ("agent", "Agent/工具"),
+    ("chat", "聊天/推理"),
+    ("advanced", "高级"),
+)
+
+# ---------------------------------------------------------------------------
 # Parameter table (emit order = CommandBuilder argument order; UI order
 # comes from tab + row).
 # ---------------------------------------------------------------------------
@@ -388,7 +404,7 @@ def help_flag_maps():
 
 def schema_i18n_strings():
     """Every Chinese-source string the schema carries (i18n coverage test)."""
-    out = []
+    out = [title for _, title in TAB_TITLES]
     for p in PARAMS:
         for s in (p.label, p.placeholder, p.tooltip, p.browse_title,
                   p.list_title, p.list_filter):

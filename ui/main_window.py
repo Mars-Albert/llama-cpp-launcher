@@ -24,7 +24,7 @@ from PyQt6.QtGui import (QAction, QFont, QTextOption, QIcon, QPixmap, QPainter,
 from core.config import (
     ConfigManager, save_scan_path, load_scan_path, save_language,
     get_server_path, save_server_path, load_server_path,
-    save_ui_prefs, load_ui_prefs,
+    save_ui_prefs, load_ui_prefs, save_ui_pref,
     load_theme, save_theme,
     load_last_preset, save_last_preset,
     CONFIG_DIR, LOGS_DIR, LAST_RUN_LOG,
@@ -1557,6 +1557,22 @@ class MainWindow(QMainWindow):
         if isinstance(bot_tab, int) and not isinstance(bot_tab, bool) \
                 and 0 <= bot_tab < self.tab_widget.count():
             self.tab_widget.setCurrentIndex(bot_tab)
+        # E10: user-configured quick toggles (validated/sanitized inside;
+        # an all-invalid list degrades to the built-in default set)
+        if prefs.get("quick_params") is not None:
+            self.basic_panel.set_quick_params(prefs["quick_params"])
+
+    def _customize_quick_toggles(self):
+        # E10: 设置-menu entry for the quick-toggles group — the panel-level
+        # gear button was dropped in favour of the menu as the single
+        # customization entry point.
+        from ui.quick_params_dialog import QuickParamsDialog
+        dlg = QuickParamsDialog(self, self.basic_panel.get_quick_params())
+        if dlg.exec() == QDialog.DialogCode.Accepted:
+            keys = list(dlg.result_keys())
+            self.basic_panel.set_quick_params(keys)
+            save_ui_pref("quick_params", keys)  # persist immediately (E10)
+            self._apply_params_to_current()
 
     def _save_ui_state(self):
         # E2: persist for the next launch (written on close)
@@ -1568,6 +1584,7 @@ class MainWindow(QMainWindow):
             "adv_tab": self.advanced_panel.tabs.currentIndex(),
             "adv_tab_key": self.advanced_panel.current_tab_key(),
             "bottom_tab": self.tab_widget.currentIndex(),
+            "quick_params": self.basic_panel.get_quick_params(),
         })
 
     def closeEvent(self, event):
@@ -1609,8 +1626,14 @@ class MainWindow(QMainWindow):
         self._exit_action.triggered.connect(self.close)
         self.file_menu.addAction(self._exit_action)
 
-        # Language menu
-        self.lang_menu = menubar.addMenu(t("语言"))
+        # Settings menu (absorbs the old 语言 menu; theme moved out of 帮助)
+        self.settings_menu = menubar.addMenu(t("设置"))
+        # E10: customize which toggles the ⚡ 快捷开关 group shows
+        self._quick_params_action = QAction(t("自定义快捷开关…"), self)
+        self._quick_params_action.triggered.connect(self._customize_quick_toggles)
+        self.settings_menu.addAction(self._quick_params_action)
+        self.settings_menu.addSeparator()
+
         self._lang_group = QActionGroup(self)
         self._lang_group.setExclusive(True)
 
@@ -1619,23 +1642,24 @@ class MainWindow(QMainWindow):
         self._action_zh.setChecked(get_language() == "zh")
         self._action_zh.triggered.connect(lambda: self._switch_language("zh"))
         self._lang_group.addAction(self._action_zh)
-        self.lang_menu.addAction(self._action_zh)
+        self.settings_menu.addAction(self._action_zh)
 
         self._action_en = QAction(self._create_text_icon("En", QColor("#3498db")), t("English"), self)
         self._action_en.setCheckable(True)
         self._action_en.setChecked(get_language() == "en")
         self._action_en.triggered.connect(lambda: self._switch_language("en"))
         self._lang_group.addAction(self._action_en)
-        self.lang_menu.addAction(self._action_en)
+        self.settings_menu.addAction(self._action_en)
+        self.settings_menu.addSeparator()
 
-        self.help_menu = menubar.addMenu(t("帮助"))
         # E5: theme toggle (checkable, persisted)
         self._theme_action = QAction(t("🌙 深色主题"), self)
         self._theme_action.setCheckable(True)
         self._theme_action.setChecked(self.theme == "dark")
         self._theme_action.triggered.connect(self._toggle_theme)
-        self.help_menu.addAction(self._theme_action)
-        self.help_menu.addSeparator()
+        self.settings_menu.addAction(self._theme_action)
+
+        self.help_menu = menubar.addMenu(t("帮助"))
         self._about_action = QAction(self._create_text_icon("?", QColor("#9b59b6")), t("关于"), self)
         self._about_action.triggered.connect(self._show_about)
         self.help_menu.addAction(self._about_action)
@@ -2092,9 +2116,12 @@ class MainWindow(QMainWindow):
         self._server_path_action.setText(t("设置 llama-server 路径..."))
         self._refresh_action.setText(t("刷新模型列表"))
         self._exit_action.setText(t("退出"))
-        self.lang_menu.setTitle(t("语言"))
-        self.help_menu.setTitle(t("帮助"))
+        self.settings_menu.setTitle(t("设置"))
+        self._quick_params_action.setText(t("自定义快捷开关…"))
+        self._action_zh.setText(t("中文"))
+        self._action_en.setText(t("English"))
         self._theme_action.setText(t("🌙 深色主题"))
+        self.help_menu.setTitle(t("帮助"))
         self._about_action.setText(t("关于"))
 
         # Status bar

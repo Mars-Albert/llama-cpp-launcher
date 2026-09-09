@@ -40,6 +40,7 @@ _EN = {
     # === main_window.py ===
     # Menu
     "文件": "File",
+    "设置": "Settings",
     "帮助": "Help",
     "语言": "Language",
     "中文": "Chinese",
@@ -160,6 +161,25 @@ _EN = {
     "上一个": "Previous",
     "下一个": "Next",
     "取消": "Cancel",
+    "确定": "OK",
+
+    # E10: quick-toggles customization dialog
+    "自定义快捷开关…": "Customize quick toggles…",
+    "自定义快捷开关": "Customize Quick Toggles",
+    "搜索参数（名称/flag）…": "Search parameters (name/flag)…",
+    "已显示": "Shown",
+    "可选参数": "Available",
+    "勾选 = 显示在快捷开关；左侧拖拽或点按钮调整顺序": "Checked = shown in quick toggles; drag or use the buttons on the left to reorder",
+    "上移": "Up",
+    "下移": "Down",
+    "恢复默认": "Reset to Default",
+    "恢复为默认的一组快捷开关": "Restore the default set of quick toggles",
+    "类型": "Kind",
+    "开关": "Toggle",
+    "下拉": "Combo",
+    "下拉(可输入)": "Combo (editable)",
+    "整数": "Integer",
+    "小数": "Decimal",
 
     # About dialog
     "一个功能丰富的图形化 llama-server 启动器，帮助您轻松管理和运行 GGUF 格式的大语言模型。<br><br>": "A feature-rich GUI launcher for llama-server to help you easily manage and run GGUF large language models.<br><br>",

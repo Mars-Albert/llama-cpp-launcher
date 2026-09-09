@@ -11,7 +11,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt
 from core.i18n import t
 from core.constants import DEFAULT_HOST, DEFAULT_PORT, MAIN_GPU_MAX
-from core.params_schema import PARAMS_BY_KEY, UI_PARAMS, tab_params
+from core.params_schema import PARAMS_BY_KEY, TAB_TITLES, UI_PARAMS, tab_params
 from core.params_help import has_help
 from ui.param_help import make_help_button
 
@@ -133,17 +133,7 @@ class AdvancedPanel(QWidget):
     # time here (labels via _add_form_row, items/placeholders/tooltips
     # via _T) so live language switching keeps working (D4).
 
-    _TAB_TITLES = (
-        ("model", "模型"),
-        ("context", "上下文"),
-        ("sampling", "采样"),
-        ("gpu", "GPU/性能"),
-        ("spec", "投机解码"),
-        ("server", "服务"),
-        ("agent", "Agent/工具"),
-        ("chat", "聊天/推理"),
-        ("advanced", "高级"),
-    )
+    _TAB_TITLES = TAB_TITLES  # single source of truth (core.params_schema)
     # Text widgets whose construction-time text is the param default
     # (the rest start empty; _apply_defaults fills them all anyway).
     _INIT_TEXT = frozenset({"host", "cors_origins", "cors_methods",

@@ -1,37 +1,53 @@
 import logging
 
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QGroupBox,
+    QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QGroupBox, QDialog,
     QComboBox, QSpinBox, QSlider, QLineEdit,
     QCheckBox, QPushButton, QLabel, QFileDialog
 )
 from PyQt6.QtCore import Qt
 from core.i18n import t
-from core.constants import DEFAULT_HOST, DEFAULT_PORT, CONTEXT_SIZE_PRESETS, MAIN_GPU_MAX
-from ui.advanced_panel import SPEC_TYPE_ITEMS
+from core.constants import DEFAULT_HOST, DEFAULT_PORT, CONTEXT_SIZE_PRESETS
+from core.params_schema import PARAMS_BY_KEY
 from ui.param_help import make_help_button
+from ui.quick_params import (
+    QUICK_DEFAULT_KEYS, build_quick_widget, quick_label_text,
+    read_quick, sanitize_quick_keys, write_quick,
+)
 
 logger = logging.getLogger(__name__)
 
 
 class BasicPanel(QWidget):
+    """Basic mode panel. Simplified UI with commonly used parameters only.
+
+    The ⚡ quick-toggles group is user-configurable (plan E10): which
+    parameters it shows is chosen from the 设置 menu (自定义快捷开关…)
+    and persisted as an ordered key list (ui.quick_params in
+    settings.json).
+    """
 
     def __init__(self, defaults=None, parent=None):
         super().__init__(parent)
         self._defaults = defaults or {}
         self._help_btns = []
+        self._quick_keys = list(QUICK_DEFAULT_KEYS)
+        self._quick_items = []
+        self._quick_boxes = []
+        self._quick_help_btns = []
         self._setup_ui()
         self._apply_defaults()
 
-    def _add_help(self, layout, key):
+    def _add_help(self, layout, key, registry=None):
         """Append a small '?' help button to a row layout (no-op if the
-        parameter has no explanation yet)."""
+        parameter has no explanation yet). Returns the button or None."""
         from core.params_help import has_help
         if not has_help(key):
-            return
+            return None
         btn = make_help_button(key, lambda: self._defaults)
-        self._help_btns.append(btn)
+        (registry if registry is not None else self._help_btns).append(btn)
         layout.addWidget(btn)
+        return btn
 
     def _apply_defaults(self):
         d = self._defaults
@@ -254,56 +270,96 @@ class BasicPanel(QWidget):
         return self._server_group
 
     def _create_quick_toggles_group(self):
+        # E10: the group content is schema-driven and user-configurable
+        # (customize from the 设置 menu → QuickParamsDialog). Slots wrap in
+        # an adaptive-column QGridLayout (a Python flow-layout subclass
+        # would be the natural fit, but the pinned PyQt6 6.11 build crashes
+        # the process in any Python QLayout subclass — see quick_params.py).
         self._toggles_group = QGroupBox(t("⚡ 快捷开关"))
-        layout = QHBoxLayout(self._toggles_group)
-        layout.setContentsMargins(6, 6, 6, 6)
-        layout.setSpacing(12)
-        self.flash_attn_combo = QComboBox()
-        self.flash_attn_combo.addItems(["auto", "on", "off"])
-        self.flash_attn_combo.setCurrentText("auto")
-        self.flash_attn_combo.setFixedWidth(78)
-        self._lbl_flash_attn = QLabel(t("FlashAttn:"))
-        layout.addWidget(self._lbl_flash_attn)
-        self._add_help(layout, "flash_attn")
-        layout.addWidget(self.flash_attn_combo)
-        layout.addSpacing(12)
-        self.reasoning_combo = QComboBox()
-        self.reasoning_combo.addItems(["auto", "on", "off"])
-        self.reasoning_combo.setCurrentText("auto")
-        self.reasoning_combo.setFixedWidth(78)
-        self._lbl_reasoning = QLabel(t("推理:"))
-        layout.addWidget(self._lbl_reasoning)
-        self._add_help(layout, "reasoning")
-        layout.addWidget(self.reasoning_combo)
-        layout.addSpacing(12)
-        self.split_mode_combo = QComboBox()
-        self.split_mode_combo.addItems(["none", "layer", "row", "tensor"])
-        self.split_mode_combo.setCurrentText("layer")
-        self.split_mode_combo.setFixedWidth(78)
-        self._lbl_split_mode = QLabel(t("分割模式:"))
-        layout.addWidget(self._lbl_split_mode)
-        self._add_help(layout, "split_mode")
-        layout.addWidget(self.split_mode_combo)
-        layout.addSpacing(12)
-        self.spec_type_combo = QComboBox()
-        self.spec_type_combo.addItems(SPEC_TYPE_ITEMS)
-        self.spec_type_combo.setCurrentText("none")
-        self.spec_type_combo.setFixedWidth(140)
-        self._lbl_spec_type = QLabel(t("投机类型:"))
-        layout.addWidget(self._lbl_spec_type)
-        self._add_help(layout, "spec_type")
-        layout.addWidget(self.spec_type_combo)
-        layout.addSpacing(12)
-        self.draft_max_spin = QSpinBox()
-        self.draft_max_spin.setRange(1, 256)
-        self.draft_max_spin.setValue(3)
-        self.draft_max_spin.setFixedWidth(60)
-        self._lbl_draft_max = QLabel(t("草稿Token:"))
-        layout.addWidget(self._lbl_draft_max)
-        self._add_help(layout, "draft_max")
-        layout.addWidget(self.draft_max_spin)
-        layout.addStretch()
+        outer = QVBoxLayout(self._toggles_group)
+        outer.setContentsMargins(6, 2, 6, 6)
+        outer.setSpacing(2)
+        self._quick_grid = QGridLayout()
+        self._quick_grid.setContentsMargins(4, 2, 4, 4)
+        self._quick_grid.setHorizontalSpacing(12)
+        self._quick_grid.setVerticalSpacing(8)
+        outer.addLayout(self._quick_grid)
+        self._rebuild_quick_toggles()
         return self._toggles_group
+
+    # Typical quick-toggle slot width (label + control + help), used to
+    # estimate how many slots fit per row.
+    _QUICK_CELL_WIDTH = 215
+
+    def _quick_cols(self):
+        n = max(1, len(self._quick_keys))
+        w = self._toggles_group.width()
+        return max(1, min(n, int((w - 24) / self._QUICK_CELL_WIDTH)))
+
+    def _arrange_quick_toggles(self):
+        """Re-place the slot boxes in the grid for the current width. Boxes
+        keep their parent (the group), so this is a cheap take/re-add."""
+        grid = self._quick_grid
+        cols = self._quick_cols()
+        while grid.count():
+            grid.takeAt(0)
+        for i, box in enumerate(self._quick_boxes):
+            grid.addWidget(box, i // cols, i % cols)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if self._quick_boxes:
+            self._arrange_quick_toggles()
+
+    def _rebuild_quick_toggles(self):
+        """E10: (re)build the quick-toggle slots from self._quick_keys."""
+        grid = self._quick_grid
+        while grid.count():
+            grid.takeAt(0)
+        for box in self._quick_boxes:
+            box.setParent(None)
+            box.deleteLater()
+        self._quick_items = []
+        self._quick_boxes = []
+        self._quick_help_btns = []
+        for key in self._quick_keys:
+            p = PARAMS_BY_KEY[key]
+            box = QWidget()
+            row = QHBoxLayout(box)
+            row.setContentsMargins(0, 0, 0, 0)
+            row.setSpacing(4)
+            w = build_quick_widget(p)
+            lbl = None
+            if p.widget != "check":
+                lbl = QLabel(quick_label_text(p))
+                row.addWidget(lbl)
+            row.addWidget(w)
+            self._add_help(row, key, registry=self._quick_help_btns)
+            self._quick_items.append((p, w, lbl))
+            self._quick_boxes.append(box)
+        self._arrange_quick_toggles()
+
+    def get_quick_params(self):
+        """E10: currently shown quick-toggle keys, in display order."""
+        return list(self._quick_keys)
+
+    def set_quick_params(self, keys):
+        """E10: apply a quick-toggle key list (validated; rebuilds the group).
+        No-op when the cleaned list is unchanged."""
+        cleaned = sanitize_quick_keys(keys)
+        if cleaned == self._quick_keys:
+            return
+        self._quick_keys = cleaned
+        self._rebuild_quick_toggles()
+
+    def _retranslate_quick_toggles(self):
+        for p, w, lbl in self._quick_items:
+            if lbl is not None:
+                lbl.setText(quick_label_text(p))
+            elif p.widget == "check":
+                w.setText(quick_label_text(p))
+        for btn in self._quick_help_btns:
+            btn.setToolTip(t("查看参数说明"))
 
     def _browse_gguf(self, title, combo):
         path, _ = QFileDialog.getOpenFileName(self, title, "", "GGUF Files (*.gguf)")
@@ -357,7 +413,7 @@ class BasicPanel(QWidget):
         label.setVisible(True)
 
     def get_values(self):
-        return {
+        out = {
             "model": self.model_combo.currentText(),
             "mmproj": self.mmproj_combo.currentText(),
             "n_gpu_layers": self.ngl_combo.currentText(),
@@ -370,14 +426,13 @@ class BasicPanel(QWidget):
             "host": self.host_edit.text(),
             "port": self.port_spin.value(),
             "parallel": self.parallel_spin.value(),
-            "flash_attn": self.flash_attn_combo.currentText(),
             "webui": self.chk_webui.isChecked(),
             "verbose": self.chk_verbose.isChecked(),
-            "reasoning": self.reasoning_combo.currentText(),
-            "split_mode": self.split_mode_combo.currentText(),
-            "spec_type": self.spec_type_combo.currentText(),
-            "draft_max": self.draft_max_spin.value(),
         }
+        # E10: dynamic quick-toggle slots (only the ones currently shown)
+        for p, w, _lbl in self._quick_items:
+            out[p.key] = read_quick(p, w)
+        return out
 
     def set_values(self, values):
         values = dict(values)
@@ -436,20 +491,15 @@ class BasicPanel(QWidget):
             self.port_spin.setValue(values["port"])
         if "parallel" in values:
             self.parallel_spin.setValue(values["parallel"])
-        if "flash_attn" in values:
-            self.flash_attn_combo.setCurrentText(str(values["flash_attn"]))
         if "webui" in values:
             self.chk_webui.setChecked(values["webui"])
         if "verbose" in values:
             self.chk_verbose.setChecked(values["verbose"])
-        if "reasoning" in values:
-            self.reasoning_combo.setCurrentText(str(values["reasoning"]))
-        if "split_mode" in values:
-            self.split_mode_combo.setCurrentText(str(values["split_mode"]))
-        if "spec_type" in values:
-            self.spec_type_combo.setCurrentText(str(values["spec_type"]))
-        if "draft_max" in values:
-            self.draft_max_spin.setValue(values["draft_max"])
+        # E10: dynamic quick-toggle slots; corrupt values raise and are
+        # skipped per-key by the set_values() fallback loop
+        for p, w, _lbl in self._quick_items:
+            if p.key in values:
+                write_quick(p, w, values[p.key])
 
     def retranslate_ui(self):
         self._model_group.setTitle(t("🧠 模型设置"))
@@ -467,8 +517,6 @@ class BasicPanel(QWidget):
         self._lbl_host.setText(t("地址:"))
         self._lbl_parallel.setText(t("并行:"))
         self._toggles_group.setTitle(t("⚡ 快捷开关"))
-        self._lbl_reasoning.setText(t("推理:"))
-        self._lbl_flash_attn.setText(t("FlashAttn:"))
         self.chk_webui.setText(t("WebUI"))
         self.chk_verbose.setText(t("Verbose"))
         self._lbl_mmproj.setText(t("mmproj:"))
@@ -477,9 +525,7 @@ class BasicPanel(QWidget):
         self._lbl_min_p.setText(t("Min-P:"))
         self._btn_browse_model.setText(t("..."))
         self._btn_browse_mmproj.setText(t("..."))
-        self._lbl_split_mode.setText(t("分割模式:"))
-        self._lbl_spec_type.setText(t("投机类型:"))
-        self._lbl_draft_max.setText(t("草稿Token:"))
+        self._retranslate_quick_toggles()
         for btn in self._help_btns:
             btn.setToolTip(t("查看参数说明"))
         self._render_gpu_info()

@@ -62,9 +62,11 @@ def test_advanced_panel_help_button_count(app):
 def test_basic_panel_help_button_count(app):
     panel = BasicPanel(defaults={})
     # model, mmproj, ngl, ctx, temp, top_p, top_k, min_p, repeat_penalty,
-    # host, port, parallel, webui, verbose, flash_attn, reasoning,
-    # split_mode, spec_type, draft_max
-    assert len(panel._help_btns) == 19
+    # host, port, parallel, webui, verbose
+    assert len(panel._help_btns) == 14
+    # E10: the quick-toggle slots (flash_attn, reasoning, split_mode,
+    # spec_type, draft_max by default) track their help buttons separately
+    assert len(panel._quick_help_btns) == 5
 
 
 def test_help_card_content_and_i18n(app, lang):
