@@ -10,7 +10,10 @@ a = Analysis(
     ['main.py'],
     pathex=[],
     binaries=[],
-    datas=[],
+    # Bundle the window icon as a data file so main.py can apply it at
+    # runtime (the EXE's PE icon below only covers file-explorer/shortcut/
+    # taskbar, not Qt's title-bar icon). Extracts to <_MEIPASS>/assets/.
+    datas=[('assets/icon.ico', 'assets')] if os.path.exists('assets/icon.ico') else [],
     hiddenimports=[
         # Launcher version (ui/main_window.py imports APP_VERSION for the
         # window title and the About dialog)

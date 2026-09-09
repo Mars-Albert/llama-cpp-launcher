@@ -11,7 +11,28 @@ def _get_work_dir():
     return os.path.dirname(os.path.abspath(__file__))
 
 
+from PyQt6.QtGui import QIcon
 from PyQt6.QtWidgets import QApplication
+
+
+def _app_icon_path():
+    """Path of the bundled window icon (assets/icon.ico).
+
+    The spec's `icon=` only writes the EXE's PE resource (file-explorer /
+    shortcut / taskbar-fallback icon); Qt's *window* title-bar icon is set
+    separately at runtime, so the same ico is also bundled as a data file
+    (see llama_cpp_launcher.spec datas) and applied via setWindowIcon().
+    """
+    if getattr(sys, 'frozen', False):
+        return os.path.join(sys._MEIPASS, 'assets', 'icon.ico')
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)), 'assets', 'icon.ico')
+
+
+def _apply_app_icon(app: QApplication):
+    """Set the app-wide window icon (title bar + all top-level dialogs)."""
+    icon_path = _app_icon_path()
+    if os.path.exists(icon_path):
+        app.setWindowIcon(QIcon(icon_path))
 from ui.main_window import MainWindow
 from core.defaults import _FALLBACK_DEFAULTS
 from core.config import CONFIG_DIR, load_language
@@ -48,6 +69,9 @@ def main():
 
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
+    # Window title-bar icon: PyInstaller's spec icon only covers the EXE
+    # resource, not Qt's runtime window icon — apply it app-wide.
+    _apply_app_icon(app)
     # The window is shown immediately with fallback defaults; the live
     # llama-server --help / --version results are fetched on a background
     # thread and merged in asynchronously (plan A10).
