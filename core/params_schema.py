@@ -349,7 +349,12 @@ PARAMS = (
     P(key='escape', tab='advanced', row=3, label='转义处理 (--escape):', wattr='adv_escape', widget='check', default=True, emit='bool_neg', flag=['--escape', '--no-escape'], flags=('--no-escape',), parser='bool'),
     P(key='offline', tab='advanced', row=4, label='离线模式 (--offline):', wattr='adv_offline', widget='check', default=False, emit='bool_pos', flag='--offline', flags=('--offline',), parser='bool'),
     P(key='verbose', tab='advanced', row=5, label='详细输出 (--verbose):', wattr='adv_verbose', widget='check', default=False, emit='bool_pos', flag='--verbose', flags=('--verbose',), parser='bool'),
-    P(key='log_verbosity', tab='advanced', row=6, label='日志详细度 (--log-verbosity):', wattr='adv_log_verbosity', widget='combo_index', default=3, emit='index', flag='--log-verbosity', flags=('-lv', '--verbosity', '--log-verbosity'), parser='int', items=["0 (generic)", "1 (error)", "2 (warning)", "3 (info)", "4 (trace)", "5 (debug)"], curidx=3, value='index'),
+    # Default 4 (trace), deliberately higher than the binary's default (3):
+    # llama.cpp >= #23021 routes library INFO lines (model load, VRAM, context
+    # details) through a callback that maps INFO->TRACE, so at the binary
+    # default the 运行信息 panel would be almost empty. 4 keeps all detail
+    # without debug noise; see ui/main_window._apply_startup_defaults.
+    P(key='log_verbosity', tab='advanced', row=6, label='日志详细度 (--log-verbosity):', wattr='adv_log_verbosity', widget='combo_index', default=4, emit='index', flag='--log-verbosity', flags=('-lv', '--verbosity', '--log-verbosity'), parser='int', items=["0 (generic)", "1 (error)", "2 (warning)", "3 (info)", "4 (trace)", "5 (debug)"], curidx=4, value='index'),
     P(key='log_colors', tab='advanced', row=7, label='日志颜色 (--log-colors):', wattr='adv_log_colors', widget='combo', default='auto', emit='diff', fmt='str', flag='--log-colors', flags=('--log-colors',), parser='str', items=["on", "off", "auto"], curtext="auto"),
     P(key='log_file', tab='advanced', row=8, label='日志文件 (--log-file):', wattr='adv_log_file', widget='file', default='', emit='diff_nonempty', fmt='str', flag='--log-file', flags=('--log-file',), parser='str', browse='file', filter_str="Text Files (*.txt *.log)"),
     P(key='log_disable', tab='advanced', row=9, label='禁用日志 (--log-disable):', wattr='adv_log_disable', widget='check', default=False, emit='bool_pos', flag='--log-disable', flags=('--log-disable',), parser='bool'),

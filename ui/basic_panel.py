@@ -3,9 +3,10 @@ import logging
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QGroupBox, QDialog,
     QComboBox, QSpinBox, QSlider, QLineEdit,
-    QCheckBox, QPushButton, QLabel, QFileDialog
+    QCheckBox, QPushButton, QLabel, QFileDialog, QScrollArea
 )
-from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QColor, QPalette, QPainter
+from PyQt6.QtCore import Qt, pyqtSignal, QSize
 from core.i18n import t
 from core.constants import DEFAULT_HOST, DEFAULT_PORT, CONTEXT_SIZE_PRESETS
 from core.params_schema import PARAMS_BY_KEY
@@ -18,6 +19,44 @@ from ui.quick_params import (
 logger = logging.getLogger(__name__)
 
 
+class ElidingLabel(QLabel):
+    """E11: a single-line label that elides (…right) instead of forcing a
+    minimum width.
+
+    A plain QLabel's minimumSizeHint is the full single-line text width;
+    long content lines (the GPU device list, the llama-server version
+    string) would then pin the *fixed* panel minimum — and with it the
+    window minimum — to the full text width, so the window could never be
+    narrowed enough for the quick-toggles grid to re-wrap. (setWordWrap
+    is no better: a wrapped label's minimumSizeHint is its height at the
+    longest word, a permanently tall minimum.) Eliding keeps the line's
+    minimum width at zero and its minimum height at one line; the tooltip
+    carries the full text. The colour is a palette color (not a QSS
+    color) because the text is drawn here, not by QStyleSheetStyle.
+
+    Usage: set the colour via the palette's Text role and the size via
+    the font (not via setStyleSheet — QSS colours would be ignored by
+    the custom paintEvent).
+    """
+
+    def minimumSizeHint(self):
+        return QSize(0, self.fontMetrics().height())
+
+    def paintEvent(self, event):
+        if not self.text():
+            super().paintEvent(event)
+            return
+        fm = self.fontMetrics()
+        text = fm.elidedText(self.text(), Qt.TextElideMode.ElideRight, self.width())
+        p = QPainter(self)
+        p.setFont(self.font())
+        p.setPen(self.palette().color(QPalette.ColorRole.Text))
+        p.drawText(self.rect(),
+                   int(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft),
+                   text)
+        p.end()
+
+
 class BasicPanel(QWidget):
     """Basic mode panel. Simplified UI with commonly used parameters only.
 
@@ -27,6 +66,13 @@ class BasicPanel(QWidget):
     settings.json).
     """
 
+    #: E11 (option A): the quick-toggles grid changed its row count (the
+    #: new row count is the argument). Emitted when a width change makes
+    #: the slots re-wrap; MainWindow re-syncs the hard minimums (panel /
+    #: scroll area / window) so an extra row never has to 'borrow' height
+    #: from the other groups.
+    quick_wrap_changed = pyqtSignal(int)
+
     def __init__(self, defaults=None, parent=None):
         super().__init__(parent)
         self._defaults = defaults or {}
@@ -35,6 +81,8 @@ class BasicPanel(QWidget):
         self._quick_items = []
         self._quick_boxes = []
         self._quick_help_btns = []
+        self._quick_cols_used = 0
+        self._quick_rows_used = 0
         self._setup_ui()
         self._apply_defaults()
 
@@ -87,8 +135,8 @@ class BasicPanel(QWidget):
         self.model_combo.setEditable(True)
         row1.addWidget(self.model_combo)
         # C4: previously a hardcoded English-only string, now goes through t()
-        self._btn_browse_model = QPushButton(t("..."))
-        self._btn_browse_model.setFixedWidth(36)
+        self._btn_browse_model = QPushButton(t("📂 浏览"))
+        self._btn_browse_model.setFixedWidth(80)
         self._btn_browse_model.clicked.connect(self._browse_model)
         row1.addWidget(self._btn_browse_model)
         layout.addLayout(row1)
@@ -101,12 +149,15 @@ class BasicPanel(QWidget):
         self.mmproj_combo = QComboBox()
         self.mmproj_combo.setEditable(True)
         row2.addWidget(self.mmproj_combo)
-        self._btn_browse_mmproj = QPushButton(t("..."))
-        self._btn_browse_mmproj.setFixedWidth(36)
+        self._btn_browse_mmproj = QPushButton(t("📂 浏览"))
+        self._btn_browse_mmproj.setFixedWidth(80)
         self._btn_browse_mmproj.clicked.connect(self._browse_mmproj)
         row2.addWidget(self._btn_browse_mmproj)
         layout.addLayout(row2)
 
+        # E11: GPU layers and context live on separate rows — the combined
+        # single row (7 context preset buttons) was ~930px wide, which kept
+        # the whole panel horizontally scrollable on typical laptop widths.
         row3 = QHBoxLayout()
         self._lbl_ngl = QLabel(t("GPU层数:"))
         row3.addWidget(self._lbl_ngl)
@@ -124,32 +175,42 @@ class BasicPanel(QWidget):
         self.ngl_spin.setToolTip(t("手动指定GPU卸载层数"))
         self.ngl_spin.valueChanged.connect(lambda v: self.ngl_combo.setEditText(str(v)))
         row3.addWidget(self.ngl_spin)
-        row3.addSpacing(12)
+        row3.addStretch()
+        layout.addLayout(row3)
+
+        row4 = QHBoxLayout()
         self._lbl_ctx = QLabel(t("上下文:"))
-        row3.addWidget(self._lbl_ctx)
-        self._add_help(row3, "ctx_size")
+        row4.addWidget(self._lbl_ctx)
+        self._add_help(row4, "ctx_size")
         self.ctx_spin = QSpinBox()
         self.ctx_spin.setRange(0, 999999)
         self.ctx_spin.setValue(0)
         self.ctx_spin.setFixedWidth(90)
         self.ctx_spin.setToolTip(t("0=使用模型默认"))
-        row3.addWidget(self.ctx_spin)
-        self.ctx_default_btn = QPushButton(t("默认"))
-        self.ctx_default_btn.setMinimumWidth(48)
+        row4.addWidget(self.ctx_spin)
+        self.ctx_default_btn = QPushButton(t("↩ 默认"))
+        self.ctx_default_btn.setMinimumWidth(56)
         self.ctx_default_btn.setToolTip(t("使用模型默认上下文长度"))
         self.ctx_default_btn.clicked.connect(lambda: self.ctx_spin.setValue(0))
-        row3.addWidget(self.ctx_default_btn)
+        row4.addWidget(self.ctx_default_btn)
         for val in CONTEXT_SIZE_PRESETS:
             btn = QPushButton(str(val))
             btn.setMinimumWidth(56)
             btn.setToolTip(t("设置上下文长度为 {val}", val=val))
             btn.clicked.connect(lambda checked, v=val: self.ctx_spin.setValue(v))
-            row3.addWidget(btn)
-        row3.addStretch()
-        layout.addLayout(row3)
-        # E8: detected GPU devices (from the `--list-devices` probe)
-        self.gpu_info_label = QLabel("")
-        self.gpu_info_label.setStyleSheet("color: #6b7280; font-size: 11px;")
+            row4.addWidget(btn)
+        row4.addStretch()
+        layout.addLayout(row4)
+        # E8: detected GPU devices (from the `--list-devices` probe).
+        # E11: eliding label — see ElidingLabel (a plain QLabel's full
+        # text width would pin the window minimum width too wide).
+        self.gpu_info_label = ElidingLabel("")
+        f = self.gpu_info_label.font()
+        f.setPixelSize(11)
+        self.gpu_info_label.setFont(f)
+        pal = self.gpu_info_label.palette()
+        pal.setColor(QPalette.ColorRole.Text, QColor("#6b7280"))
+        self.gpu_info_label.setPalette(pal)
         self.gpu_info_label.setVisible(False)
         layout.addWidget(self.gpu_info_label)
         return self._model_group
@@ -238,14 +299,16 @@ class BasicPanel(QWidget):
         layout.addWidget(self._lbl_host)
         self._add_help(layout, "host")
         self.host_edit = QLineEdit(DEFAULT_HOST)
-        self.host_edit.setFixedWidth(110)
+        # E11: keep the row's minimum width below the smallest window's
+        # panel viewport, so the row never forces a horizontal scrollbar.
+        self.host_edit.setFixedWidth(100)
         layout.addWidget(self.host_edit)
         layout.addWidget(QLabel(":"))
         self._add_help(layout, "port")
         self.port_spin = QSpinBox()
         self.port_spin.setRange(1, 65535)
         self.port_spin.setValue(DEFAULT_PORT)
-        self.port_spin.setFixedWidth(70)
+        self.port_spin.setFixedWidth(64)
         layout.addWidget(self.port_spin)
         layout.addSpacing(12)
         self._lbl_parallel = QLabel(t("并行:"))
@@ -254,7 +317,7 @@ class BasicPanel(QWidget):
         self.parallel_spin = QSpinBox()
         self.parallel_spin.setRange(-1, 64)
         self.parallel_spin.setValue(1)
-        self.parallel_spin.setFixedWidth(60)
+        self.parallel_spin.setFixedWidth(56)
         layout.addWidget(self.parallel_spin)
         layout.addSpacing(12)
         self.chk_webui = QCheckBox(t("WebUI"))
@@ -279,32 +342,127 @@ class BasicPanel(QWidget):
         outer = QVBoxLayout(self._toggles_group)
         outer.setContentsMargins(6, 2, 6, 6)
         outer.setSpacing(2)
+        # E11: the grid lives in a plain host widget because QLayout has no
+        # minimum size — the host's *explicit* minimum height (set in
+        # _arrange_quick_toggles) is always live, unlike the grid's layout
+        # minimum, which lags one event-loop pass after a re-wrap and would
+        # make the panel/window minimums derived from it stale.
+        self._quick_grid_host = QWidget()
+        host_layout = QVBoxLayout(self._quick_grid_host)
+        host_layout.setContentsMargins(0, 0, 0, 0)
         self._quick_grid = QGridLayout()
         self._quick_grid.setContentsMargins(4, 2, 4, 4)
         self._quick_grid.setHorizontalSpacing(12)
         self._quick_grid.setVerticalSpacing(8)
-        outer.addLayout(self._quick_grid)
+        host_layout.addLayout(self._quick_grid)
+        outer.addWidget(self._quick_grid_host)
         self._rebuild_quick_toggles()
         return self._toggles_group
 
-    # Typical quick-toggle slot width (label + control + help), used to
-    # estimate how many slots fit per row.
-    _QUICK_CELL_WIDTH = 215
+    def _quick_target_width(self):
+        """Visible width the quick-toggles grid should fit within. When the
+        panel sits in a scroll area (E11) that is the viewport width — not
+        the group width, which may sit at the content's minimum while the
+        viewport is narrower. Wrapping to the viewport is what avoids a
+        horizontal scrollbar. Group/grid margins are subtracted."""
+        w = None
+        p = self._toggles_group.parentWidget()
+        while p is not None:
+            if isinstance(p, QScrollArea):
+                w = p.viewport().width()
+                break
+            p = p.parentWidget()
+        if w is None:
+            w = self._toggles_group.width()
+        # group outer margins (6+6) + grid contents margins (4+4)
+        return max(0, w - 20)
+
+    def _quick_slot_widths(self):
+        """Each slot's natural (sizeHint) width — label + control + help
+        button. This is the width the slot needs for its label to be fully
+        visible (a minimumSizeHint would report the shrunken label and let
+        the text clip)."""
+        return [b.sizeHint().width() for b in self._quick_boxes]
+
+    def _quick_grid_natural_width(self, cols):
+        """Width needed to lay the slots round-robin into *cols* columns
+        with every label fully visible (each column sized to its widest
+        slot)."""
+        widths = self._quick_slot_widths()
+        if not widths or cols <= 1:
+            return max(widths) if widths else 0
+        col_w = []
+        for k in range(cols):
+            vals = [widths[i] for i in range(len(widths)) if i % cols == k]
+            col_w.append(max(vals))
+        return sum(col_w) + (cols - 1) * self._quick_grid.horizontalSpacing()
 
     def _quick_cols(self):
+        """Largest column count that shows every label in full — i.e. whose
+        grid *natural* width (see _quick_grid_natural_width) fits the
+        visible width. Never drops below 2 columns (with ≥2 slots): a
+        single column would make the grid — and the panel's hard minimum
+        height — depend on the current width, so narrow widths scroll the
+        grid horizontally instead of re-wrapping (E11)."""
         n = max(1, len(self._quick_keys))
-        w = self._toggles_group.width()
-        return max(1, min(n, int((w - 24) / self._QUICK_CELL_WIDTH)))
+        if n == 1:
+            return 1
+        avail = self._quick_target_width()
+        if avail <= 0:
+            return 2
+        for cols in range(n, 1, -1):
+            if self._quick_grid_natural_width(cols) <= avail:
+                return cols
+        return 2
+
+    def _apply_quick_column_widths(self, cols):
+        """E11: pin each column's minimum width to the natural width of its
+        widest slot, so the label can never be clipped at any window width
+        (columns narrower than that would hide the text behind the
+        control). If even 2 columns of natural width exceed the viewport
+        the grid scrolls horizontally instead of clipping. Called on every
+        arrange — including column-count-unchanged ones, because a
+        retranslate (语言切换) changes the natural widths."""
+        grid = self._quick_grid
+        widths = self._quick_slot_widths()
+        for k in range(cols):
+            colw = max(widths[i] for i in range(len(widths)) if i % cols == k)
+            grid.setColumnMinimumWidth(k, colw)
+        for k in range(cols, grid.columnCount()):
+            grid.setColumnMinimumWidth(k, 0)
 
     def _arrange_quick_toggles(self):
         """Re-place the slot boxes in the grid for the current width. Boxes
-        keep their parent (the group), so this is a cheap take/re-add."""
+        keep their parent (the group), so this is a cheap take/re-add.
+        The take/re-add is skipped when the column count is unchanged (E11:
+        MainWindow calls this on every panel-viewport resize via event
+        filter), but the per-column natural-width minimums are refreshed
+        every time (a retranslate changes them). Emits
+        quick_wrap_changed when the row count changes, so the hard
+        minimums can be re-synced in the same pass (before this panel's
+        layout runs)."""
         grid = self._quick_grid
+        if not self._quick_boxes:
+            return
         cols = self._quick_cols()
+        self._apply_quick_column_widths(cols)
+        if cols == self._quick_cols_used:
+            return
+        self._quick_cols_used = cols
         while grid.count():
             grid.takeAt(0)
         for i, box in enumerate(self._quick_boxes):
             grid.addWidget(box, i // cols, i % cols)
+        rows = (len(self._quick_boxes) + cols - 1) // cols
+        # Explicit (arithmetic) minimum height for the current row count —
+        # see the _quick_grid_host comment in _create_quick_toggles_group.
+        row_h = max(b.minimumSizeHint().height() for b in self._quick_boxes)
+        gm = grid.contentsMargins()
+        self._quick_grid_host.setMinimumHeight(
+            rows * row_h + (rows - 1) * grid.verticalSpacing() + gm.top() + gm.bottom())
+        if rows != self._quick_rows_used:
+            self._quick_rows_used = rows
+            self.quick_wrap_changed.emit(rows)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -322,6 +480,10 @@ class BasicPanel(QWidget):
         self._quick_items = []
         self._quick_boxes = []
         self._quick_help_btns = []
+        # E11: force a re-arrange after rebuild (the _arrange guard compares
+        # against the previous column count — new widgets must be placed)
+        self._quick_cols_used = 0
+        self._quick_rows_used = 0
         for key in self._quick_keys:
             p = PARAMS_BY_KEY[key]
             box = QWidget()
@@ -332,12 +494,43 @@ class BasicPanel(QWidget):
             lbl = None
             if p.widget != "check":
                 lbl = QLabel(quick_label_text(p))
+                # E11: the label's *column* minimum (see
+                # _apply_quick_column_widths) guarantees full text at every
+                # width; the label's own minimum stays at 1 (not 0 — Qt
+                # treats an empty minimum size as "unset" and would fall
+                # back to minimumSizeHint, the full label width) so the
+                # slot itself does not force the grid wider than the
+                # column minimums do.
+                lbl.setMinimumWidth(1)
                 row.addWidget(lbl)
             row.addWidget(w)
             self._add_help(row, key, registry=self._quick_help_btns)
             self._quick_items.append((p, w, lbl))
             self._quick_boxes.append(box)
         self._arrange_quick_toggles()
+        self.resync_min_height()
+
+    def resync_min_height(self):
+        """E11: (re)apply the hard minimum height = the panel's natural
+        height, so the window can never be resized to a height that
+        squashes the rows.
+
+        The sum is taken item-by-item from each group's
+        minimumSizeHint() — which Qt computes on demand — rather than from
+        the panel layout's minimumSize(), whose cache lags one event-loop
+        pass behind a quick-grid re-wrap and would pin a stale (too small)
+        minimum during a resize cascade. Extra space at larger windows is
+        absorbed by the layout stretch below the quick-toggles group."""
+        lay = self.layout()
+        if lay is None:
+            return
+        m = lay.contentsMargins()
+        groups = (self._model_group, self._sampling_group,
+                  self._server_group, self._toggles_group)
+        total = (m.top() + m.bottom()
+                 + sum(g.minimumSizeHint().height() for g in groups)
+                 + lay.spacing() * (lay.count() - 1))  # 4 groups + trailing stretch
+        self.setMinimumHeight(total)
 
     def get_quick_params(self):
         """E10: currently shown quick-toggle keys, in display order."""
@@ -360,6 +553,9 @@ class BasicPanel(QWidget):
                 w.setText(quick_label_text(p))
         for btn in self._quick_help_btns:
             btn.setToolTip(t("查看参数说明"))
+        # Label lengths change with the language: refresh the column
+        # minimums (and re-wrap if the new natural widths no longer fit).
+        self._arrange_quick_toggles()
 
     def _browse_gguf(self, title, combo):
         path, _ = QFileDialog.getOpenFileName(self, title, "", "GGUF Files (*.gguf)")
@@ -509,7 +705,7 @@ class BasicPanel(QWidget):
         self.ngl_spin.setToolTip(t("手动指定GPU卸载层数"))
         self._lbl_ctx.setText(t("上下文:"))
         self.ctx_spin.setToolTip(t("0=使用模型默认"))
-        self.ctx_default_btn.setText(t("默认"))
+        self.ctx_default_btn.setText(t("↩ 默认"))
         self._sampling_group.setTitle(t("🎲 采样参数"))
         self._lbl_temp.setText(t("温度:"))
         self._lbl_repeat_penalty.setText(t("重复惩罚:"))
@@ -523,8 +719,8 @@ class BasicPanel(QWidget):
         self._lbl_top_p.setText(t("Top-P:"))
         self._lbl_top_k.setText(t("Top-K:"))
         self._lbl_min_p.setText(t("Min-P:"))
-        self._btn_browse_model.setText(t("..."))
-        self._btn_browse_mmproj.setText(t("..."))
+        self._btn_browse_model.setText(t("📂 浏览"))
+        self._btn_browse_mmproj.setText(t("📂 浏览"))
         self._retranslate_quick_toggles()
         for btn in self._help_btns:
             btn.setToolTip(t("查看参数说明"))

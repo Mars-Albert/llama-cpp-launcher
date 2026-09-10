@@ -24,6 +24,15 @@ def build_info_html(info):
     """Render the runtime info dict as an HTML table."""
     categories = []
 
+    # Hint: llama.cpp >= #23021 suppresses the library INFO detail lines at
+    # verbosity < 4, so an explicitly low log level leaves this panel sparse.
+    lvl = info.get("log_level")
+    if isinstance(lvl, int) and 0 <= lvl < 4:
+        hint = [(t("⚠️ 日志详细度较低"), t(
+            "当前日志详细度为 {lv}，llama.cpp 会抑制模型加载、显存、上下文等详细信息。"
+            "建议在 高级 页将 日志详细度 设为 4 (trace) 或勾选 详细输出。", lv=lvl))]
+        categories.append((t("提示"), hint))
+
     items = []
     # Support multiple GPUs (new format) or single GPU (old format)
     gpu_indices = sorted(set(k[3:k.index('_')] for k in info if k.startswith('gpu') and k[3:4].isdigit() and '_' in k))
@@ -97,6 +106,10 @@ def build_info_html(info):
         items.append((t("📚 词表大小（Token 数量）"), info.get("vocab_size")))
     if info.get("vocab_type"):
         items.append((t("🔤 词表类型（分词方式）"), info.get("vocab_type")))
+    if info.get("n_expert"):
+        items.append((t("🧩 MoE 专家（总数 / 每token激活）"),
+                      f"{info['n_expert']} / {info.get('n_expert_used', '?')}"))
+
     if info.get("tensor_types"):
         tensor_lines = []
         for qtype, qcount in sorted(info["tensor_types"].items()):
@@ -118,6 +131,10 @@ def build_info_html(info):
         items.append((t("📦 物理批处理（硬件实际批次）"), info.get("n_ubatch")))
     if info.get("sliding_window"):
         items.append((t("🪟 滑动窗口（SWA 窗口大小）"), info.get("sliding_window")))
+    if info.get("rope_scaling"):
+        items.append((t("🌀 RoPE 缩放（位置编码缩放方式）"), info.get("rope_scaling")))
+    if info.get("reasoning_preserve"):
+        items.append((t("🧠 推理保留（思维链上下文保留）"), t(info.get("reasoning_preserve"))))
     if info.get("freq_base"):
         items.append((t("📡 RoPE 频率（位置编码基频）"), info.get("freq_base")))
     if info.get("freq_base_runtime"):
@@ -133,7 +150,10 @@ def build_info_html(info):
     if info.get("gpu_offload"):
         items.append((t("🖥️ GPU 卸载（加载到 GPU 的层数）"), info.get("gpu_offload")))
     if info.get("model_vram"):
-        items.append((t("📦 模型显存（模型权重占用）"), info.get("model_vram")))
+        model_vram = info["model_vram"]
+        if info.get("model_vram_detail"):
+            model_vram += f"（{info['model_vram_detail']}）"
+        items.append((t("📦 模型显存（模型权重占用）"), model_vram))
     if info.get("cpu_buffer"):
         items.append((t("💻 CPU 缓冲（CPU 侧模型缓冲）"), info.get("cpu_buffer")))
     if info.get("projected_vram"):
@@ -160,6 +180,10 @@ def build_info_html(info):
         items.append((t("🔗 图节点数（计算图节点数量）"), info.get("graph_nodes")))
     if info.get("graph_splits"):
         items.append((t("✂️ 图分割数（CPU/GPU 切换次数）"), info.get("graph_splits")))
+    if info.get("prompt_speed"):
+        items.append((t("🚄 提示词处理速度（最近任务）"), info.get("prompt_speed")))
+    if info.get("decode_speed"):
+        items.append((t("🐇 生成速度（最近任务）"), info.get("decode_speed")))
     if items:
         categories.append((t("性能优化"), items))
 

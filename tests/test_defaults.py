@@ -295,8 +295,9 @@ class TestUserInputParams:
 
     def test_size(self):
         # 67 original inline keys, minus the 4 genuine server defaults
-        # (tools, sampler_seq, cors_origins, cors_headers) exposed to the check
-        assert len(D.USER_INPUT_PARAMS) == 63
+        # (tools, sampler_seq, cors_origins, cors_headers) exposed to the check,
+        # plus log_verbosity (launcher runs llama-server at trace by default)
+        assert len(D.USER_INPUT_PARAMS) == 64
 
     def test_exposed_keys_exist(self):
         for key in ("tools", "sampler_seq", "cors_origins", "cors_headers"):
@@ -305,5 +306,5 @@ class TestUserInputParams:
 
     def test_hardcoded_defaults_still_skipped(self):
         # their parsed values are launcher constants, not real help parsing
-        for key in ("samplers", "cors_methods"):
+        for key in ("samplers", "cors_methods", "log_verbosity"):
             assert key in D.USER_INPUT_PARAMS

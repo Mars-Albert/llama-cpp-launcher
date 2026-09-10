@@ -31,8 +31,10 @@ def test_stylesheets_resolve_all_tokens():
     # dark uses the new palette and none of the light-only backgrounds
     assert "#1e1e2e" in dark and "#181825" in dark and "#313244" in dark
     assert "#f0f2f5" not in dark and "#d0d4dc" not in dark and "#e8ecf0" not in dark
-    # only the fixed white-on-accent text colors may survive in dark
-    assert dark.count("#ffffff") <= 6
+    # only the fixed white-on-accent text colors may survive in dark:
+    # the four control-bar gradient buttons (start/stop/copy/webui)
+    # + checkbox indicator / list selection / table selection text
+    assert dark.count("#ffffff") <= 7
     # identical structure (same selectors in the same order)
     import re
     selectors = re.findall(r"([A-Za-z][\w:.\-# ]*?)\s*\{", light)

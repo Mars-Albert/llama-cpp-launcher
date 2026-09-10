@@ -1,7 +1,8 @@
 import struct
 from pathlib import Path
 
-from .models import GGUFInfo, GGUFHeader, GGUFTensorInfo, GGUFStats, GGUFDiagnostic
+from .models import (GGUFInfo, GGUFHeader, GGUFTensorInfo, GGUFStats,
+                     GGUFDiagnostic, GGUFQuickInfo)
 from .ggml_types import get_type_name, estimate_tensor_nbytes, is_quantized_type
 from .filename import parse_gguf_filename
 
@@ -277,6 +278,80 @@ def parse_gguf(path, progress_callback=None):
         tensor_data_offset=tensor_data_offset,
         alignment=alignment,
     )
+
+
+# ---------------------------------------------------------------------------
+# Lightweight metadata-only parse (launcher model-info row)
+# ---------------------------------------------------------------------------
+
+# Bounded module-level cache: (path, size, mtime_ns) -> GGUFQuickInfo. The
+# key includes size+mtime so an edited file is never served stale. 3 entries
+# covers the usual model/mmproj re-selection cycle (same budget as the
+# inspector's full-parse cache; quick infos are tiny, but stay consistent).
+_quick_cache: dict[tuple, GGUFQuickInfo] = {}
+_QUICK_CACHE_MAX = 3
+
+
+def parse_gguf_metadata(path) -> GGUFQuickInfo:
+    """Read only the GGUF header + metadata KV pairs (no tensor infos).
+
+    Returns a GGUFQuickInfo with arch, general.name and the
+    architecture's context_length (None when absent). Touches only the
+    first few MB of the file, so it is cheap enough to run per model
+    selection. Results are cached per (path, size, mtime).
+
+    Raises:
+        FileNotFoundError if the file doesn't exist
+        ValueError on invalid GGUF
+    """
+    path = Path(path)
+    if not path.exists():
+        raise FileNotFoundError(f"File not found: {path}")
+    st = path.stat()
+    key = (str(path), st.st_size, st.st_mtime_ns)
+    cached = _quick_cache.get(key)
+    if cached is not None:
+        return cached
+
+    with open(path, "rb") as f:
+        header_data = f.read(24)
+        if len(header_data) < 24:
+            raise ValueError("File too small to contain a valid GGUF header")
+        if header_data[0:4] != b"GGUF":
+            raise ValueError(
+                f"Invalid GGUF magic: expected b'GGUF', got {header_data[0:4]!r}"
+            )
+        version = struct.unpack("<I", header_data[4:8])[0]
+        tensor_count = struct.unpack("<Q", header_data[8:16])[0]
+        metadata_kv_count = struct.unpack("<Q", header_data[16:24])[0]
+        if tensor_count > _MAX_TENSOR_COUNT:
+            raise ValueError(f"Tensor count {tensor_count} exceeds sanity limit {_MAX_TENSOR_COUNT}")
+        if metadata_kv_count > _MAX_METADATA_KV_COUNT:
+            raise ValueError(f"Metadata KV count {metadata_kv_count} exceeds sanity limit {_MAX_METADATA_KV_COUNT}")
+
+        metadata = {}
+        for _ in range(metadata_kv_count):
+            k, v, _vt = _read_metadata_kv(f)
+            metadata[k] = v
+
+    arch = str(metadata.get("general.architecture", "") or "")
+    name = str(metadata.get("general.name", "") or "")
+    context_length = None
+    ctx_val = metadata.get(f"{arch}.context_length") if arch else None
+    if isinstance(ctx_val, int):
+        context_length = ctx_val
+
+    info = GGUFQuickInfo(
+        path=str(path),
+        version=version,
+        arch=arch,
+        name=name,
+        context_length=context_length,
+    )
+    if len(_quick_cache) >= _QUICK_CACHE_MAX:
+        _quick_cache.pop(next(iter(_quick_cache)))  # drop oldest (insertion order)
+    _quick_cache[key] = info
+    return info
 
 
 def _run_parse_diagnostics(path, file_size, header, metadata, tensors,

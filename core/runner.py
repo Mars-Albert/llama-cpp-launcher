@@ -25,7 +25,10 @@ _READY_PHRASES = (
 
 
 class ServerRunner(QObject):
-    log_output = pyqtSignal(str)
+    # (text, stream) — stream is "out"/"err"; the window keeps one
+    # per-stream line tail so a partial line from one stream can never be
+    # glued onto a line arriving from the other stream
+    log_output = pyqtSignal(str, str)
     state_changed = pyqtSignal(str)
     error_occurred = pyqtSignal(str)
     server_ready = pyqtSignal()
@@ -135,17 +138,17 @@ class ServerRunner(QObject):
             else:
                 self._ready_tail = (self._ready_tail + low)[-_READY_TAIL_LEN:]
 
-    def _read_stream(self, read_method):
+    def _read_stream(self, read_method, stream):
         data = read_method().data()
         text = data.decode("utf-8", errors="replace")
         self._check_ready(text)
-        self.log_output.emit(text)
+        self.log_output.emit(text, stream)
 
     def _read_stdout(self):
-        self._read_stream(self.process.readAllStandardOutput)
+        self._read_stream(self.process.readAllStandardOutput, "out")
 
     def _read_stderr(self):
-        self._read_stream(self.process.readAllStandardError)
+        self._read_stream(self.process.readAllStandardError, "err")
 
     def _on_finished(self, exit_code, exit_status):
         self._kill_timer.stop()

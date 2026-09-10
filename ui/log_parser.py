@@ -2,6 +2,16 @@
 
 Extracted from ui/main_window.py (optimization-plan C2): level-based HTML
 coloring and the pre-compiled pattern table that feeds runtime info.
+
+Verbosity note (llama.cpp >= #23021, commit 67b2b7f2f "logs: reduce"): the
+library INFO lines (model load, VRAM, context, ggml backends) are emitted
+through a log callback that maps INFO -> TRACE, so at the binary's default
+-lv 3 (info) they are suppressed entirely. The launcher therefore defaults
+log_verbosity to 4 (trace) — see core/params_schema.py — which shows every
+line below except debug (level 5). Patterns for level-3-only lines (srv/cmn
+INFO, warnings, slot timings) are kept so the panel still fills in when the
+user lowers the level, and ui/runtime_info.py shows a hint when the parsed
+`verbosity = N` line reports N < 4.
 """
 import html as html_mod
 import os
@@ -10,33 +20,62 @@ import re
 from core.i18n import t
 
 
-# Log level colors for colored output (matching llama.cpp terminal colors)
+# Log level colors for colored output, mirroring llama.cpp's terminal
+# color roles (common/log.cpp print(): D=yellow, I=green, W=magenta,
+# E=red). The log area is always dark, so each ANSI role is rendered with
+# the matching Catppuccin Mocha shade.
 _LOG_LEVEL_COLORS = {
-    'D': '#6c7086',   # Debug - gray (subtle)
-    'I': '#cdd6f4',   # Info - default light
-    'W': '#f9e2af',   # Warning - yellow
-    'E': '#f38ba8',   # Error - red
-    'F': '#f38ba8',   # Fatal - red
+    'D': '#f9e2af',   # Debug - yellow (ANSI 33)
+    'I': '#a6e3a1',   # Info - green (ANSI 32)
+    'W': '#cba6f7',   # Warning - magenta (ANSI 35, mauve in Mocha)
+    'E': '#f38ba8',   # Error - red (ANSI 31)
+    'F': '#f38ba8',   # Fatal - red (defensive; llama.cpp never emits F)
 }
 _LOG_LEVEL_RE = re.compile(r'^[\d.]+\s+([DIWEF])\s')
 
+# Length guards. Verbose/debug verbosity makes llama.cpp dump the raw
+# prompt/completion text to stdout — in real runs single lines over
+# 500 KB appeared. Running the ~73-pattern table against such lines costs
+# ~0.5 s of GUI-thread time each, and letting them into the log view made
+# one giant unbounded block (see the per-line block rendering in
+# ui/main_window._flush_log_buffer). Runtime facts only ever appear on
+# short structured lines, so:
+#   - lines > PARSE_LINE_MAX are skipped for runtime-info parsing (model
+#     text matching a check string would corrupt the info anyway);
+#   - the log view shows at most DISPLAY_LINE_MAX chars per line.
+PARSE_LINE_MAX = 2048
+DISPLAY_LINE_MAX = 1024
 
-def colorize_log_line(line):
-    """Convert a log line to HTML with color based on log level."""
-    escaped = html_mod.escape(line)
+
+def colorize_log_line(line, max_len=DISPLAY_LINE_MAX):
+    """Convert a log line to HTML with color based on log level.
+
+    Lines longer than max_len are truncated for display (the full line is
+    still kept in the run-log file); a marker notes the original length.
+    Every line is wrapped in a white-space:pre span: appendHtml applies HTML
+    whitespace rules, which collapse the runs of spaces llama.cpp uses for
+    column alignment ("srv  slot   0 …") into single spaces — pre keeps the
+    alignment visible (and in search / exported view text).
+    """
+    if len(line) > max_len:
+        escaped = html_mod.escape(line[:max_len])
+        escaped += t("… 已截断（共 {n} 字符）", n=len(line))
+    else:
+        escaped = html_mod.escape(line)
     m = _LOG_LEVEL_RE.match(line)
     if m:
         level = m.group(1)
         color = _LOG_LEVEL_COLORS.get(level, '#cdd6f4')
-        return f'<span style="color: {color};">{escaped}</span>'
-    return escaped
+        return f'<span style="color: {color}; white-space: pre;">{escaped}</span>'
+    return f'<span style="white-space: pre;">{escaped}</span>'
 
 
 def line_level(line):
     """Return the level char ('D'/'I'/'W'/'E'/'F') of a log line, or None.
 
     Used by the E3 level filter in the main window; lines without a
-    level prefix (banners, command echoes) always stay visible.
+    level prefix are shown only in the unfiltered view (see
+    ui/main_window._log_level_visible).
     """
     m = _LOG_LEVEL_RE.match(line)
     return m.group(1) if m else None
@@ -68,6 +107,16 @@ def compile_log_patterns():
 
     def _int_comma(checks, regex, key, exclude=None):
         _simple(checks, regex, key, lambda m: f"{int(m.group(1)):,}", exclude)
+
+    def _first(checks, regex, key, transform, exclude=None):
+        """Like _simple, but only the FIRST matching line wins (later repeats
+        of the same value in draft/speculative contexts are ignored)."""
+        def handler(info, m):
+            if key in info:
+                return False
+            info[key] = transform(m)
+            return True
+        _add(checks, regex, handler, exclude)
 
     # ========== NEW FORMAT (v9174+) ==========
 
@@ -112,23 +161,68 @@ def compile_log_patterns():
     # --- Slot context new format (new: `srv load_model: initializing, n_ctx_slot = 131072`) ---
     _int_comma(["srv", "initializing", "n_ctx_slot"], r"n_ctx_slot\s*=\s*(\d+)", "ctx_size")
 
-    # --- Context warning (new: `llama_context: n_ctx_seq (65536) < n_ctx_train (262144)`) ---
+    # --- Context warning (`llama_context: n_ctx_seq (65536) < n_ctx_train (262144)`,
+    #     or the `>` overflow variant; library INFO → visible at -lv 4) ---
     def _handle_ctx_warning(info, m):
         info["ctx_size_seq"] = f"{int(m.group(1)):,}"
         info["train_ctx"] = f"{int(m.group(2)):,}"
         return True
-    _add(["llama_context", "n_ctx_seq", "n_ctx_train"], r"n_ctx_seq\s*\((\d+)\)\s*<\s*n_ctx_train\s*\((\d+)\)", _handle_ctx_warning)
+    _add(["llama_context", "n_ctx_seq", "n_ctx_train"], r"n_ctx_seq\s*\((\d+)\)\s*[<>]\s*n_ctx_train\s*\((\d+)\)", _handle_ctx_warning)
 
-    # --- Prompt cache (new: `srv load_model: use '--cache-ram 0' to disable the prompt cache`) ---
-    def _handle_cache_hint(info, m):
-        if "prompt_cache" not in info:
-            info["prompt_cache"] = "已启用"
+    # --- Prompt cache (TRACE → visible at -lv 4) ---
+    # `srv load_model: prompt cache is enabled, size limit: no limit`
+    # `srv load_model: prompt cache is enabled, size limit: 2048 MiB`
+    # `srv load_model: prompt cache is disabled - use `--cache-ram N` to enable it`
+    def _handle_prompt_cache(info, m):
+        if m.group(1) is None:
+            info["prompt_cache"] = t("已启用")
+        elif m.group(1) == "no limit":
+            info["prompt_cache"] = t("已启用（无上限）")
+        else:
+            info["prompt_cache"] = t("已启用（上限 {n} MiB）", n=m.group(2))
         return True
-    _add(["srv", "prompt cache"], r"disable the prompt cache", _handle_cache_hint)
+    _add("prompt cache is enabled", r"prompt cache is enabled(?:,\s*size limit:\s*(no limit|([\d,]+) MiB))?", _handle_prompt_cache)
+    _simple(["prompt cache is disabled"], r"prompt cache is disabled", "prompt_cache", lambda m: t("已禁用"))
 
-    # --- Speculative decoding (new: `srv load_model: speculative decoding will use checkpoints`) ---
+    # --- Speculative decoding (INFO, always on) ---
+    # `spec common_specu: adding speculative implementation 'draft-mtp'`
+    # `common_speculative_init_result: creating MTP draft context against the target model '...gguf'`
+    _simple(["adding speculative implementation"], r"adding speculative implementation '([^']+)'", "speculative_decoding", lambda m: m.group(1))
+    _simple(["creating mtp draft context"], r"creating mtp draft context", "speculative_decoding", lambda m: "MTP")
+    # legacy: `srv load_model: speculative decoding will use checkpoints`
     _simple(["srv", "speculative decoding"], r"speculative decoding", "speculative_decoding",
             lambda m: "已启用")
+
+    # --- Reasoning preservation (chat-template capability; INFO/WARN, always on) ---
+    # `srv init: chat template supports preserving reasoning, it is enabled by default (...)`
+    # `srv init: chat template supports preserving reasoning, consider enabling it via --reasoning-preserve`
+    # `srv init: chat template does NOT support preserving reasoning, --reasoning-preserve has no effect`
+    _simple(["chat template supports preserving reasoning", "enabled by default"],
+            r"enabled by default", "reasoning_preserve", lambda m: t("默认开启"))
+    _simple(["chat template supports preserving reasoning", "consider enabling"],
+            r"consider enabling", "reasoning_preserve", lambda m: t("未开启（可手动开启）"))
+    _simple(["does not support preserving reasoning"], r"does NOT support", "reasoning_preserve", lambda m: t("不支持"))
+
+    # --- CPU threadpool (INFO, always on) ---
+    # `cmn init: llama threadpool init, n_threads = 12`
+    _kv(["llama threadpool init"], r"n_threads\s*=\s*(\d+)", "n_threads")
+
+    # --- Effective log verbosity (INFO, always on; drives the low-detail hint) ---
+    # `cmn common_param: common_params_print_info: verbosity = 3 (adjust with the `-lv N` CLI arg)`
+    _simple(["verbosity = "], r"verbosity = (\d+)", "log_level", lambda m: int(m.group(1)))
+
+    # --- Per-task timings (slot INFO, always on) ---
+    # `slot print_timing: id  0 | task 0 | prompt eval time = 37262.14 ms / 74152 tokens (0.50 ms per token, 1990.01 tokens per second)`
+    def _handle_prompt_speed(info, m):
+        info["prompt_speed"] = f"{m.group(2)} t/s · {int(m.group(1)):,} tokens"
+        return True
+    _add(["prompt eval time"], r"prompt eval time =\s+[\d.]+ ms /\s*(\d+) tokens \(\s*[\d.]+ ms per token,\s*([\d.]+) tokens per second\)", _handle_prompt_speed)
+
+    # `slot print_timing: id  0 | task 0 | eval time = 2105.08 ms / 196 tokens (10.80 ms per token, 92.63 tokens per second)`
+    def _handle_decode_speed(info, m):
+        info["decode_speed"] = f"{m.group(2)} t/s · {int(m.group(1)):,} tokens"
+        return True
+    _add(["eval time"], r"\beval time =\s+[\d.]+ ms /\s*(\d+) tokens \(\s*[\d.]+ ms per token,\s*([\d.]+) tokens per second\)", _handle_decode_speed, exclude=["prompt"])
 
     # --- Model loaded (new: `srv main: model loaded`) ---
     def _handle_model_loaded_new(info, m):
@@ -151,24 +245,39 @@ def compile_log_patterns():
     # --- Load hparams warnings (new: `load_hparams: Qwen-VL models require ...`) ---
     _kv(["load_hparams", "image", "tokens"], r"require.*?(\d+)\s*image\s*tokens", "vision_min_tokens")
 
-    # ========== OLD FORMAT (legacy) ==========
+    # ========== GPU DEVICE LINES ==========
 
-    # --- GPU info (old: `Device 0: NVIDIA GeForce RTX 4090, compute capability 8.9, VRAM: 24564 MiB`) ---
-    def _handle_device_old(info, m):
-        info["gpu_name"] = m.group(1).strip()
-        info["gpu_vram"] = f"{m.group(2).strip()} MiB"
+    # --- ggml backend init (library INFO → visible at -lv 4; also matches the
+    #     legacy llama_print_system_info line) ---
+    # `  Device 0: NVIDIA GeForce RTX 5090, compute capability 9.0, VMM: yes, VRAM: 32579 MiB`
+    # `  Device 0: AMD Radeon RX 7900 XTX, gfx906 (0x00000906), VMM: no, Wave Size: 32, VRAM: 24576 MiB`
+    # legacy: `Device 0: NVIDIA GeForce RTX 4090, compute capability 8.9, VRAM: 24564 MiB`
+    def _handle_gpu_device(info, m):
+        # VRAM is always the LAST capture group (the optional named `cc`
+        # group shifts the numbering between the three device patterns)
+        idx = m.group(1)
+        name = m.group(2).strip()
+        vram = m.group(m.re.groups).strip()
+        if not info.get(f"gpu{idx}_name"):
+            info[f"gpu{idx}_name"] = name
+        if not info.get(f"gpu{idx}_vram"):
+            info[f"gpu{idx}_vram"] = f"{vram} MiB"
+        cc = m.groupdict().get("cc")
+        if cc and "gpu_compute_cap" not in info:
+            info["gpu_compute_cap"] = cc
+        if "gpu_name" not in info:
+            info["gpu_name"] = name
+            info["gpu_vram"] = f"{vram} MiB"
         return True
-    _add("device 0:", r"Device \d+: (.+?),.*?VRAM:\s*([\d,]+)\s*MiB", _handle_device_old)
+    _add("vram", r"Device (\d+): (.+?), compute capability (?P<cc>[\d.]+), VMM: \w+, VRAM: ([\d,]+) MiB", _handle_gpu_device)
+    _add("vram", r"Device (\d+): (.+?), \S+ \(0x[0-9a-fA-F]+\), VMM: \w+, Wave Size: \d+, VRAM: ([\d,]+) MiB", _handle_gpu_device)
+    _add("vram", r"Device (\d+): (.+?), compute capability (?P<cc>[\d.]+), VRAM: ([\d,]+) MiB", _handle_gpu_device)
 
-    def _handle_compute_cap(info, m):
-        info["gpu_compute_cap"] = m.group(1)
-        return True
-    _add("device 0:", r"compute capability\s+([\d.]+)", _handle_compute_cap)
-
-    # --- System info (old) ---
+    # --- System info (old: `system_info: n_threads = 12 (n_threads_batch = 12) / 20`) ---
     _kv("system_info:", r"n_threads\s*=\s*(\d+)", "n_threads")
     _kv("system_info:", r"n_threads_batch\s*=\s*(\d+)", "n_threads_batch")
     _kv("system_info:", r"total_threads\s*=\s*(\d+)", "total_threads")
+    _kv("system_info:", r"n_threads_batch\s*=\s*\d+\)\s*/\s*(\d+)", "total_threads")
 
     # --- Projected VRAM (old) ---
     def _handle_projected(info, m):
@@ -192,7 +301,8 @@ def compile_log_patterns():
     # --- GGUF / model info (old: print_info format / new: llama_model_loader format) ---
     _simple("file format", r"GGUF V(\d+)", "gguf_version", lambda m: f"V{m.group(1)}")
     _simple("version gguf", r"GGUF\s+V(\d+)", "gguf_version", lambda m: f"V{m.group(1)}")
-    _kv(["file type", "print_info"], r"file type\s*=\s*(.+)", "quant_type")
+    _simple(["file type", "print_info"], r"file type\s*=\s*(.+)", "quant_type",
+            lambda m: m.group(1).replace("(guessed) ", "").strip())
     _kv(["file size", "print_info"], r"file size\s*=\s*(.+)", "file_size")
     _kv(["model params", "print_info"], r"model params\s*=\s*(.+)", "model_params")
     _kv("general.name", r"general\.name\s+(?:str\s+)?=\s+(.+)", "model_name")
@@ -204,6 +314,24 @@ def compile_log_patterns():
     _kv(["n_layer", "print_info"], r"n_layer\s+=\s+(\d+)", "n_layers")
     _int_comma(["n_ff", "print_info"], r"n_ff\s+=\s+(\d+)", "n_ff")
     _int_comma(["n_swa", "print_info"], r"n_swa\s+=\s+(\d+)", "sliding_window")
+
+    # --- MoE experts (print_info; only stored for expert models) ---
+    def _handle_n_expert(info, m):
+        if int(m.group(1)) > 0:
+            info["n_expert"] = m.group(1)
+            return True
+        return False
+    _add(["n_expert", "print_info"], r"\bn_expert\s+=\s+(\d+)", _handle_n_expert)
+
+    def _handle_n_expert_used(info, m):
+        if info.get("n_expert"):
+            info["n_expert_used"] = m.group(1)
+            return True
+        return False
+    _add(["n_expert_used", "print_info"], r"n_expert_used\s+=\s+(\d+)", _handle_n_expert_used)
+
+    # --- RoPE scaling (print_info) ---
+    _kv(["rope scaling", "print_info"], r"rope scaling\s+=\s+(\S+)", "rope_scaling")
     _simple(["vocab type", "print_info"], r"vocab type\s+=\s+(\w+)", "vocab_type", lambda m: m.group(1))
     _simple(["bos token", "print_info"], r"BOS token\s+=\s+(\d+)\s+'([^']*)'",
             "bos_token", lambda m: f"{m.group(1)} '{m.group(2)}'")
@@ -231,46 +359,72 @@ def compile_log_patterns():
     # in newer builds), so the pre-filter only checks the stable wording
     _add(["offloaded", "layers"], r"offloaded (\d+)/(\d+) layers", _handle_gpu_offload)
 
-    # --- E8: in-use device line (new: `main: using device CUDA0 (NVIDIA GeForce RTX 5090) (CUDA0) - 30819 MiB free`) ---
+    # --- In-use device line (library INFO → visible at -lv 4) ---
+    # `llama_prepare_model_devices: using device CUDA0 (NVIDIA GeForce RTX 5090) (0000:01:00.0) - 30991 MiB free`
+    # `main: using device CPU (12th Gen Intel(R) Core(TM) i7-12700K) (unknown id) - 53243 MiB free`
     def _handle_using_device(info, m):
-        idx = m.group(1)
-        name = m.group(2).strip()
-        if not info.get(f"gpu{idx}_name"):
-            info[f"gpu{idx}_name"] = name
-        if "gpu_name" not in info:
-            info["gpu_name"] = name
+        backend = m.group(1)
+        idx = m.group(2) or "0"
+        name = m.group(3).strip()
+        free = m.group(4).strip()
+        if backend.lower() == "cpu":
+            info.setdefault("cpu_name", name)
+        else:
+            if not info.get(f"gpu{idx}_name"):
+                info[f"gpu{idx}_name"] = name
+            if not info.get(f"gpu{idx}_free"):
+                info[f"gpu{idx}_free"] = f"{free} MiB"
+            if "gpu_name" not in info:
+                info["gpu_name"] = name
+            if "free_vram" not in info:
+                info["free_vram"] = f"{free} MiB"
         return True
-    _add("using device", r"using device CUDA(\d+) \((.+?)\) \(", _handle_using_device)
+    _add("using device", r"using device ([A-Za-z]+)(\d*)\s+\((.+?)\) \([^()]*\)\s+-\s+([\d,]+) MiB free", _handle_using_device)
 
-    # --- VRAM buffers (old) ---
-    _kv(["model buffer size", "cuda"], r"CUDA\d+\s+model buffer size\s+=\s+(.+)", "model_vram")
-    _kv("cpu_mapped model buffer size", r"CPU_Mapped model buffer size\s+=\s+(.+)", "cpu_buffer")
+    # --- Per-backend buffers (library INFO → visible at -lv 4) ---
+    # `load_tensors:        CUDA0 model buffer size = 18904.69 MiB`
+    # `load_tensors:   CPU_Mapped model buffer size =   994.63 MiB`
+    # `llama_kv_cache:      CUDA0 KV buffer size =  9579.50 MiB`
+    # `sched_reserve:       CUDA0 compute buffer size =  36.14 MiB`
+    def _handle_model_buffer(info, m):
+        bufs = info.setdefault("model_bufs", {})
+        bufs[m.group(1)] = bufs.get(m.group(1), 0) + float(m.group(2))
+        gpu = {k: v for k, v in bufs.items() if not k.startswith("CPU")}
+        cpu = {k: v for k, v in bufs.items() if k.startswith("CPU")}
+        if gpu:
+            info["model_vram"] = f"{sum(gpu.values()):.2f} MiB"
+            if len(gpu) > 1:
+                info["model_vram_detail"] = " + ".join(f"{k}: {v:.2f}" for k, v in sorted(gpu.items()))
+        if cpu:
+            info["cpu_buffer"] = f"{sum(cpu.values()):.2f} MiB"
+        return True
+    _add("model buffer size", r"([A-Za-z_]\w*)\s+model buffer size\s+=\s+([\d.]+)\s*MiB", _handle_model_buffer)
 
     def _handle_kv_buffer(info, m):
-        prev_total = info.get("kv_cache_total", 0.0)
-        if isinstance(prev_total, str):
-            pm = re.search(r"([\d.]+)", prev_total)
-            prev_total = float(pm.group(1)) if pm else 0.0
-        curr_match = re.search(r"([\d.]+)", m.group(1))
-        if curr_match:
-            info["kv_cache_total"] = prev_total + float(curr_match.group(1))
-            return True
-        return False
-    _add(["kv buffer size", "cuda"], r"CUDA\d+\s+KV buffer size\s+=\s+(.+)", _handle_kv_buffer)
+        # full + SWA/DSA caches each print a line; the total is the sum
+        info["kv_cache_total"] = info.get("kv_cache_total", 0.0) + float(m.group(2))
+        return True
+    _add("kv buffer size", r"([A-Za-z_]\w*)\s+KV buffer size\s+=\s+([\d.]+)\s*MiB", _handle_kv_buffer)
 
-    _kv(["compute buffer size", "cuda"], r"CUDA\d+\s+compute buffer size\s+=\s+(.+)", "compute_buffer",
-         exclude=["host", "cpu"])
+    def _handle_compute_buffer(info, m):
+        bufs = info.setdefault("compute_bufs", {})
+        bufs[m.group(1)] = bufs.get(m.group(1), 0) + float(m.group(2))
+        gpu = {k: v for k, v in bufs.items() if not k.startswith("CPU")}
+        if gpu:
+            info["compute_buffer"] = f"{sum(gpu.values()):.2f} MiB"
+        return True
+    _add("compute buffer size", r"([A-Za-z_]\w*)\s+compute buffer size\s+=\s+([\d.]+)\s*MiB", _handle_compute_buffer)
 
-    # --- Graph (old) ---
-    _kv(["graph nodes", "sched_reserve"], r"graph nodes\s+=\s+(\d+)", "graph_nodes")
-    _kv(["graph splits", "sched_reserve"], r"graph splits\s+=\s+(\d+)", "graph_splits")
+    # --- Graph (first sched_reserve wins: the main context reserves before
+    #     draft/speculative contexts, so last-wins would show the draft's) ---
+    _first(["graph nodes", "sched_reserve"], r"graph nodes\s+=\s+(\d+)", "graph_nodes", lambda m: m.group(1))
+    _first(["graph splits", "sched_reserve"], r"graph splits\s+=\s+(\d+)", "graph_splits", lambda m: m.group(1))
+    # `reserve_compute_meta: graph splits = 1, nodes = 823` (compute-meta graph)
+    _first(["reserve_compute_meta"], r"nodes\s*=\s*(\d+)", "graph_nodes", lambda m: m.group(1))
 
     # --- n_ctx (old) ---
     _int_comma(["n_ctx", "llama_context"], r"n_ctx\s+=\s+(\d+)", "ctx_size",
                exclude=["n_ctx_seq", "n_ctx_orig", "n_ctx_train"])
-
-    # --- Prompt cache (old) ---
-    _kv("prompt cache is enabled", r"size limit:\s+([\d,]+)\s*MiB", "prompt_cache")
 
     # --- Vision (old) ---
     def _handle_mmproj(info, m):
@@ -299,11 +453,22 @@ def compile_log_patterns():
 # Pre-compiled at module level
 LOG_PATTERNS = compile_log_patterns()
 
+# Fast rejection set for parse_log_line: a line can match a pattern only if
+# it contains that pattern's primary check string, so any line missing ALL
+# primary checks can be skipped before the per-pattern loop. This is the
+# hot path during verbose prompt-dump bursts (tens of thousands of
+# arbitrary-text lines per second on the GUI thread).
+_PARSE_ANCHORS = tuple(checks[0] for checks, _, _, _ in LOG_PATTERNS)
+
 
 def parse_log_line(line, info):
     """Parse one log line, mutating `info`. Returns True if anything changed."""
+    if len(line) > PARSE_LINE_MAX:
+        return False
     stripped = line.strip()
     lower = stripped.lower()
+    if not any(anchor in lower for anchor in _PARSE_ANCHORS):
+        return False
     updated = False
 
     # Pre-compiled pattern matching

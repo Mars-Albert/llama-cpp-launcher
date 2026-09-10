@@ -264,6 +264,33 @@
 - **B. 运行真相（优先做）**：服务器启动日志本身会报告实际使用设备与实际 offload 层数（如 `offloaded 33/38 layers to GPU`）；在 `ui/log_parser.py` 加 2-3 个模式（兼容新旧措辞），运行信息面板加一行 `GPU: …` 。零额外子进程，回答"这次实际跑了什么"。
 - 验证：双卡机器离屏冒烟（探测行渲染 + 启动服务器后运行信息出现 offload 行）；无 GPU 环境（仅 CPU）下两行分别显示"仅 CPU"/不显示，不报错。
 
+### E11. 小窗体控件压缩/重叠 ✅（2026-09，用户反馈：窗体尺寸比较小时控件被压缩并重叠）
+- **根因**：窗口 `setMinimumSize(1100, 700)` 低于内容实际布局最小（开发机实测 1201×861）——最小窗口下布局无法满足最小尺寸，行被压到 4px 高、控件互相叠画。宽度上快捷开关 grid 最小 ~1005px（QLabel 单行标签的 minimumSizeHint=整行文字宽）、模型组 ngl+上下文+7 个预设按钮单行 ~934px，共同把窗口最小宽顶到 1201+。
+- **设计（用户决定：参数区不要垂直滚动条）**：行保持完整高度，窗口直接不允许缩到放不下的高度——面板设硬最小高而非让面板自己滚动。
+- **修复**：
+  - `BasicPanel` 硬最小高 = 面板自然高（`resync_min_height()` = `layout().minimumSize().height()`）。自然高依赖解析后的字体，所以 `MainWindow._sync_panel_min()` 在 showEvent（直接 + 0ms timer 补第一次布局）和快捷开关自定义后再重新 pin 一次——构造期读到的是字体未定的近似值（400 vs 实际 486，不重 pin 会把底部裁掉）。
+  - `stacked` 仍包在无边框 `QScrollArea`（`panel_scroll`，widgetResizable）里，但垂直滚动条 `AlwaysOff`：`_sync_panel_min()` 显式给 scroll area 设最小高=面板最小高+2（QScrollArea 不会把内容最小**高**传给自己，widgetResizable 内容会被静默压扁——宽度会尊重最小值、高度不会，实测如此）。
+  - `_sync_panel_min()` 末尾按 live `minimumSizeHint()` 抬窗口最小（`max(MIN_WINDOW_*, hint)`，MIN 降为 900×690 地板）——字体/DPI 不同也能保证"窗口最小=内容最小"，永远不会缩进压缩态。
+  - scroll area / `stacked` 只保留水平方向滚动：`stacked` 硬最小宽 = 固定组（模型/采样/服务）最宽者（`_update_panel_content_min()`），刻意不含自适应换行的快捷开关 grid（其最小随列数变，是移动靶）。这个宽度地板同时保证窗口内 grid 恒 ≥4 列（2 行），使面板最小高与窗口宽度无关——高度闭环成立的关键。
+  - 快捷开关：槽位标签 `setMinimumWidth(1)`（空最小=未设置，Qt 会回退 minimumSizeHint=整行文字宽）；`_quick_cols()` 按"最大可容纳列数"贪心（按 scroll-area viewport 宽，祖先链查找），且**不低于 2 列**——单列会让 grid（和面板最小高）依赖当前窗口宽度，窄于 2 列最小宽时改出水平滚动条而不是折成单列。
+  - 模型组 ngl 行与上下文行拆为两行（原单行 ~934px 是宽度主要来源之一）。
+  - 服务行 host/port/parallel 固定宽微调（110/70/60 → 100/64/56），行最小 843→833。
+- 实测（offscreen 全量 widget 几何扫描，visibility 按滚动区 viewport 裁剪）：最小尺寸/1100×700/默认尺寸 × 基础/高级模式 = 0 重叠、无垂直滚动条、面板恒为完整高度；左栏拖到最宽的最坏组合下 grid 仍 2 行；旧代码同扫描 8 组重叠（行被压至 4px）；窗口最小 1100×700（名义）/1201×861（实际）→ 902×879（开发机字体）。
+- **第二轮（用户第二次反馈：窗口横向缩小后快捷开关从 1 行折成 2 行，多出来的行高被"借"自模型设置组，压扁了该组行高）**——用户选定**方案 A：尺寸变化时动态重新同步**（在面板布局 pass 之前检测 grid 折行并提前重 pin 硬最小，当前高度放不下时窗口自动加高，而不是让 Qt 去压"最软"的组）：
+  - `BasicPanel._arrange_quick_toggles()`：列数变化才重排（避免拖动期间每帧 takeAt/addWidget），行数变化时发 `quick_wrap_changed(rows)`；grid 收进 `_quick_grid_host` 包装 widget，**显式**最小高 = 行数×槽位高（算术值）。
+  - `MainWindow.eventFilter` 监视 `panel_scroll.viewport()` 尺寸变化——viewport 在面板自己的布局 pass **之前**被调整，这是唯一的"提前量"；重排后 `_on_quick_wrap_changed` 直接（不再延迟）调 `_sync_panel_min()`，同一 pass 内更新窗口最小，`setMinimumSize` 大于当前尺寸时 Qt 自动加高窗口。
+  - **Qt 最小尺寸缓存的两个坑**（本轮实测发现）：① grid 的 takeAt/addWidget 之后，其 layout 最小值要隔一个事件循环 pass 才更新，期间面板 layout 的 `minimumSize()` 缓存同样是旧值——所以 grid 用显式最小高（host widget，QLayout 本身没有最小值）、`resync_min_height()` 改为逐项累加各组的 `minimumSizeHint()`（按需计算、不读缓存）；② `minimumSizeHint()` 会少报 scroll area 的显式最小值，而日志标签页的弹性区会把缺口全部分给面板——所以窗口最小**高**改为右列子项最小值之和 + 菜单栏/状态栏 + 中央 margins（实测 914 vs hint 879，缺口 35px 正好被日志区吃成压缩）。
+  - GPU 信息标签晚到（异步探测，可能在任意模式/时机出现）后也补一次同步，覆盖"高级模式切换回来时模型组已含 GPU 行"的压缩 case。
+  - **窗口最小宽不能含 grid 当前列数最小宽**：`minimumSizeHint().width()` 会带上 grid 当前列数（1 行时 ~1015px）的最小宽，把窗口最小宽顶到 1276+ —— "1 行 grid 把窗口撑宽、宽窗口让 grid 保持 1 行"自我锁死，折行永远不发生。改为显式计算：左栏最小宽 + splitter handle（未布局前 `handleWidth()=-1`，floor 到 10）+ 右列子项最大最小宽（scroll area 用其固定内容最小宽 `_panel_fixed_min_width` 替代）。
+  - **长单行标签也会顶宽**：GPU 设备行（"检测到 2× GPU: RTX 5090 (32GB) + …"）和版本字符串（`llama-server 10867 (…)`）的 QLabel 最小宽 = 整行文字宽（~1090px），同样把窗口最小宽顶到 1276。`setWordWrap` 更差（折行标签的 minimumSizeHint = 最长单词处的多行高，永久拉高最小高）。改用 `basic_panel.ElidingLabel`：省略号截断、最小宽 0、最小高恒 1 行、tooltip 保留全文（颜色走 palette + 显式字号，不走 QSS——自定义 paintEvent 会忽略 QSS 颜色）。GPU 标签与 version_label 均已换用；实测 GPU 晚到后窗口不再跳宽（1020 稳定），仅按 2 行+GPU 行加高。
+- 第二轮实测（7 快捷项场景：1360 宽 → 927 窄 → 最小 → 放大 → 高级/基础来回，连跑 3 次覆盖异步 GPU 探测的不同落地时机）：折行时窗口最小 885→923 自动跟上，5 个状态全部 0 压缩 0 重叠，无垂直滚动条。
+- **第三轮（用户第三次反馈：快捷开关行水平拉伸时标签文字容易被盖住，如 "KV C"、"适"——要求保证显示全）**：根因是 `_quick_cols()` 用 grid **最小宽**（标签被压到 1px）选列数——列数按"压扁后"的宽度算，放得下更多列，但每列实际分到的宽度不够完整标签，文字被控件盖住。修复：
+  - 列数改按 **自然宽**（`sizeHint`，标签完整显示所需宽度）选列：`_quick_grid_natural_width(cols)`（每列取该列最宽 slot）≤ viewport 宽才用该列数；
+  - `_apply_quick_column_widths()`：每列 `setColumnMinimumWidth` = 该列最宽 slot 的自然宽——任何宽度下列都不窄于标签所需，文字永远完整；连列数不变的重排（语言切换改标签长度）也会刷新；
+  - 代价：同样宽度下列数变少、行数变多（如 1180 宽 7 项从 5 列 2 行变 4 列 2 行，最小宽下 3 列 3 行），窗口最小高随之自动加高（第二轮机制，不压任何组）；两列自然宽都放不下时出水平滚动条（滚得开、不裁切）。标签自身的 `setMinimumWidth(1)` 保留——列最小宽才是保证，slot 自身不能再把 grid 撑得更宽。
+- 第三轮实测（真实字体，7 快捷项）：1180（用户截图宽度）4 列 2 行、最小宽 937 3 列 3 行、1360 4 列 2 行——全部标签完整显示（KV Cache K类型 / KV Cache V类型 / 适配内存不再被截断），无水平/垂直滚动条，各组零压缩。
+- 测试：`tests/test_small_window.py` 4 测试（窗口最小≥内容最小、6 个尺寸×模式组合零重叠、3 个尺寸下面板完整高度+无垂直滚动条+grid ≥2 列、**7 项快捷开关宽→窄场景 grid 折行不压缩任何组且窗口最小跟随**）；stash 回退验证旧代码必挂。
+
 ---
 
 ## 附：审查时确认过、无需改的点（避免重复排查）

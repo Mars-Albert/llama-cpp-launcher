@@ -184,6 +184,13 @@ class CommandBuilder:
 
     def build(self, v):
         args = []
+        # --verbose (schema order: row 5) is emitted BEFORE --log-verbosity
+        # (row 6) and forces verbosity to INT_MAX; emitting --log-verbosity
+        # afterwards would silently downgrade the user's "log everything"
+        # request, so skip it whenever verbose is on.
+        verbose_on = bool(v.get("verbose"))
         for p in PARAMS:
+            if p.key == "log_verbosity" and verbose_on:
+                continue
             args.extend(self._emit(p, v))
         return args

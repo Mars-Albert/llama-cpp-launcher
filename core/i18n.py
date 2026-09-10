@@ -50,11 +50,12 @@ _EN = {
     "关于": "About",
 
     # Presets
-    "预设管理": "Presets",
-    "加载": "Load",
+    "📦 预设管理": "📦 Presets",
+    "⬇️ 加载": "⬇️ Load",
     "保存": "Save",
-    "删除": "Delete",
-    "导入": "Import",
+    "💾 保存": "💾 Save",
+    "🗑️ 删除": "🗑️ Delete",
+    "📥 导入": "📥 Import",
 
     # Mode
     "模式:": "Mode:",
@@ -170,9 +171,9 @@ _EN = {
     "已显示": "Shown",
     "可选参数": "Available",
     "勾选 = 显示在快捷开关；左侧拖拽或点按钮调整顺序": "Checked = shown in quick toggles; drag or use the buttons on the left to reorder",
-    "上移": "Up",
-    "下移": "Down",
-    "恢复默认": "Reset to Default",
+    "▲ 上移": "▲ Move up",
+    "▼ 下移": "▼ Move down",
+    "✕ 移除": "✕ Remove",
     "恢复为默认的一组快捷开关": "Restore the default set of quick toggles",
     "类型": "Kind",
     "开关": "Toggle",
@@ -209,6 +210,9 @@ _EN = {
     "🔍 GGUF": "🔍 GGUF",
     "请先选择 .gguf 模型": "Please select a .gguf model first",
     "打开 GGUF 详情查看器": "Open GGUF Inspector",
+    "最大上下文 {ctx}": "max ctx {ctx}",
+    "GGUF 元数据解析失败: {err}": "GGUF metadata parse failed: {err}",
+    "⚠ 当前设置的上下文 {ctx} 超过模型上限 {max}（启动后会被截断）": "⚠ Set context ({ctx}) exceeds the model limit ({max}); it will be clamped at startup",
     "正在解析...": "Parsing...",
     "解析失败": "Parse Failed",
     "解析错误": "Parse Error",
@@ -240,7 +244,7 @@ _EN = {
     "已切换到浅色主题": "Switched to light theme",
     "打开任意 GGUF 文件加入列表": "Open any GGUF file and add it to the list",
     "打开 GGUF 文件": "Open GGUF File",
-    "导出": "Export",
+    "📤 导出": "📤 Export",
     "📥 导出": "📥 Export",
     "导出解析结果": "Export parse results",
     "📋 概览": "📋 Overview",
@@ -459,6 +463,32 @@ _EN = {
     "✅ 服务就绪": "✅ Service Ready",
     "🔄 模型加载完成": "🔄 Model Loaded",
     "已加载": "Loaded",
+    # prompt cache (log parser, dynamic limit)
+    "已启用（无上限）": "Enabled (No Limit)",
+    "已启用（上限 {n} MiB）": "Enabled (Limit {n} MiB)",
+    # reasoning preservation (log parser)
+    "默认开启": "On by default",
+    "未开启（可手动开启）": "Off (can be enabled manually)",
+    "不支持": "Not supported",
+
+    # Log line display truncation (verbose prompt dumps can produce 500KB lines)
+    "… 已截断（共 {n} 字符）": "… truncated ({n} chars total)",
+
+    # Low-verbosity hint (runtime info)
+    "⚠️ 日志详细度较低": "⚠️ Low Log Verbosity",
+    "当前日志详细度为 {lv}，llama.cpp 会抑制模型加载、显存、上下文等详细信息。"
+    "建议在 高级 页将 日志详细度 设为 4 (trace) 或勾选 详细输出。":
+        "Log verbosity is {lv}; llama.cpp suppresses model-loading, VRAM and context "
+        "details at this level. Set Log Verbosity to 4 (trace) in the Advanced tab, "
+        "or enable Verbose output.",
+
+    # New runtime-info rows (log parser / runtime_info)
+    "🧩 MoE 专家（总数 / 每token激活）": "🧩 MoE Experts (Total / Active per token)",
+    "🌀 RoPE 缩放（位置编码缩放方式）": "🌀 RoPE Scaling (Positional Encoding)",
+    "🧠 推理保留（思维链上下文保留）": "🧠 Reasoning Preservation (Chain-of-thought)",
+    "🚄 提示词处理速度（最近任务）": "🚄 Prompt Processing Speed (latest task)",
+    "🐇 生成速度（最近任务）": "🐇 Generation Speed (latest task)",
+    "提示": "Hint",
 
     # Empty info HTML
     "🚀 运行信息": "🚀 Runtime Info",
@@ -478,9 +508,9 @@ _EN = {
     "高级": "Advanced",
 
     # Buttons
-    "浏览": "Browse",
-    "添加": "Add",
-    "移除": "Remove",
+    "📂 浏览": "📂 Browse",
+    "➕ 添加": "➕ Add",
+    "➖ 移除": "➖ Remove",
 
     # File dialogs
     "选择文件": "Select File",
@@ -538,7 +568,7 @@ _EN = {
     "auto=自动检测, all=全部卸载到GPU, 或输入具体层数": "auto=detect, all=all to GPU, or enter layer count",
     "手动指定GPU卸载层数": "Manually set GPU offload layers",
     "上下文:": "Context:",
-    "默认": "Default",
+    "↩ 默认": "↩ Default",
     "使用模型默认上下文长度": "Use model default context length",
     "设置上下文长度为 {val}": "Set context length to {val}",
     "温度:": "Temp:",
@@ -1061,7 +1091,7 @@ _EN = {
     "代码补全（infill）使用 Suffix/Prefix/Middle 模式（部分模型偏好此顺序）。默认使用 Prefix/Suffix/Middle。": "Use the Suffix/Prefix/Middle pattern for infill (some models prefer this order). Default is Prefix/Suffix/Middle.",
     "是否处理转义序列（\\n、\\r、\\t、\\'、\\\"、\\\\）。": "Process escape sequences (\\n, \\r, \\t, \\', \\\", \\\\).",
     "离线模式：强制使用缓存，阻止一切网络访问（如模型下载）。": "Offline mode: force cache usage and block all network access (e.g. model downloads).",
-    "日志详细度阈值，超过阈值的消息被忽略。0=一般输出，1=错误，2=警告，3=信息，4=trace，5=debug（数值越大越详细）。": "Log verbosity threshold; messages above it are ignored. 0=generic output, 1=error, 2=warning, 3=info, 4=trace, 5=debug (higher = more detailed).",
+    "日志详细度阈值，超过阈值的消息被忽略。0=一般输出，1=错误，2=警告，3=信息，4=trace，5=debug（数值越大越详细）。默认为 4 (trace)：llama.cpp 自 2026 年 5 月起（#23021）在 3 (info) 级别下会抑制模型加载、显存、上下文等详细信息，运行信息面板需要 4 及以上才能完整显示；设为 3 或更低可让日志更简洁。": "Log verbosity threshold; messages above it are ignored. 0=generic output, 1=error, 2=warning, 3=info, 4=trace, 5=debug (higher = more detailed). Defaults to 4 (trace): since May 2026 (#23021) llama.cpp suppresses model-loading, VRAM and context details at level 3 (info), and the runtime-info panel needs 4 or higher to display fully; set 3 or lower for terser logs.",
     "日志是否使用颜色（on/off/auto）。auto = 输出到终端时启用颜色。": "Colored logging (on/off/auto). auto = enable colors when output goes to a terminal.",
     "把服务器日志写入指定文件。": "Write server logs to the given file.",
     "禁用日志输出。": "Disable log output.",

@@ -253,7 +253,7 @@ HELP_TEXTS = {
     "spm_infill": "代码补全（infill）使用 Suffix/Prefix/Middle 模式（部分模型偏好此顺序）。默认使用 Prefix/Suffix/Middle。",
     "escape": "是否处理转义序列（\\n、\\r、\\t、\\'、\\\"、\\\\）。",
     "offline": "离线模式：强制使用缓存，阻止一切网络访问（如模型下载）。",
-    "log_verbosity": "日志详细度阈值，超过阈值的消息被忽略。0=一般输出，1=错误，2=警告，3=信息，4=trace，5=debug（数值越大越详细）。",
+    "log_verbosity": "日志详细度阈值，超过阈值的消息被忽略。0=一般输出，1=错误，2=警告，3=信息，4=trace，5=debug（数值越大越详细）。默认为 4 (trace)：llama.cpp 自 2026 年 5 月起（#23021）在 3 (info) 级别下会抑制模型加载、显存、上下文等详细信息，运行信息面板需要 4 及以上才能完整显示；设为 3 或更低可让日志更简洁。",
     "log_colors": "日志是否使用颜色（on/off/auto）。auto = 输出到终端时启用颜色。",
     "log_file": "把服务器日志写入指定文件。",
     "log_disable": "禁用日志输出。",

@@ -10,7 +10,7 @@ from gguf.ggml_types import (
     GGML_TYPES, estimate_tensor_nbytes, get_type_name, is_quantized_type
 )
 from gguf.models import GGUFInfo, GGUFHeader, GGUFFilenameInfo
-from gguf.parser import parse_gguf, _align_offset
+from gguf.parser import parse_gguf, parse_gguf_metadata, _align_offset
 from gguf.diagnostics import run_diagnostics
 
 
@@ -399,6 +399,87 @@ class TestGGUFParser:
         messages = []
         parse_gguf(str(gguf_path), progress_callback=lambda m: messages.append(m))
         assert len(messages) > 0
+
+
+# ---------------------------------------------------------------------------
+# Metadata-only (quick) parse tests
+# ---------------------------------------------------------------------------
+
+class TestParseGgufMetadata:
+    def test_extracts_quick_fields(self, tmp_path):
+        p = tmp_path / "quick.gguf"
+        write_fake_gguf(str(p), metadata={
+            "general.architecture": "qwen3",
+            "general.name": "Qwen3-4B",
+            "qwen3.context_length": 40960,
+        })
+        info = parse_gguf_metadata(str(p))
+        assert info.path == str(p)
+        assert info.version == 3
+        assert info.arch == "qwen3"
+        assert info.name == "Qwen3-4B"
+        assert info.context_length == 40960
+
+    def test_missing_ctx(self, tmp_path):
+        p = tmp_path / "noctx.gguf"
+        write_fake_gguf(str(p), metadata={"general.architecture": "llama"})
+        info = parse_gguf_metadata(str(p))
+        assert info.arch == "llama"
+        assert info.name == ""
+        assert info.context_length is None
+
+    def test_does_not_read_tensor_infos(self, tmp_path):
+        # Header claims 100 tensors but the file only carries 1 tensor info:
+        # a full parse_gguf would hit EOF, the metadata-only parse must not
+        # touch the tensor section at all.
+        p = tmp_path / "notensors.gguf"
+        data = build_fake_gguf(
+            metadata={"general.architecture": "llama", "llama.context_length": 8192},
+            tensors=[{"name": "token_embd.weight", "dims": [4096, 4096],
+                      "type_id": 1, "offset": 0}],
+        )
+        # Patch the tensor count in the header up to 100
+        data = data[:8] + (100).to_bytes(8, "little") + data[16:]
+        p.write_bytes(data)
+        with pytest.raises(ValueError):
+            parse_gguf(str(p))  # full parse fails on the truncated tensor list
+        info = parse_gguf_metadata(str(p))
+        assert info.context_length == 8192
+
+    def test_cache_hit_returns_same_object(self, tmp_path):
+        p = tmp_path / "cached.gguf"
+        write_fake_gguf(str(p), metadata={
+            "general.architecture": "llama", "llama.context_length": 8192,
+        })
+        a = parse_gguf_metadata(str(p))
+        b = parse_gguf_metadata(str(p))
+        assert a is b
+
+    def test_cache_invalidated_on_rewrite(self, tmp_path):
+        p = tmp_path / "rewritten.gguf"
+        write_fake_gguf(str(p), metadata={
+            "general.architecture": "llama", "llama.context_length": 8192,
+        })
+        a = parse_gguf_metadata(str(p))
+        # Same path, different size+mtime → the cached entry must not be used
+        write_fake_gguf(str(p), metadata={
+            "general.architecture": "llama", "llama.context_length": 32768,
+            "general.name": "rewritten",
+        })
+        b = parse_gguf_metadata(str(p))
+        assert b is not a
+        assert b.context_length == 32768
+        assert b.name == "rewritten"
+
+    def test_nonexistent_file(self, tmp_path):
+        with pytest.raises(FileNotFoundError):
+            parse_gguf_metadata(str(tmp_path / "nope.gguf"))
+
+    def test_invalid_magic(self, tmp_path):
+        p = tmp_path / "bad.gguf"
+        p.write_bytes(b"NOTG" + b"\x00" * 100)
+        with pytest.raises(ValueError, match="Invalid GGUF magic"):
+            parse_gguf_metadata(str(p))
 
 
 # ---------------------------------------------------------------------------

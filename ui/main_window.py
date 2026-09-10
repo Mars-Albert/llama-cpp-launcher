@@ -14,12 +14,16 @@ from PyQt6.QtWidgets import (
     QPushButton, QLabel, QPlainTextEdit, QComboBox, QInputDialog,
     QMessageBox, QFileDialog, QStatusBar,
     QCheckBox, QGroupBox, QTabWidget, QTextEdit,
-    QDialog, QDialogButtonBox, QFormLayout, QLineEdit, QToolButton
+    QDialog, QDialogButtonBox, QFormLayout, QLineEdit, QToolButton,
+    QScrollArea, QFrame
 )
-from PyQt6.QtCore import Qt, QTimer, QThread, pyqtSignal, QPoint, PYQT_VERSION_STR
+import heapq
+from collections import deque
+
+from PyQt6.QtCore import Qt, QTimer, QThread, QEvent, pyqtSignal, QPoint, PYQT_VERSION_STR
 from PyQt6.QtGui import (QAction, QFont, QTextOption, QIcon, QPixmap, QPainter,
-                         QColor, QTextCursor, QTextDocument, QKeySequence, QShortcut,
-                         QImage, QPolygon, QPen)
+                         QColor, QPalette, QTextCursor, QTextDocument, QKeySequence,
+                         QShortcut, QImage, QPolygon, QPen)
 
 from core.config import (
     ConfigManager, save_scan_path, load_scan_path, save_language,
@@ -31,7 +35,8 @@ from core.config import (
 )
 from core.constants import (
     WINDOW_WIDTH, WINDOW_HEIGHT, MIN_WINDOW_WIDTH, MIN_WINDOW_HEIGHT,
-    LOG_MAX_BLOCK_COUNT, UNDO_HISTORY_MAX, PREVIEW_TIMER_MS, UNDO_DEBOUNCE_MS,
+    LOG_MAX_BLOCK_COUNT, LOG_DOC_MAX_BLOCK_COUNT,
+    UNDO_HISTORY_MAX, PREVIEW_TIMER_MS, UNDO_DEBOUNCE_MS,
     VERSION_CHECK_TIMEOUT_S,
 )
 from ui.log_parser import colorize_log_line, parse_log_line, line_level
@@ -41,7 +46,7 @@ from core.runner import ServerRunner
 from core.params_schema import PARAMS_BY_KEY
 from core.i18n import t, get_language, set_language
 from ui.model_browser import ModelBrowser
-from ui.basic_panel import BasicPanel
+from ui.basic_panel import BasicPanel, ElidingLabel
 from ui.advanced_panel import AdvancedPanel
 from ui.gguf_inspector import GGUFInspectorDialog
 
@@ -238,6 +243,38 @@ class _StartupInfoWorker(QThread):
             pass  # window keeps the fallback defaults
 
 
+# Workers still parsing when the window closes: module-level references keep
+# the QThread objects alive (destroying a running QThread crashes the
+# process); each worker removes itself on finish.
+_active_meta_workers: set = set()
+
+
+class _ModelMetaWorker(QThread):
+    """Parse GGUF header metadata off the main thread (model-info quick row).
+
+    parse_gguf_metadata only reads the header + metadata KV section (the
+    first few MB of the file), but on a slow disk that is still real IO, so
+    it runs in a thread and lands via finished_ok/finished_err. The seq
+    counter guards against fast model switching: results for a model the
+    user already moved on from are dropped by the handlers.
+    """
+    finished_ok = pyqtSignal(int, object)   # seq, GGUFQuickInfo
+    finished_err = pyqtSignal(int, str)     # seq, error message
+
+    def __init__(self, seq, path, parent=None):
+        super().__init__(parent)
+        self._seq = seq
+        self._path = path
+
+    def run(self):
+        try:
+            from gguf.parser import parse_gguf_metadata
+            info = parse_gguf_metadata(self._path)
+            self.finished_ok.emit(self._seq, info)
+        except Exception as e:
+            self.finished_err.emit(self._seq, str(e))
+
+
 class MainWindow(QMainWindow):
     def __init__(self, work_dir=None, defaults=None, chat_templates=None, theme=None):
         super().__init__()
@@ -266,7 +303,10 @@ class MainWindow(QMainWindow):
         self._preset_protected_keys = set()
         self._applying_values = False
         self._pending_webui_url = None
-        self._log_tail = ""
+        # QProcess 读取块不保证按行对齐：每个流（stdout/stderr）各挂起一个
+        # 未写完的半行。两个流分开挂起，否则一个流的半行会被粘到另一个流
+        # 的完整行上，把整行日志吞掉
+        self._log_tails = {"out": "", "err": ""}
         # B2: log lines are parsed immediately but rendered into this buffer;
         # a 100ms timer flushes the buffer with a single insertHtml, so
         # verbose logs no longer trigger one Qt layout pass per line.
@@ -276,6 +316,20 @@ class MainWindow(QMainWindow):
         # document itself.
         self._log_html: list[tuple] = []
         self._log_records: list[tuple] = []
+        # Per-level history windows (see LOG_MAX_BLOCK_COUNT): a narrow filter
+        # view reads from these, so a flood of hidden levels (-lv 5 debug,
+        # prompt dumps) cannot evict the visible level's lines out of the
+        # shared global window before the user ever sees them.
+        # (seq, (level, html)); each deque caps at LOG_MAX_BLOCK_COUNT.
+        self._log_seq = 0
+        self._level_histories = {
+            lvl: deque(maxlen=LOG_MAX_BLOCK_COUNT)
+            for lvl in ("D", "I", "W", "E", "F", None)
+        }
+        # Visible document blocks per level, in stream order — a per-level
+        # eviction drops the level's front block live instead of at the next
+        # filter toggle (only populated while a filter is active).
+        self._doc_blocks = {lvl: deque() for lvl in self._level_histories}
         self._log_flush_timer = QTimer()
         # E3: full (un-truncated) log of the current server run
         self._run_log_file = None
@@ -327,6 +381,8 @@ class MainWindow(QMainWindow):
         self._create_menu_bar()
         self._create_status_bar()
 
+        self._sync_panel_min()
+
     def _create_left_panel(self):
         widget = QWidget()
         # C8: no setFixedWidth — the QSplitter handle must stay draggable.
@@ -345,7 +401,7 @@ class MainWindow(QMainWindow):
 
         layout.addWidget(self._create_model_info_group())
 
-        self.preset_group = QGroupBox(t("预设管理"))
+        self.preset_group = QGroupBox(t("📦 预设管理"))
         preset_layout = QVBoxLayout(self.preset_group)
         preset_layout.setContentsMargins(6, 20, 6, 6)
 
@@ -355,9 +411,9 @@ class MainWindow(QMainWindow):
         preset_layout.addWidget(self.preset_combo)
 
         preset_btns = QHBoxLayout()
-        self.btn_load = QPushButton(t("加载"))
-        self.btn_save = QPushButton(t("保存"))
-        self.btn_delete = QPushButton(t("删除"))
+        self.btn_load = QPushButton(t("⬇️ 加载"))
+        self.btn_save = QPushButton(t("💾 保存"))
+        self.btn_delete = QPushButton(t("🗑️ 删除"))
         self.btn_load.clicked.connect(self._load_preset)
         self.btn_save.clicked.connect(self._save_preset)
         self.btn_delete.clicked.connect(self._delete_preset)
@@ -367,8 +423,8 @@ class MainWindow(QMainWindow):
         preset_layout.addLayout(preset_btns)
 
         preset_io = QHBoxLayout()
-        self.btn_import = QPushButton(t("导入"))
-        self.btn_export = QPushButton(t("导出"))
+        self.btn_import = QPushButton(t("📥 导入"))
+        self.btn_export = QPushButton(t("📤 导出"))
         self.btn_import.clicked.connect(self._import_preset)
         self.btn_export.clicked.connect(self._export_preset)
         preset_io.addWidget(self.btn_import)
@@ -414,7 +470,31 @@ class MainWindow(QMainWindow):
 
         self.stacked_layout.addWidget(self.basic_panel)
         self.stacked_layout.addWidget(self.advanced_panel)
-        layout.addWidget(self.stacked)
+
+        # E11: the parameter area never scrolls vertically. The basic panel
+        # carries a hard minimum height equal to its natural height (see
+        # BasicPanel._rebuild_quick_toggles), so the window minimum
+        # (computed in init_ui) always leaves room for the full panel and
+        # rows can never be squashed into overlapping controls. The scroll
+        # area is kept for the horizontal direction only: when the window
+        # is very narrow (or the left pane is dragged wide), the fixed rows
+        # scroll sideways instead of clipping.
+        self.panel_scroll = QScrollArea()
+        self.panel_scroll.setWidgetResizable(True)
+        self.panel_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self.panel_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.panel_scroll.setWidget(self.stacked)
+        layout.addWidget(self.panel_scroll)
+
+        # E11 (option A): the viewport is resized *before* the panel's own
+        # layout pass, so reacting here lets us re-wrap the quick-toggles
+        # grid before any group could be squashed to make room for a new
+        # grid row; the minimum re-sync itself is deferred to the next
+        # event-loop pass (see _on_quick_wrap_changed).
+        self.panel_scroll.viewport().installEventFilter(self)
+        self.basic_panel.quick_wrap_changed.connect(self._on_quick_wrap_changed)
+
+        self._update_panel_content_min()
 
         self.cmd_label = QLabel(t("📝 启动命令预览"))
         self.cmd_label.setStyleSheet("font-weight: bold; color: #7aa2f7; font-size: 13px;")
@@ -431,6 +511,11 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.cmd_preview)
 
         control_bar = QHBoxLayout()
+        # One visual language for all four (objectName -> dedicated gradient
+        # rule in _THEME_TEMPLATE): same font-size / weight / radius /
+        # padding, semantic color per role (green=go, red=stop, slate=aux,
+        # blue=service). The #webuiBtn rule used to exist in the QSS but was
+        # never applied because no objectName was set — wired up now.
         self.btn_start = QPushButton(t("▶ 启动服务"))
         self.btn_start.setFixedHeight(40)
         self.btn_start.setObjectName("startBtn")
@@ -439,8 +524,10 @@ class MainWindow(QMainWindow):
         self.btn_stop.setObjectName("stopBtn")
         self.btn_copy_cmd = QPushButton(t("📋 复制命令"))
         self.btn_copy_cmd.setFixedHeight(40)
+        self.btn_copy_cmd.setObjectName("copyBtn")
         self.btn_webui = QPushButton(t("🌐 打开WebUI"))
         self.btn_webui.setFixedHeight(40)
+        self.btn_webui.setObjectName("webuiBtn")
 
 
         self.btn_start.clicked.connect(self._start_server)
@@ -456,8 +543,16 @@ class MainWindow(QMainWindow):
         control_bar.addWidget(self.btn_webui)
         control_bar.addStretch()
 
-        self.version_label = QLabel(t("🔍 检测中..."))
-        self.version_label.setStyleSheet("color: #6b7280; font-size: 12px;")
+        # E11: eliding label — the full version string must not pin the
+        # window minimum width (see basic_panel.ElidingLabel); the tooltip
+        # keeps the full text.
+        self.version_label = ElidingLabel(t("🔍 检测中..."))
+        f = self.version_label.font()
+        f.setPixelSize(12)
+        self.version_label.setFont(f)
+        pal = self.version_label.palette()
+        pal.setColor(QPalette.ColorRole.Text, QColor("#6b7280"))
+        self.version_label.setPalette(pal)
         self.version_label.setToolTip(t("llama.cpp 版本信息"))
         self._version_base_tooltip = t("llama.cpp 版本信息")
         control_bar.addWidget(self.version_label)
@@ -502,7 +597,8 @@ class MainWindow(QMainWindow):
                 padding: 4px;
             }
         """ + _DARK_SCROLLBAR_QSS)
-        self.log_output.document().setMaximumBlockCount(LOG_MAX_BLOCK_COUNT)
+        # Narrow filter views can hold one window per visible level
+        self.log_output.document().setMaximumBlockCount(LOG_DOC_MAX_BLOCK_COUNT)
 
         log_tab = QWidget()
         log_tab_layout = QVBoxLayout(log_tab)
@@ -519,7 +615,12 @@ class MainWindow(QMainWindow):
         self.btn_log_search_prev = QPushButton("▲")
         self.btn_log_search_next = QPushButton("▼")
         self.btn_log_search_close = QPushButton("✕")
+        # objectName selects the #logSearchBtn QSS rule: the theme's generic
+        # QPushButton padding (5px 14px) is wider than these 26px buttons,
+        # so without zero padding Qt gives the text a zero-width content
+        # rect and the ▲/▼/✕ glyphs never render (empty rounded boxes).
         for b in (self.btn_log_search_prev, self.btn_log_search_next, self.btn_log_search_close):
+            b.setObjectName("logSearchBtn")
             b.setFixedHeight(24)
             b.setFixedWidth(26)
         self.btn_log_search_prev.setToolTip(t("上一个"))
@@ -591,6 +692,101 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.tab_widget, 1)
 
         return widget
+
+    def _sync_panel_min(self):
+        """E11: keep the scrollable parameter area — and the window
+        minimum — in sync with the content's hard minimums.
+
+        QScrollArea does not propagate its content's minimum *height* to
+        its own (it just squashes widgetResizable content), so the scroll
+        area is given an explicit minimum height equal to the basic
+        panel's hard minimum height (which equals the panel's natural
+        height — see BasicPanel._rebuild_quick_toggles). Together with the
+        live window minimum (the static MIN_WINDOW_* floors can be below
+        what the content needs on this font/DPI — the old 1100x700
+        minimum was, which is exactly what let the window shrink into
+        overlapping controls), the window can never be resized into a
+        state that squashes the rows.
+        """
+        self._update_panel_content_min()
+        # The panel's natural height depends on the resolved font, so re-pin
+        # it from the live layout every time (construction-time value is an
+        # approximation; after the first show it is the real one).
+        self.basic_panel.resync_min_height()
+        new_min = self.basic_panel.minimumHeight() + 2
+        changed = new_min != self.panel_scroll.minimumHeight()
+        self.panel_scroll.setMinimumHeight(new_min)
+        hint = self.minimumSizeHint()
+        # The window minimum height is computed directly as the sum of the
+        # right column's children minimums (+ menu/status bars, central
+        # margins) rather than from minimumSizeHint(): the hint
+        # under-reports the scroll area's explicit minimum, and a QVBox
+        # with a stretchy log-tab area squashes the scroll area (the
+        # most-expandable child) before the window is tall enough for the
+        # full panel.
+        right = self.panel_scroll.parentWidget().layout()
+        cm = self.centralWidget().layout().contentsMargins()
+        min_h = (right.minimumSize().height()
+                 + self.menuBar().sizeHint().height()
+                 + self.statusBar().sizeHint().height()
+                 + cm.top() + cm.bottom())
+        # The window minimum WIDTH is computed the same way (explicitly, not
+        # from hint.width()): the scroll area's own minimum includes the
+        # quick-toggles grid's *current column count* minimum — a moving
+        # target that self-locks the window wide (a 1-row grid keeps the
+        # window wide enough to stay a 1-row grid, so the re-wrap that
+        # would raise the height minimum never happens). The scroll area
+        # contributes its fixed-content minimum instead; the grid re-wraps
+        # as the viewport narrows (see BasicPanel._quick_cols) and the
+        # re-wrap re-syncs this minimum.
+        left_w = self.splitter.widget(0).minimumSize().width()
+        right_w = 0
+        for i in range(right.count()):
+            item = right.itemAt(i)
+            wdt = (self._panel_fixed_min_width
+                   if item.widget() is self.panel_scroll
+                   else item.minimumSize().width())
+            right_w = max(right_w, wdt)
+        # handleWidth() is -1 until the splitter's first layout — floor it
+        # so the pre-layout sync cannot pin a too-small minimum.
+        min_w = (left_w + max(self.splitter.handleWidth(), 10) + right_w)
+        self.setMinimumSize(
+            max(MIN_WINDOW_WIDTH, min_w),
+            max(MIN_WINDOW_HEIGHT, min_h, hint.height()),
+        )
+        if changed:
+            # Qt's layout-minimum caches settle one event-loop pass after a
+            # grid re-wrap (inside a resize cascade the just-rewrapped
+            # layout still reports its previous minimum). Re-sync once more
+            # so the window minimum sees the true content minimum; the
+            # changed-flag makes this converge (no repeated resyncs).
+            QTimer.singleShot(0, self._sync_panel_min)
+
+    def _update_panel_content_min(self):
+        """E11: hard minimum width for the scrollable panel content.
+
+        It is the widest of the *fixed* groups (model / sampling / server),
+        deliberately not the panel's full layout minimum: the quick-toggles
+        grid wraps on its own (see BasicPanel._quick_cols) and its minimum
+        depends on the current column count — a moving target that would
+        freeze the window minimum at whatever width the grid last had. Below
+        this width the fixed rows would clip at the group edges; with it,
+        a horizontal scrollbar appears instead and nothing is clipped.
+        """
+        bp = self.basic_panel
+        w = 0
+        for group in (bp._model_group, bp._sampling_group, bp._server_group):
+            w = max(w, group.minimumSizeHint().width())
+        margins = bp.layout().contentsMargins()
+        stacked_min = w + margins.left() + margins.right()
+        self._panel_fixed_min_width = stacked_min
+        self.stacked.setMinimumWidth(stacked_min)
+        # The scroll area has no frame and no vertical scrollbar (E11), so
+        # its viewport width equals its own width: the window minimum
+        # (computed from this in _sync_panel_min) leaves a viewport that
+        # already fits the panel — no horizontal scrollbar at the smallest
+        # size.
+        self.panel_scroll.setMinimumWidth(stacked_min)
 
     def _connect_signals(self):
         self.runner.log_output.connect(self._append_log)
@@ -755,9 +951,29 @@ class MainWindow(QMainWindow):
     def showEvent(self, event):
         super().showEvent(event)
         self._retry_pending_splitter(8)
+        # E11: re-sync the hard minimums once the font/layout has settled
+        # (the construction-time value is an approximation). The 0ms timer
+        # catches the first full layout pass; direct call covers the rest.
+        self._post_show_panel_resync()
+        QTimer.singleShot(0, self._post_show_panel_resync)
         if not self.preview_timer.isActive():
             self.preview_timer.start(PREVIEW_TIMER_MS)
             self._update_cmd_preview()
+
+    def _post_show_panel_resync(self):
+        # E11: the grid's wrap depends on the resolved font (slot minimum
+        # widths), so re-run the wrap decision and re-sync afterwards.
+        self.basic_panel._arrange_quick_toggles()
+        self._sync_panel_min()
+
+    def _on_quick_wrap_changed(self, rows):
+        """E11 (option A): the quick-toggles grid just re-wrapped (inside
+        the viewport's resize event, before the panel's own layout pass),
+        so re-syncing here — with the grid's explicit minimum already live —
+        updates the window minimum in the same pass: the window grows if
+        the new row no longer fits, and no group is ever squashed to make
+        room for it."""
+        self._sync_panel_min()
 
     def _flush_snapshot(self):
         self._save_current_to_params()
@@ -940,15 +1156,16 @@ class MainWindow(QMainWindow):
         QMessageBox.critical(self, t("错误"), msg)
         self.statusBar().showMessage(t("❌ 启动失败: {msg}", msg=msg[:80]))
 
-    def _append_log(self, text):
+    def _append_log(self, text, stream="out"):
         # QProcess 的读取块不保证按行对齐，最后一个元素可能是未写完的半行，
-        # 先挂起拼到下一个块，否则跨块的一行会被切成两半解析
-        text = self._log_tail + text
-        self._log_tail = ""
+        # 按流挂起拼到下一个块，否则跨块的一行会被切成两半解析；跨流粘行
+        # 会把两个逻辑行合成一行（后一行的级别前缀被吞掉）
+        text = self._log_tails.get(stream, "") + text
+        self._log_tails[stream] = ""
         if not text:
             return
         lines = text.split("\n")
-        self._log_tail = lines.pop()
+        self._log_tails[stream] = lines.pop()
         for line in lines:
             self._append_log_line(line)
         # B2: schedule a batched render (auto-scroll happens in the flush)
@@ -965,29 +1182,110 @@ class MainWindow(QMainWindow):
         self._run_log_write(line)
 
     def _log_banner(self, html):
-        # E3: banners go through the record system (level None = always
-        # visible) so they survive level-filter rebuilds
+        # E3: banners go through the record system (level None = shown only
+        # in the unfiltered view, like other prefix-less lines) so they
+        # survive level-filter rebuilds
         self._log_html.append((None, html))
         self._flush_log_buffer()
+
+    def _ingest_log_record(self, rec):
+        """Move one rendered (level, html) record into the histories: the
+        shared global window (serves the all-on view) plus the record's own
+        per-level window (serves the narrow filter views)."""
+        self._log_records.append(rec)
+        self._level_histories[rec[0]].append((self._log_seq, rec))
+        self._log_seq += 1
 
     def _flush_log_buffer(self):
         if not self._log_html:
             return
-        if self._log_filter_active():
-            # Re-render the whole (filtered) document from the records;
-            # the pending batch is merged in by the rebuild
-            self._rebuild_log_view()
-            return
         batch, self._log_html = self._log_html, []
-        self._log_records.extend(batch)
+        enabled = {lvl for lvl, b in self._log_level_boxes.items() if b.isChecked()}
+        active = self._log_filter_active()
+        # One block per line (appendHtml), never one giant <br>-joined block:
+        # (1) a batch appended right after the previous one used to glue the
+        #     last line of batch N to the first line of batch N+1;
+        # (2) a single growing block defeats setMaximumBlockCount, so the
+        #     document grew without bound and relayout cost grew with time.
+        # The document already mirrors the (filtered) view — fully rebuilt on
+        # every filter toggle — so only the batch's visible lines are
+        # appended; a full clear+reinsert per 100 ms tick froze the UI in
+        # verbose runs (O(visible records) per tick).
+        for rec in batch:
+            lvl = rec[0]
+            # per-level front eviction: this line pushing the level past its
+            # window means the level's oldest visible line leaves the
+            # document right now (it is the front of that level's block
+            # queue) instead of lingering until the next filter toggle
+            evicted = len(self._level_histories[lvl]) == LOG_MAX_BLOCK_COUNT
+            self._ingest_log_record(rec)
+            if self._log_level_visible(lvl, enabled):
+                self.log_output.appendHtml(rec[1])
+                if active:
+                    self._doc_blocks[lvl].append(
+                        self.log_output.document().lastBlock()
+                    )
+                    if evicted:
+                        self._drop_front_doc_block(lvl)
         if len(self._log_records) > LOG_MAX_BLOCK_COUNT:
             del self._log_records[:len(self._log_records) - LOG_MAX_BLOCK_COUNT]
-        html = "<br>".join(h for _, h in batch)
-        cursor = self.log_output.textCursor()
-        cursor.movePosition(QTextCursor.MoveOperation.End)
-        cursor.insertHtml(html)
+            if not active:
+                # All-on: the global window's front is the document's front,
+                # so a front-trim keeps doc == global window in sync
+                self._trim_log_document(enabled)
         if self.chk_auto_scroll.isChecked():
             self._log_scroll_to_bottom()
+
+    def _drop_front_doc_block(self, lvl):
+        dq = self._doc_blocks[lvl]
+        while dq and not dq[0].isValid():
+            dq.popleft()
+        if not dq:
+            return
+        self._remove_doc_block(dq.popleft())
+
+    def _remove_doc_block(self, block):
+        """Remove one (middle or last) block, merging it out of the document
+        without disturbing the others."""
+        doc = self.log_output.document()
+        second = block.next()
+        if second.isValid():
+            start, end = block.position(), second.position()
+        else:
+            prev = block.previous()
+            if not prev.isValid():
+                return  # the document's only block: keep it
+            start = prev.position() + prev.length()
+            end = block.position() + block.length()
+        cur = QTextCursor(doc)
+        cur.setPosition(start)
+        cur.setPosition(end, QTextCursor.MoveMode.KeepAnchor)
+        cur.removeSelectedText()
+
+    def _trim_log_document(self, enabled):
+        """All-on view only: drop front blocks for records the shared global
+        window already evicted, so they don't linger in the document until
+        the next filter toggle (which would read as “toggling the switch
+        makes log lines disappear”). Under an active filter the document is
+        kept in sync per level instead (see _drop_front_doc_block)."""
+        target = sum(
+            1 for lvl, _ in self._log_records
+            if self._log_level_visible(lvl, enabled)
+        )
+        doc = self.log_output.document()
+        to_drop = doc.blockCount() - target
+        if to_drop <= 0:
+            return
+        keep = QTextCursor.MoveMode.KeepAnchor
+        for _ in range(to_drop):
+            first = doc.firstBlock()
+            second = first.next()
+            if not second.isValid():
+                break
+            cur = QTextCursor(doc)
+            cur.setPosition(first.position())
+            cur.setPosition(second.position(), keep)
+            cur.removeSelectedText()
 
     # ---------- E3: level filter / search / full run log ----------
 
@@ -1000,24 +1298,53 @@ class MainWindow(QMainWindow):
         self._rebuild_log_view()
 
     def _log_level_visible(self, level, enabled):
-        # F (fatal) lines follow the E (error) filter
-        return level is None or level in enabled or (level == "F" and "E" in enabled)
+        # Non-level lines — the launcher banners and server lines without a
+        # level prefix (blank lines, raw model I/O dumps) — are shown only in
+        # the unfiltered view (all level boxes on). When a specific level
+        # filter is active they are hidden so each category view stays clean;
+        # "all unchecked" is also empty. F (fatal) lines follow E (error).
+        if level is None:
+            return len(enabled) == len(self._log_level_boxes)
+        return level in enabled or (level == "F" and "E" in enabled)
 
     def _rebuild_log_view(self):
+        """Full re-render of the (filtered) document. One-shot cost, only on
+        filter toggles — steady-state flushing appends incrementally.
+
+        All-on: re-render from the shared global window (unchanged).
+        Narrow: merge the visible levels' own history windows in stream
+        order — rendering from the shared window alone would show only the
+        few visible lines that happen to sit inside its last-5000-lines
+        slice, which a flood of hidden levels (debug at -lv 5, prompt
+        dumps) can shrink to a single line.
+        """
         if self._log_html:
-            self._log_records.extend(self._log_html)
+            for rec in self._log_html:
+                self._ingest_log_record(rec)
             self._log_html = []
-            if len(self._log_records) > LOG_MAX_BLOCK_COUNT:
-                del self._log_records[:len(self._log_records) - LOG_MAX_BLOCK_COUNT]
+        if len(self._log_records) > LOG_MAX_BLOCK_COUNT:
+            del self._log_records[:len(self._log_records) - LOG_MAX_BLOCK_COUNT]
         enabled = {lvl for lvl, b in self._log_level_boxes.items() if b.isChecked()}
-        html = "<br>".join(
-            h for lvl, h in self._log_records if self._log_level_visible(lvl, enabled)
-        )
+        active = self._log_filter_active()
         stick = self.chk_auto_scroll.isChecked() and self._log_at_bottom()
         self.log_output.clear()
-        if html:
-            cursor = self.log_output.textCursor()
-            cursor.insertHtml(html)
+        for lvl in self._doc_blocks:
+            self._doc_blocks[lvl].clear()
+        if active:
+            # per-level deques are seq-ordered; k-way merge keeps stream order
+            pools = [
+                self._level_histories[lvl] for lvl in self._level_histories
+                if self._log_level_visible(lvl, enabled)
+            ]
+            for _seq, rec in heapq.merge(*pools):
+                lvl, h = rec
+                self.log_output.appendHtml(h)
+                self._doc_blocks[lvl].append(
+                    self.log_output.document().lastBlock()
+                )
+        else:
+            for lvl, h in self._log_records:
+                self.log_output.appendHtml(h)
         if stick:
             self._log_scroll_to_bottom()
 
@@ -1075,9 +1402,20 @@ class MainWindow(QMainWindow):
         return count
 
     def eventFilter(self, obj, event):
-        # E3: Shift+Enter in the search box searches backwards
-        if obj is self.log_search_edit and event.type() == event.Type.KeyPress:
-            if event.key() == event.Key.Key_Return and (event.modifiers() & event.Modifier.ShiftModifier):
+        # E11 (option A): the panel viewport is resized before the panel's
+        # own layout pass — re-wrapping the quick-toggles grid here (and
+        # re-syncing the hard minimums via quick_wrap_changed) means an
+        # extra grid row never has to borrow height from the other groups.
+        if obj is self.panel_scroll.viewport() and \
+                event.type() == QEvent.Type.Resize:
+            self.basic_panel._arrange_quick_toggles()
+        # E3: Shift+Enter in the search box searches backwards.
+        # PyQt6 enums are class-scoped — QKeyEvent instances do not carry
+        # Key/Modifier/Type (that PyQt5-style access raises AttributeError
+        # on the first keypress in the search box).
+        if obj is self.log_search_edit and event.type() == QEvent.Type.KeyPress:
+            if event.key() == Qt.Key.Key_Return and \
+                    (event.modifiers() & Qt.KeyboardModifier.ShiftModifier):
                 self._log_search_find(False)
                 return True
         return super().eventFilter(obj, event)
@@ -1113,11 +1451,14 @@ class MainWindow(QMainWindow):
             self._close_run_log()
 
     def _flush_log_tail(self):
-        # 进程结束时最后一个块可能没有换行，把挂起的半行补显出来
-        if self._log_tail:
-            line = self._log_tail
-            self._log_tail = ""
-            self._append_log_line(line)
+        # 进程结束时各流最后一个块可能没有换行，把挂起的半行补显出来
+        flushed = False
+        for stream, line in list(self._log_tails.items()):
+            if line:
+                self._log_tails[stream] = ""
+                self._append_log_line(line)
+                flushed = True
+        if flushed:
             self._flush_log_buffer()  # final line shows up immediately on stop/error
 
     def _parse_log_line(self, line):
@@ -1131,6 +1472,9 @@ class MainWindow(QMainWindow):
     def _clear_log(self):
         self._log_html = []
         self._log_records = []
+        for lvl in self._level_histories:
+            self._level_histories[lvl].clear()
+            self._doc_blocks[lvl].clear()
         self.log_output.clear()
 
     def _export_log(self):
@@ -1572,6 +1916,8 @@ class MainWindow(QMainWindow):
             keys = list(dlg.result_keys())
             self.basic_panel.set_quick_params(keys)
             save_ui_pref("quick_params", keys)  # persist immediately (E10)
+            self._sync_panel_min()  # E11: more keys can grow the panel's min height
+            QTimer.singleShot(0, self._sync_panel_min)  # ...and once more on the settled layout
             self._apply_params_to_current()
 
     def _save_ui_state(self):
@@ -1629,7 +1975,7 @@ class MainWindow(QMainWindow):
         # Settings menu (absorbs the old 语言 menu; theme moved out of 帮助)
         self.settings_menu = menubar.addMenu(t("设置"))
         # E10: customize which toggles the ⚡ 快捷开关 group shows
-        self._quick_params_action = QAction(t("自定义快捷开关…"), self)
+        self._quick_params_action = QAction(self._create_text_icon("Q", QColor("#f1c40f")), t("自定义快捷开关…"), self)
         self._quick_params_action.triggered.connect(self._customize_quick_toggles)
         self.settings_menu.addAction(self._quick_params_action)
         self.settings_menu.addSeparator()
@@ -1747,6 +2093,10 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(10, 20, 10, 8)
         layout.setSpacing(6)
         layout.setColumnStretch(1, 1)
+        # GGUF quick-metadata row state (arch · max ctx · chat template)
+        self._model_meta = None          # GGUFQuickInfo for the current model
+        self._model_meta_seq = 0         # in-flight parse guard
+        self._model_meta_worker = None   # keep the running thread alive
 
         self.model_info_labels = {}
         self._model_info_label_widgets = {}
@@ -1781,9 +2131,18 @@ class MainWindow(QMainWindow):
             "QPushButton:disabled { background: #94a3b8; color: #cbd5e1; }"
         )
         self.btn_gguf_inspect.clicked.connect(self._open_gguf_inspector)
+        # GGUF quick metadata (arch · max ctx), parsed asynchronously;
+        # fills the space left of the GGUF button. Eliding so the label
+        # never widens the group (full text in the tooltip).
+        self.model_meta_label = ElidingLabel("—")
+        f = self.model_meta_label.font()
+        f.setPixelSize(11)
+        self.model_meta_label.setFont(f)
+        self._set_meta_color("#6b7280")
         btn_container = QWidget()
         btn_layout = QHBoxLayout(btn_container)
         btn_layout.setContentsMargins(0, 0, 0, 0)
+        btn_layout.addWidget(self.model_meta_label)
         btn_layout.addStretch()
         btn_layout.addWidget(self.btn_gguf_inspect)
         layout.addWidget(btn_container, btn_row, 0, 1, 2)
@@ -1841,6 +2200,94 @@ class MainWindow(QMainWindow):
             self.btn_gguf_inspect.setToolTip(t("打开 GGUF 详情查看器"))
         else:
             self.btn_gguf_inspect.setToolTip(t("请先选择 .gguf 模型"))
+
+        self._update_model_meta(model_path)
+
+    # ------------------------------------------------------------------
+    # GGUF quick-metadata row (arch · max ctx)
+    # ------------------------------------------------------------------
+
+    def _set_meta_color(self, hexcolor):
+        # ElidingLabel paints with the palette Text role, not QSS — see its
+        # docstring. Idle/status gray; amber when ctx exceeds the model limit.
+        pal = self.model_meta_label.palette()
+        pal.setColor(QPalette.ColorRole.Text, QColor(hexcolor))
+        self.model_meta_label.setPalette(pal)
+
+    def _update_model_meta(self, model_path):
+        """Refresh the quick-metadata row for the selected model file.
+
+        Always goes through the worker — even a cache hit only costs one
+        event-loop hop, while a miss must never block the GUI thread on
+        disk IO. The seq counter drops results for models the user already
+        switched away from."""
+        self._model_meta_seq += 1
+        seq = self._model_meta_seq
+        self._model_meta = None
+        label = self.model_meta_label
+        if not (model_path and Path(model_path).exists()):
+            label.setText("—")
+            label.setToolTip("")
+            self._set_meta_color("#6b7280")
+            return
+        label.setText(t("正在解析..."))
+        label.setToolTip(str(model_path))
+        self._set_meta_color("#6b7280")
+        worker = _ModelMetaWorker(seq, str(model_path), self)
+        worker.finished_ok.connect(self._on_model_meta_ok)
+        worker.finished_err.connect(self._on_model_meta_err)
+        # 窗口关闭时仍在解析的 worker：模块级持引用，防止 QThread 对象在运行
+        # 中被销毁（销毁运行中的 QThread 会直接崩进程），结束后自动清理
+        worker.finished.connect(lambda: _active_meta_workers.discard(worker))
+        _active_meta_workers.add(worker)
+        self._model_meta_worker = worker
+        worker.start()
+
+    def _on_model_meta_ok(self, seq, info):
+        if seq != self._model_meta_seq:
+            return  # stale: user switched model while this was parsing
+        self._model_meta = info
+        self._render_model_meta()
+
+    def _on_model_meta_err(self, seq, msg):
+        if seq != self._model_meta_seq:
+            return
+        self._model_meta = None
+        label = self.model_meta_label
+        label.setText("—")
+        label.setToolTip(t("GGUF 元数据解析失败: {err}", err=msg))
+        self._set_meta_color("#6b7280")
+
+    def _render_model_meta(self):
+        """(Re)build the quick-metadata row text + colour from _model_meta.
+
+        Amber when the user-set context exceeds the model's limit — the
+        server would clamp it at load, so flag it before launch."""
+        label = self.model_meta_label
+        info = self._model_meta
+        if info is None:
+            return
+        parts = []
+        if info.arch:
+            parts.append(info.arch)
+        if info.context_length:
+            parts.append(t("最大上下文 {ctx}", ctx=f"{info.context_length:,}"))
+        text = " · ".join(parts)
+        label.setText(text)
+        ctx = 0
+        try:
+            ctx = int(self.params.get("ctx_size") or 0)
+        except (TypeError, ValueError):
+            ctx = 0
+        if info.context_length and ctx > info.context_length:
+            label.setToolTip(
+                text + "\n" + t(
+                    "⚠ 当前设置的上下文 {ctx} 超过模型上限 {max}（启动后会被截断）",
+                    ctx=f"{ctx:,}", max=f"{info.context_length:,}"))
+            self._set_meta_color("#d97706")
+        else:
+            label.setToolTip(text)
+            self._set_meta_color("#6b7280")
 
     def _estimate_params(self, size_bytes):
         quant = self._guess_quant_type(self.params.get("model", ""))
@@ -1908,6 +2355,11 @@ class MainWindow(QMainWindow):
         self._gpu_devices = devices or []
         self.basic_panel.set_gpu_info(self._gpu_devices)
         self.advanced_panel.set_gpu_info(self._gpu_devices)
+        # E11: the GPU-info label appears late (the probe is async) and
+        # grows the panel's natural height — defer the resync so it reads
+        # the settled layout minimum (same reasoning as
+        # _on_quick_wrap_changed).
+        QTimer.singleShot(0, self._sync_panel_min)
 
     def _on_startup_defaults(self, defaults, chat_templates):
         """Live-parsed defaults arrive from the startup worker (plan A10)."""
@@ -1939,6 +2391,12 @@ class MainWindow(QMainWindow):
             # A preset restored at startup explicitly set these keys — keep
             # the user's values even when they equal the fallback default.
             if key in self._preset_protected_keys:
+                continue
+            # Launcher-hardcoded default: log_verbosity is intentionally 4
+            # (trace) instead of the binary's 3 (info) so the runtime-info
+            # panel keeps working after llama.cpp #23021 moved library INFO
+            # lines behind the trace threshold — never adopt the live value.
+            if key == "log_verbosity":
                 continue
             if self.params.get(key, None) == orig_defaults.get(key, None):
                 self.params[key] = value
@@ -2054,15 +2512,17 @@ class MainWindow(QMainWindow):
     def retranslate_ui(self):
         # Left panel
         self.model_browser.retranslate_ui()
-        self.preset_group.setTitle(t("预设管理"))
-        self.btn_load.setText(t("加载"))
-        self.btn_save.setText(t("保存"))
-        self.btn_delete.setText(t("删除"))
-        self.btn_import.setText(t("导入"))
-        self.btn_export.setText(t("导出"))
+        self.preset_group.setTitle(t("📦 预设管理"))
+        self.btn_load.setText(t("⬇️ 加载"))
+        self.btn_save.setText(t("💾 保存"))
+        self.btn_delete.setText(t("🗑️ 删除"))
+        self.btn_import.setText(t("📥 导入"))
+        self.btn_export.setText(t("📤 导出"))
         self.drift_button.setToolTip(t("参数与当前版本存在差异，点击查看完整列表"))
         # Model info labels
         self.model_info_group.setTitle(t("📊 模型信息"))
+        # 快速元数据行的文案随语言变化（arch/数值不变）
+        self._render_model_meta()
         for key, (lbl, label_text) in self._model_info_label_widgets.items():
             lbl.setText(t(label_text))
         self.btn_gguf_inspect.setText(t("🔍 GGUF"))
@@ -2273,6 +2733,7 @@ class MainWindow(QMainWindow):
             "table_alt": "#f2f5f9",
             "start_dis_bg": "#c8d8c8", "start_dis_fg": "#8a9a8a",
             "stop_dis_bg": "#d8c8c8", "stop_dis_fg": "#9a8a8a",
+            "copy_dis_bg": "#c9cdd3", "copy_dis_fg": "#8a8f98",
             "webui_dis_bg": "#c8d0d8", "webui_dis_fg": "#8a9098",
         },
         # Catppuccin-ish dark, harmonized with the always-dark log areas
@@ -2285,6 +2746,7 @@ class MainWindow(QMainWindow):
             "table_alt": "#1f1f2e",
             "start_dis_bg": "#2e3d34", "start_dis_fg": "#748a7c",
             "stop_dis_bg": "#3d2e2e", "stop_dis_fg": "#8a7474",
+            "copy_dis_bg": "#2f3136", "copy_dis_fg": "#767c88",
             "webui_dis_bg": "#2e333d", "webui_dis_fg": "#6b7280",
         },
     }
@@ -2305,7 +2767,7 @@ class MainWindow(QMainWindow):
                 border-radius: 8px;
                 font-weight: bold;
                 font-size: 14px;
-                padding: 8px 24px;
+                padding: 8px 22px;
             }
             QPushButton#startBtn:hover {
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #4ade80, stop:1 #22c55e);
@@ -2321,7 +2783,7 @@ class MainWindow(QMainWindow):
                 border-radius: 8px;
                 font-weight: bold;
                 font-size: 14px;
-                padding: 8px 24px;
+                padding: 8px 22px;
             }
             QPushButton#stopBtn:hover {
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #f87171, stop:1 #ef4444);
@@ -2330,14 +2792,30 @@ class MainWindow(QMainWindow):
                 background: @@stop_dis_bg@@;
                 color: @@stop_dis_fg@@;
             }
+            QPushButton#copyBtn {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #94a3b8, stop:1 #64748b);
+                color: #ffffff;
+                border: none;
+                border-radius: 8px;
+                font-weight: bold;
+                font-size: 14px;
+                padding: 8px 22px;
+            }
+            QPushButton#copyBtn:hover {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #a9b7c6, stop:1 #718096);
+            }
+            QPushButton#copyBtn:disabled {
+                background: @@copy_dis_bg@@;
+                color: @@copy_dis_fg@@;
+            }
             QPushButton#webuiBtn {
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #3b82f6, stop:1 #2563eb);
                 color: #ffffff;
                 border: none;
                 border-radius: 8px;
                 font-weight: bold;
-                font-size: 13px;
-                padding: 8px 20px;
+                font-size: 14px;
+                padding: 8px 22px;
             }
             QPushButton#webuiBtn:hover {
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #60a5fa, stop:1 #3b82f6);
@@ -2345,7 +2823,6 @@ class MainWindow(QMainWindow):
             QPushButton#webuiBtn:disabled {
                 background: @@webui_dis_bg@@;
                 color: @@webui_dis_fg@@;
-                border: 1px solid @@sub_border@@;
             }
             QPlainTextEdit {
                 background-color: @@field_bg@@;
@@ -2444,6 +2921,9 @@ class MainWindow(QMainWindow):
                 background: @@field_bg@@;
                 color: @@muted@@;
                 border-color: @@border@@;
+            }
+            QPushButton#logSearchBtn {
+                padding: 0px;
             }
             QToolButton {
                 background: @@field_bg@@;

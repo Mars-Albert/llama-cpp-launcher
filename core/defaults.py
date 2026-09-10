@@ -46,6 +46,10 @@ USER_INPUT_PARAMS = frozenset({
     # launcher-hardcoded known defaults (the parsed value is a launcher
     # constant, so a drift check against it would be meaningless)
     "samplers", "cors_methods",
+    # log_verbosity: the launcher intentionally runs llama-server with 4
+    # (trace) while the binary's own default is 3 — since llama.cpp #23021
+    # the library INFO lines the runtime-info panel parses are suppressed at 3.
+    "log_verbosity",
 })
 
 _PRIO_MAP = {0: "normal", -1: "low", 1: "medium", 2: "high", 3: "realtime"}

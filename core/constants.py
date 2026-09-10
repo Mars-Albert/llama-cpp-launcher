@@ -7,9 +7,22 @@ DEFAULT_PORT = 8080
 # UI defaults
 WINDOW_WIDTH = 1360
 WINDOW_HEIGHT = 860
-MIN_WINDOW_WIDTH = 1100
-MIN_WINDOW_HEIGHT = 700
+# E11: floors for the window minimum. init_ui() raises these to the live
+# minimumSizeHint when the content needs more (font/DPI dependent), so the
+# window can never shrink into a state where controls overlap. The parameter
+# panel scrolls (panel_scroll), which is what allows these to be far below the
+# old 1100x700 minimum that the non-scrollable content actually required.
+MIN_WINDOW_WIDTH = 900
+MIN_WINDOW_HEIGHT = 690
+# E3 log window. Per level: each log level (D/I/W/E/F, plus the prefix-less
+# group) keeps its own most-recent-N window, so a narrow filter view is never
+# starved by a flood of hidden levels (a -lv 5 debug burst used to evict the
+# few visible info lines out of the shared window, leaving a 1-line view).
+# The unfiltered (all-on) view still uses one shared window of this size.
 LOG_MAX_BLOCK_COUNT = 5000
+# The visible document may hold one full window per visible level (5 levels
+# incl. prefix-less and F) under a multi-level narrow filter.
+LOG_DOC_MAX_BLOCK_COUNT = LOG_MAX_BLOCK_COUNT * 5
 UNDO_HISTORY_MAX = 20
 PREVIEW_TIMER_MS = 300
 UNDO_DEBOUNCE_MS = 800

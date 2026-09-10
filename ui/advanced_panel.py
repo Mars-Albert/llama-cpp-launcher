@@ -249,7 +249,7 @@ class AdvancedPanel(QWidget):
                 row_w = QWidget()
                 lay = QHBoxLayout(row_w)
                 lay.setContentsMargins(0, 0, 0, 0)
-                btn = QPushButton(t("浏览"))
+                btn = QPushButton(t("📂 浏览"))
                 self._browse_btns.append(btn)
                 title = self._T(p.browse_title) if p.browse_title else None
                 filter_str = p.filter_str or "All Files (*)"
@@ -297,11 +297,11 @@ class AdvancedPanel(QWidget):
         lst.setMinimumHeight(40)
         lst.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         btn_row = QHBoxLayout()
-        add_btn = QPushButton(t("添加"))
+        add_btn = QPushButton(t("➕ 添加"))
         add_btn.setFixedWidth(80)
         add_btn.clicked.connect(lambda: self._add_to_list(lst, title, filter_str))
         self._add_rm_btns.append(add_btn)
-        rm_btn = QPushButton(t("移除"))
+        rm_btn = QPushButton(t("➖ 移除"))
         rm_btn.setFixedWidth(80)
         self._add_rm_btns.append(rm_btn)
         rm_btn.clicked.connect(lambda: self._remove_from_list(lst))
@@ -483,10 +483,10 @@ class AdvancedPanel(QWidget):
 
         # Buttons
         for btn in self._browse_btns:
-            btn.setText(t("浏览"))
+            btn.setText(t("📂 浏览"))
         if hasattr(self, '_add_rm_btns'):
             for btn in self._add_rm_btns:
-                if btn.text() in ("添加", "Add"):
-                    btn.setText(t("添加"))
-                elif btn.text() in ("移除", "Remove"):
-                    btn.setText(t("移除"))
+                if btn.text() in ("➕ 添加", "➕ Add"):
+                    btn.setText(t("➕ 添加"))
+                elif btn.text() in ("➖ 移除", "➖ Remove"):
+                    btn.setText(t("➖ 移除"))

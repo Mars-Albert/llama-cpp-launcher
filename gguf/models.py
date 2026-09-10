@@ -11,6 +11,18 @@ class GGUFHeader:
 
 
 @dataclass
+class GGUFQuickInfo:
+    """Lightweight header-only summary (see parser.parse_gguf_metadata):
+    just enough metadata for the launcher's model-info row — no tensor
+    data is read."""
+    path: str
+    version: int
+    arch: str
+    name: str
+    context_length: int | None
+
+
+@dataclass
 class GGUFTensorInfo:
     name: str
     dims: list[int]

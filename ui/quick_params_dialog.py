@@ -55,9 +55,13 @@ class QuickParamsDialog(QDialog):
         self._sel.model().rowsMoved.connect(self._on_sel_rows_moved)
         left_box.addWidget(self._sel, 1)
         btns = QHBoxLayout()
-        for text, slot in ((t("上移"), self._move_up),
-                           (t("下移"), self._move_down),
-                           (t("移除"), self._remove_sel)):
+        # Icon glyphs (▲/▼/✕) match the compact log-search nav buttons;
+        # emoji would render blank in QToolButton on this platform
+        # (see basic_panel's dropped ⚙️ button). 🔄 reuses the preset
+        # area's 恢复默认 button icon (main_window.btn_reset).
+        for text, slot in ((t("▲ 上移"), self._move_up),
+                           (t("▼ 下移"), self._move_down),
+                           (t("✕ 移除"), self._remove_sel)):
             b = QToolButton()
             b.setText(text)
             b.setToolTip(text)
@@ -95,7 +99,7 @@ class QuickParamsDialog(QDialog):
         layout.addLayout(center, 1)
 
         bottom = QHBoxLayout()
-        self._btn_default = QPushButton(t("恢复默认"))
+        self._btn_default = QPushButton(t("🔄 恢复默认"))
         self._btn_default.setToolTip(t("恢复为默认的一组快捷开关"))
         self._btn_default.clicked.connect(self._reset_default)
         bottom.addWidget(self._btn_default)
