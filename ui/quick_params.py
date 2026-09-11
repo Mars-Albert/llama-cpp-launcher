@@ -81,16 +81,28 @@ def sanitize_quick_keys(raw, default=QUICK_DEFAULT_KEYS):
     return out
 
 
-def quick_short_label(p) -> str:
-    """Chinese-source label without the CLI-flag suffix:
-    'Flash Attention (--flash-attn):' -> 'Flash Attention'."""
-    label = p.label or p.key
+def _strip_flag_suffix(label: str) -> str:
+    """'图像最小Token (--image-min-tokens):' -> '图像最小Token'.
+
+    Works on the translated string too: every _EN value keeps the ASCII
+    flag suffix verbatim (checked for the whole schema)."""
     return _FLAG_RE.sub("", label).rstrip(":：").strip()
 
 
+def quick_short_label(p) -> str:
+    """Chinese-source label without the CLI-flag suffix:
+    'Flash Attention (--flash-attn):' -> 'Flash Attention'."""
+    return _strip_flag_suffix(p.label or p.key)
+
+
 def quick_label_text(p) -> str:
-    """Translated short label (t() applied at build/retranslate time)."""
-    return t(quick_short_label(p))
+    """Translated short label (t() applied at build/retranslate time).
+
+    t() must be applied to the FULL schema label — the _EN keys include
+    the `(--flag):` suffix, so stripping it before the lookup misses
+    every entry and Chinese leaks into English mode (the ⚡ quick-toggles
+    group and the 自定义快捷开关 dialog both render via this function)."""
+    return _strip_flag_suffix(t(p.label or p.key))
 
 
 def kind_display_name(kind: str) -> str:

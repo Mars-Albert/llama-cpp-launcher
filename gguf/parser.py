@@ -1,6 +1,7 @@
 import struct
 from pathlib import Path
 
+from core.i18n import t
 from .models import (GGUFInfo, GGUFHeader, GGUFTensorInfo, GGUFStats,
                      GGUFDiagnostic, GGUFQuickInfo)
 from .ggml_types import get_type_name, estimate_tensor_nbytes, is_quantized_type
@@ -156,7 +157,7 @@ def parse_gguf(path, progress_callback=None):
         if progress_callback:
             progress_callback(msg)
 
-    _prog("Reading header...")
+    _prog(t("正在读取文件头..."))
 
     with open(path, "rb") as f:
         # Read header: magic(4) + version(4) + tensor_count(8) + metadata_kv_count(8)
@@ -182,9 +183,9 @@ def parse_gguf(path, progress_callback=None):
         if version > _MAX_SUPPORTED_VERSION:
             diags.append(GGUFDiagnostic(
                 "warning",
-                "Unsupported GGUF version",
-                f"Version {version} is newer than supported version {_MAX_SUPPORTED_VERSION}. "
-                "Some features may not parse correctly."
+                t("不支持的 GGUF 版本"),
+                t("版本 {version} 高于当前支持的 {max_version}，部分字段可能无法正确解析。",
+                  version=version, max_version=_MAX_SUPPORTED_VERSION),
             ))
 
         header = GGUFHeader(
@@ -195,14 +196,14 @@ def parse_gguf(path, progress_callback=None):
         )
 
         # Read metadata KV pairs
-        _prog("Reading metadata...")
+        _prog(t("正在读取元数据..."))
         metadata = {}
         for i in range(metadata_kv_count):
             key, value, vtype = _read_metadata_kv(f)
             metadata[key] = value
 
         # Read tensor infos
-        _prog("Reading tensor infos...")
+        _prog(t("正在读取张量信息..."))
         tensors = []
         for i in range(tensor_count):
             name = _read_string(f)
@@ -244,20 +245,20 @@ def parse_gguf(path, progress_callback=None):
         if alignment % 8 != 0:
             diags.append(GGUFDiagnostic(
                 "warning",
-                "Alignment not multiple of 8",
-                f"general.alignment = {alignment} is not a multiple of 8. "
-                "This may cause loading issues."
+                t("对齐不是 8 的倍数"),
+                t("general.alignment = {alignment} 不是 8 的倍数，可能导致加载问题。",
+                  alignment=alignment),
             ))
 
         current_pos = f.tell()
         tensor_data_offset = _align_offset(current_pos, alignment)
 
         # Compute absolute offsets for each tensor
-        for t in tensors:
-            t.absolute_offset = tensor_data_offset + t.offset
+        for tensor in tensors:
+            tensor.absolute_offset = tensor_data_offset + tensor.offset
 
         # Run diagnostics
-        _prog("Running diagnostics...")
+        _prog(t("正在运行诊断..."))
         _run_parse_diagnostics(
             path, file_size, header, metadata, tensors,
             alignment, tensor_data_offset, filename_info, diags
@@ -361,16 +362,16 @@ def _run_parse_diagnostics(path, file_size, header, metadata, tensors,
     if "general.architecture" not in metadata:
         diags.append(GGUFDiagnostic(
             "warning",
-            "Missing architecture",
-            "general.architecture is not set in metadata."
+            t("缺少架构字段"),
+            t("元数据中未设置 general.architecture。"),
         ))
 
     # Check alignment default
     if "general.alignment" not in metadata:
         diags.append(GGUFDiagnostic(
             "info",
-            "Default alignment",
-            "general.alignment not specified, using default 32."
+            t("默认对齐"),
+            t("未指定 general.alignment，使用默认值 32。"),
         ))
 
     # Check quantization_version
@@ -378,39 +379,40 @@ def _run_parse_diagnostics(path, file_size, header, metadata, tensors,
     if has_quant and "general.quantization_version" not in metadata:
         diags.append(GGUFDiagnostic(
             "warning",
-            "Missing quantization version",
-            "File contains quantized tensors but general.quantization_version is not set."
+            t("缺少量化版本"),
+            t("文件包含量化张量，但未设置 general.quantization_version。"),
         ))
 
     # Check tensor offsets and name lengths
-    for t in tensors:
-        if t.absolute_offset >= file_size:
+    for tensor in tensors:
+        if tensor.absolute_offset >= file_size:
             diags.append(GGUFDiagnostic(
                 "error",
-                "Tensor offset out of bounds",
-                f"Tensor '{t.name}' absolute offset {t.absolute_offset} "
-                f"exceeds file size {file_size}."
+                t("张量偏移越界"),
+                t("张量 '{name}' 的绝对偏移 {offset} 超出文件大小 {size}。",
+                  name=tensor.name, offset=tensor.absolute_offset, size=file_size),
             ))
-        elif t.absolute_offset % alignment != 0:
+        elif tensor.absolute_offset % alignment != 0:
             diags.append(GGUFDiagnostic(
                 "warning",
-                "Tensor offset not aligned",
-                f"Tensor '{t.name}' absolute offset {t.absolute_offset} "
-                f"is not a multiple of alignment {alignment}."
+                t("张量偏移未对齐"),
+                t("张量 '{name}' 的绝对偏移 {offset} 不是对齐值 {alignment} 的倍数。",
+                  name=tensor.name, offset=tensor.absolute_offset, alignment=alignment),
             ))
-        if len(t.name.encode("utf-8")) > _MAX_TENSOR_NAME_LEN:
+        if len(tensor.name.encode("utf-8")) > _MAX_TENSOR_NAME_LEN:
             diags.append(GGUFDiagnostic(
                 "warning",
-                "Tensor name too long",
-                f"Tensor name '{t.name}' exceeds {_MAX_TENSOR_NAME_LEN} bytes."
+                t("张量名过长"),
+                t("张量名 '{name}' 超过 {max_len} 字节。",
+                  name=tensor.name, max_len=_MAX_TENSOR_NAME_LEN),
             ))
 
     # Filename diagnostics
     if filename_info and not filename_info.parse_ok:
         diags.append(GGUFDiagnostic(
             "warning",
-            "Filename does not match naming convention",
-            "The filename does not follow the recommended GGUF naming convention."
+            t("文件名不符合命名规范"),
+            t("文件名未遵循推荐的 GGUF 命名规范。"),
         ))
 
     # Sidecar mismatch checks
@@ -419,8 +421,8 @@ def _run_parse_diagnostics(path, file_size, header, metadata, tensors,
         if arch and arch not in ("llava", "clip", "whisper", "vision"):
             diags.append(GGUFDiagnostic(
                 "info",
-                "Sidecar type hint",
-                "File has mmproj sidecar but architecture is not vision-related."
+                t("伴随文件类型提示"),
+                t("文件带有 mmproj 伴随文件标记，但架构与视觉模型无关。"),
             ))
 
     # Note: info-level diagnostics (chat_template, hf_tokenizer, rope, moe, shard)

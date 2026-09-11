@@ -149,8 +149,24 @@ def _parse_help_to_defaults(help_text):
             continue  # skip blank lines and description continuation text
         combined = line
         j = i + 1
-        while j < len(lines) and lines[j].strip() and not lines[j].strip().startswith("-"):
-            combined += " " + lines[j].strip()
+        while j < len(lines) and lines[j].strip():
+            nxt = lines[j]
+            stripped = nxt.strip()
+            # A new option line starts with '-' at column 0 (current
+            # --help layout) or at a shallow indent (older layouts
+            # indented flags by two spaces). Deeply indented dash lines
+            # are description list items — e.g. the -lv entries
+            # " - 0: generic output" … " - 5: debug" — and must be
+            # joined, otherwise the "(default: 3)" line after such a
+            # list is missed and the value silently stays the fallback.
+            # For -lv that made the live default 4 instead of the
+            # binary's 3, so CommandBuilder's is_default() comparison
+            # never emitted --log-verbosity and the server ran at its
+            # built-in level 3 despite the UI showing 4.
+            indent = len(nxt) - len(nxt.lstrip(" "))
+            if stripped.startswith("-") and indent < 8:
+                break
+            combined += " " + stripped
             j += 1
 
         tokens = set(line.replace(",", " ").replace("=", " ").split())

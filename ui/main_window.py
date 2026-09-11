@@ -1,4 +1,5 @@
 import html as html_mod
+import logging
 import platform
 import re
 import shutil
@@ -15,12 +16,13 @@ from PyQt6.QtWidgets import (
     QMessageBox, QFileDialog, QStatusBar,
     QCheckBox, QGroupBox, QTabWidget, QTextEdit,
     QDialog, QDialogButtonBox, QFormLayout, QLineEdit, QToolButton,
-    QScrollArea, QFrame
+    QScrollArea, QFrame, QMenuBar
 )
 import heapq
 from collections import deque
 
-from PyQt6.QtCore import Qt, QTimer, QThread, QEvent, pyqtSignal, QPoint, PYQT_VERSION_STR
+from PyQt6.QtCore import (Qt, QTimer, QThread, QEvent, pyqtSignal, QPoint,
+                          QRectF, PYQT_VERSION_STR)
 from PyQt6.QtGui import (QAction, QFont, QTextOption, QIcon, QPixmap, QPainter,
                          QColor, QPalette, QTextCursor, QTextDocument, QKeySequence,
                          QShortcut, QImage, QPolygon, QPen)
@@ -35,6 +37,8 @@ from core.config import (
 )
 from core.constants import (
     WINDOW_WIDTH, WINDOW_HEIGHT, MIN_WINDOW_WIDTH, MIN_WINDOW_HEIGHT,
+    SHADOW_MARGIN, CARD_RADIUS, CARD_CONTENT_INSET, TITLE_BAR_HEIGHT,
+    TITLE_GRAB_MIN,
     LOG_MAX_BLOCK_COUNT, LOG_DOC_MAX_BLOCK_COUNT,
     UNDO_HISTORY_MAX, PREVIEW_TIMER_MS, UNDO_DEBOUNCE_MS,
     VERSION_CHECK_TIMEOUT_S,
@@ -49,6 +53,9 @@ from ui.model_browser import ModelBrowser
 from ui.basic_panel import BasicPanel, ElidingLabel
 from ui.advanced_panel import AdvancedPanel
 from ui.gguf_inspector import GGUFInspectorDialog
+from ui.frameless import (TitleBar, FramelessDialog, install_frameless,
+                          app_icon)
+from ui.message_box import ThemedMessageBox
 
 try:
     # Single source of truth for the launcher version (build_config.py is
@@ -58,6 +65,41 @@ try:
     from build_config import VERSION as APP_VERSION
 except ImportError:
     APP_VERSION = "dev"
+
+
+class _ThemedStatusBar(QStatusBar):
+    """E13: status bar whose message lives in a layout-managed label.
+
+    ``QStatusBar.showMessage()`` paints its built-in label at a fixed
+    x=6 that ignores layout margins — under the rounded card that
+    overlaps the transparent corner band (the text would float over the
+    drop shadow). A label added through ``addWidget`` goes through the
+    layout, and a small contents-margin keeps the first character on
+    the card face (the status bar's own x offset is ~2px).
+    """
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        # The frameless window is edge-resized by the app-level filter;
+        # the native grip would also paint square into the corner band.
+        self.setSizeGripEnabled(False)
+        self._msg_label = QLabel(self)
+        self._msg_label.setObjectName("statusMsg")
+        self._msg_label.setContentsMargins(15, 0, 0, 0)
+        self.addWidget(self._msg_label)
+        self._msg_timer = QTimer(self)
+        self._msg_timer.setSingleShot(True)
+        self._msg_timer.timeout.connect(lambda: self._msg_label.setText(""))
+
+    def showMessage(self, message, timeout=0):
+        self._msg_label.setText(message)
+        if timeout > 0:
+            self._msg_timer.start(int(timeout))
+
+    def currentMessage(self):
+        # QStatusBar.currentMessage() reads the internal label we no
+        # longer use — mirror our own so the public API stays truthful
+        return self._msg_label.text()
 
 
 def _ensure_arrow_image(direction: str, color: str) -> Path:
@@ -336,6 +378,9 @@ class MainWindow(QMainWindow):
         self._run_log_failed = False
         self._log_flush_timer.setSingleShot(True)
         self._log_flush_timer.timeout.connect(self._flush_log_buffer)
+        # E13: cached painted chrome (shadow + card face), keyed by
+        # (width, height, theme) — see _chrome_pixmap()
+        self._chrome_cache = None
         self.start_time = None
         self.timer = QTimer()
         self.timer.timeout.connect(self._update_timer)
@@ -356,15 +401,25 @@ class MainWindow(QMainWindow):
 
     def init_ui(self):
         self.setWindowTitle(f"🦙 llama.cpp Launcher v{APP_VERSION}")
+        # E12: objectName drives the frameless chrome QSS (1px border on
+        # the transparent top level) — see _THEME_TEMPLATE.
+        self.setObjectName("llamaMainWin")
         self.resize(WINDOW_WIDTH, WINDOW_HEIGHT)
         self.setMinimumSize(MIN_WINDOW_WIDTH, MIN_WINDOW_HEIGHT)
         self._apply_theme()
 
+        # E13: the transparent band around the card is part of the central
+        # widget's rect (see _set_card_inset); the #centralArea rule keeps
+        # its background transparent so the painted card face / drop shadow
+        # shows through the band (the generic QWidget rule would otherwise
+        # paint it opaque all the way to the window edge).
         central = QWidget()
+        central.setObjectName("centralArea")
         self.setCentralWidget(central)
         main_layout = QHBoxLayout(central)
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
+        self._central_layout = main_layout
 
         # E2: kept as an instance attribute so closeEvent can persist its sizes
         self.splitter = QSplitter(Qt.Orientation.Horizontal)
@@ -380,8 +435,146 @@ class MainWindow(QMainWindow):
 
         self._create_menu_bar()
         self._create_status_bar()
+        # E12/E13: frameless window chrome — flags + edge-resize overlay.
+        # Must run before the first show (flags recreate the platform
+        # window). Since E13 the window is a translucent rounded card
+        # with a painted drop shadow (like the dialogs): the content is
+        # inset by the shadow band (see _set_card_inset / paintEvent).
+        # E13.1: the resize grip covers the whole shadow band, so the
+        # cursor/grip sits at the visible card edge (not in the shadow
+        # "air" outside it).
+        install_frameless(self, resizable=True, translucent=True,
+                          resize_margin=CARD_CONTENT_INSET)
+        # E13: watch our own WindowStateChange / Move events (card band
+        # collapse + keep-on-screen clamping — see eventFilter)
+        self.installEventFilter(self)
+        self._set_card_inset(CARD_CONTENT_INSET)
 
         self._sync_panel_min()
+
+    # ------------------------------------------------- E13: card chrome
+    def _set_card_inset(self, m):
+        """E13: switch the shadow band in/out (m px; 0 when maximized).
+
+        The title row and the central area span the full window width —
+        their *content* is inset by the band so the painted rounded card
+        face (paintEvent) shows through their transparent edges, and the
+        card's crisp 1px border is never covered (content starts one px
+        inside the face edge). The status bar's message label carries its
+        own inset (see _ThemedStatusBar) because QStatusBar swaps its
+        internal layout on the first layout pass and would drop margins.
+        """
+        self._title_bar.setFixedHeight(TITLE_BAR_HEIGHT + m)
+        self._title_bar._row.setContentsMargins(10 + m, m, 6 + m, 0)
+        self._central_layout.setContentsMargins(m, 0, m, 0)
+
+    def _on_card_state_changed(self):
+        # Maximized / fullscreen: the band collapses and the card fills
+        # the screen edge-to-edge (driven from eventFilter on
+        # WindowStateChange, so Win+Up / Aero Snap flips are covered).
+        full = self.isMaximized() or self.isFullScreen()
+        self._set_card_inset(0 if full else CARD_CONTENT_INSET)
+        self._chrome_cache = None
+        self.update()
+
+    def _clamp_to_screen(self):
+        """E13: keep a frameless window grabbable after being dragged away.
+
+        A frameless window has no caption for the WM to constrain, so the
+        title-bar row can be dragged (or restored from a stale saved
+        geometry) partially off-screen — past a point where nothing is
+        left to grab. Keep at least TITLE_GRAB_MIN px of the top row and
+        a 24 px sliver on the other sides visible. Maximized / fullscreen
+        rects are WM-managed and skipped; a window larger than its screen
+        has no valid clamp.
+        """
+        if self.isMaximized() or self.isFullScreen():
+            return
+        from PyQt6.QtGui import QGuiApplication
+        screen = (QGuiApplication.screenAt(self.frameGeometry().center())
+                  or QGuiApplication.primaryScreen())
+        avail = screen.availableGeometry()
+        g = self.frameGeometry()
+        if g.width() > avail.width() or g.height() > avail.height():
+            return
+        sliver = 24
+        new_left = min(max(g.left(), avail.left() + sliver - g.width()),
+                       avail.right() - sliver)
+        new_top = min(max(g.top(), avail.top() + sliver - g.height()),
+                      avail.bottom() - sliver)
+        # The top row is the only grab handle — it gets the strictest
+        # clamp (applied last so it wins over the bottom sliver rule).
+        new_top = max(new_top, avail.top() - (g.height() - TITLE_GRAB_MIN))
+        if (new_left, new_top) != (g.left(), g.top()):
+            self.move(new_left, new_top)
+
+    def _chrome_pixmap(self):
+        """E13: cached drop shadow + rounded card face for the current
+        window size / theme. Rebuilt lazily on resize or theme switch.
+
+        The shadow is a stack of expanding rounded-rect rings with a
+        quadratic alpha falloff — a pre-rendered stand-in for a blur.
+        It is deliberately NOT a QGraphicsDropShadowEffect: an effect
+        re-renders the entire window subtree through the blur on every
+        child update (i.e. on every verbose log flush). The cached
+        pixmap makes steady-state painting one drawPixmap.
+        """
+        w, h = self.width(), self.height()
+        key = (w, h, self.theme)
+        if self._chrome_cache is not None and self._chrome_cache[0] == key:
+            return self._chrome_cache[1]
+        pal = MainWindow._THEME_PALETTES[self.theme]
+        pix = QPixmap(w, h)
+        pix.fill(Qt.GlobalColor.transparent)
+        p = QPainter(pix)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        m = SHADOW_MARGIN
+        card = QRectF(m, m, w - 2 * m, h - 2 * m)
+        r = CARD_RADIUS
+        # Drop shadow: rings fading out to ~0 at the band edge. The +2
+        # bottom offset drops the shadow slightly below the card.
+        # E13.1: the band is tighter (10px) so the profile is a touch
+        # denser — one ring per px of band. E13.2: peak alpha reduced
+        # (the 10px band made the same alpha read much darker) — a soft
+        # hint of elevation, not a heavy drop. Peaks lowered further:
+        # at 95/45 the shadow still read heavy against the card border.
+        alpha0 = 60 if self.theme == "dark" else 28
+        rings = m
+        p.setPen(Qt.PenStyle.NoPen)
+        for i in range(rings, 0, -1):
+            a = int(alpha0 * ((rings - i) / rings) ** 2)
+            if a <= 0:
+                continue
+            p.setBrush(QColor(0, 0, 0, a))
+            p.drawRoundedRect(card.adjusted(-i, -i, i, i + 2),
+                              r + i * 0.9, r + i * 0.9)
+        # Card face, then a crisp 1px border just inside the face edge
+        # (the 0.5 offset lands the 1px pen on whole pixels).
+        p.setBrush(QColor(pal["win_bg"]))
+        p.drawRoundedRect(card, r, r)
+        p.setPen(QPen(QColor(pal["border"]), 1))
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        p.drawRoundedRect(card.adjusted(0.5, 0.5, -0.5, -0.5), r - 0.5,
+                          r - 0.5)
+        p.end()
+        self._chrome_cache = (key, pix)
+        return pix
+
+    def paintEvent(self, event):
+        # E13: the transparent top level is painted by hand — shadow +
+        # rounded card face. Children (title row, central, status bar)
+        # paint their content on top; their edge strips are transparent
+        # so the face shows through the rounded corners.
+        p = QPainter(self)
+        if self.isMaximized() or self.isFullScreen():
+            # Band collapsed: the card fills the screen edge-to-edge
+            # (square — the DWM rounds a maximized window's corners on
+            # Windows 11, which is the look we want there).
+            p.fillRect(self.rect(),
+                       QColor(MainWindow._THEME_PALETTES[self.theme]["win_bg"]))
+        else:
+            p.drawPixmap(0, 0, self._chrome_pixmap())
+        p.end()
 
     def _create_left_panel(self):
         widget = QWidget()
@@ -445,6 +638,21 @@ class MainWindow(QMainWindow):
         self.mode_label = QLabel(t("模式:"))
         self.mode_combo = QComboBox()
         self.mode_combo.addItems([t("基础模式"), t("高级模式")])
+        # This PyQt6 build computes the combo's sizeHint once, from the
+        # items added first — setItemText (the live 中文/English switch in
+        # retranslate_ui) never re-runs it. Built in Chinese (the shorter
+        # text, 48px vs 156px) the combo kept its narrow width in English
+        # mode and truncated "Basic Mode" to "Basic Mo…". Pin the minimum
+        # width to the longest item across both languages: text width from
+        # font metrics, non-text chrome (arrow + margins) measured off the
+        # live sizeHint so it tracks the style/DPI.
+        _fm = self.mode_combo.fontMetrics()
+        _w_text = max(_fm.horizontalAdvance(s)
+                      for s in ("基础模式", "高级模式", "Basic Mode", "Advanced Mode"))
+        _w_now = max(_fm.horizontalAdvance(self.mode_combo.itemText(i))
+                     for i in range(self.mode_combo.count()))
+        self.mode_combo.setMinimumWidth(_w_text
+                                        + max(0, self.mode_combo.sizeHint().width() - _w_now))
         self.mode_combo.currentIndexChanged.connect(self._on_mode_changed)
         mode_bar.addWidget(self.mode_label)
         mode_bar.addWidget(self.mode_combo)
@@ -727,7 +935,10 @@ class MainWindow(QMainWindow):
         right = self.panel_scroll.parentWidget().layout()
         cm = self.centralWidget().layout().contentsMargins()
         min_h = (right.minimumSize().height()
-                 + self.menuBar().sizeHint().height()
+                 # E12: the menu-widget slot now carries title bar + menu
+                 # bar (self._top_bar); menuBar() is null once a menu
+                 # widget is set.
+                 + self._top_bar.sizeHint().height()
                  + self.statusBar().sizeHint().height()
                  + cm.top() + cm.bottom())
         # The window minimum WIDTH is computed the same way (explicitly, not
@@ -749,7 +960,9 @@ class MainWindow(QMainWindow):
             right_w = max(right_w, wdt)
         # handleWidth() is -1 until the splitter's first layout — floor it
         # so the pre-layout sync cannot pin a too-small minimum.
-        min_w = (left_w + max(self.splitter.handleWidth(), 10) + right_w)
+        # E13: + the central area's left/right shadow-band insets.
+        min_w = (left_w + max(self.splitter.handleWidth(), 10) + right_w
+                 + 2 * CARD_CONTENT_INSET)
         self.setMinimumSize(
             max(MIN_WINDOW_WIDTH, min_w),
             max(MIN_WINDOW_HEIGHT, min_h, hint.height()),
@@ -951,6 +1164,9 @@ class MainWindow(QMainWindow):
     def showEvent(self, event):
         super().showEvent(event)
         self._retry_pending_splitter(8)
+        # E13: a stale saved geometry can restore the window off-screen
+        # before the first Move event arrives — clamp once on show.
+        self._clamp_to_screen()
         # E11: re-sync the hard minimums once the font/layout has settled
         # (the construction-time value is an approximation). The 0ms timer
         # catches the first full layout pass; direct call covers the rest.
@@ -988,7 +1204,7 @@ class MainWindow(QMainWindow):
     def _start_server(self):
         v = self._get_current_values()
         if not v.get("model"):
-            QMessageBox.warning(self, t("警告"), t("请选择一个模型文件"))
+            ThemedMessageBox.warning(self, t("警告"), t("请选择一个模型文件"))
             return False
 
         model_path = v["model"]
@@ -999,7 +1215,7 @@ class MainWindow(QMainWindow):
         if not model_file.is_absolute():
             model_file = self.work_dir / model_file
         if not model_file.exists():
-            QMessageBox.warning(self, t("警告"), t("模型文件不存在:\n{model_path}", model_path=model_path))
+            ThemedMessageBox.warning(self, t("警告"), t("模型文件不存在:\n{model_path}", model_path=model_path))
             return False
 
         host = v.get('host', '127.0.0.1')
@@ -1008,7 +1224,7 @@ class MainWindow(QMainWindow):
         # loopback connections, so 127.0.0.1 is the right probe target then.
         check_host = "127.0.0.1" if host in ("0.0.0.0", "::") else host
         if self._is_port_in_use(port, check_host):
-            reply = QMessageBox.question(
+            reply = ThemedMessageBox.question(
                 self, t("端口占用"),
                 t("端口 {port} 可能已被占用，是否继续？", port=port),
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
@@ -1054,10 +1270,10 @@ class MainWindow(QMainWindow):
         url = self._get_web_address()
         v = self._get_current_values()
         if not v.get("webui", True):
-            QMessageBox.warning(self, t("WebUI未启用"), t("当前配置已关闭WebUI (--no-webui)，请在设置中启用后再打开。"))
+            ThemedMessageBox.warning(self, t("WebUI未启用"), t("当前配置已关闭WebUI (--no-webui)，请在设置中启用后再打开。"))
             return
         if not self.runner.is_running:
-            reply = QMessageBox.question(
+            reply = ThemedMessageBox.question(
                 self, t("服务未运行"),
                 t("服务尚未启动，是否先启动服务并打开 WebUI？\n\n地址: {url}", url=url),
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
@@ -1153,7 +1369,7 @@ class MainWindow(QMainWindow):
             self.btn_webui.setEnabled(False)
 
     def _on_error(self, msg):
-        QMessageBox.critical(self, t("错误"), msg)
+        ThemedMessageBox.critical(self, t("错误"), msg)
         self.statusBar().showMessage(t("❌ 启动失败: {msg}", msg=msg[:80]))
 
     def _append_log(self, text, stream="out"):
@@ -1402,6 +1618,15 @@ class MainWindow(QMainWindow):
         return count
 
     def eventFilter(self, obj, event):
+        # E13: window-state flips (Win+Up, Aero Snap, taskbar button) —
+        # collapse / restore the card band and repaint the chrome.
+        if obj is self and event.type() == QEvent.Type.WindowStateChange:
+            self._on_card_state_changed()
+        # E13: top-level position changes arrive as Move in this PyQt6
+        # build — keep the title-bar row on-screen (frameless windows
+        # have no caption for the WM to constrain).
+        elif obj is self and event.type() == QEvent.Type.Move:
+            self._clamp_to_screen()
         # E11 (option A): the panel viewport is resized before the panel's
         # own layout pass — re-wrapping the quick-toggles grid here (and
         # re-syncing the hard minimums via quick_wrap_changed) means an
@@ -1499,7 +1724,7 @@ class MainWindow(QMainWindow):
                     f.write(self.log_output.toPlainText())
             self.statusBar().showMessage(t("日志已导出: {path}", path=path), 3000)
         except (OSError, IOError) as e:
-            QMessageBox.warning(self, t("错误"), str(e))
+            ThemedMessageBox.warning(self, t("错误"), str(e))
 
     @staticmethod
     def _count_log_lines(path):
@@ -1511,7 +1736,7 @@ class MainWindow(QMainWindow):
 
     def _ask_export_scope(self, full_lines, view_lines):
         """E3: choose between the visible (truncated) area and the full run log."""
-        box = QMessageBox(self)
+        box = ThemedMessageBox(self)
         box.setWindowTitle(t("导出日志"))
         box.setText(t("选择要导出的日志范围"))
         btn_view = box.addButton(
@@ -1521,6 +1746,7 @@ class MainWindow(QMainWindow):
         box.addButton(t("取消"), QMessageBox.ButtonRole.RejectRole)
         box.exec()
         clicked = box.clickedButton()
+        box.deleteLater()  # don't leave a hidden top-level behind
         if clicked is btn_view:
             return "view"
         if clicked is btn_full:
@@ -1658,10 +1884,11 @@ class MainWindow(QMainWindow):
 
     def _save_preset(self):
         # E6: save dialog with an optional "include model paths" switch
+        # (E12: frameless themed card like every other dialog)
         current_name = self.preset_combo.currentText()
-        dlg = QDialog(self)
-        dlg.setWindowTitle(t("保存预设"))
-        form = QFormLayout(dlg)
+        dlg = FramelessDialog(self, title=t("保存预设"), icon=app_icon(),
+                              resizable=False, size=(420, 0))
+        form = QFormLayout()
         name_edit = QLineEdit(current_name)
         name_edit.setPlaceholderText(t("预设名称:"))
         chk_paths = QCheckBox(t("包含模型路径 (model/mmproj)"))
@@ -1676,7 +1903,10 @@ class MainWindow(QMainWindow):
         buttons.accepted.connect(dlg.accept)
         buttons.rejected.connect(dlg.reject)
         form.addRow(buttons)
-        if dlg.exec() != QDialog.DialogCode.Accepted:
+        dlg.content_layout.addLayout(form)
+        result = dlg.exec()
+        dlg.deleteLater()  # don't leave a hidden top-level behind
+        if result != QDialog.DialogCode.Accepted:
             return
         name = name_edit.text().strip()
         if not name:
@@ -1684,7 +1914,7 @@ class MainWindow(QMainWindow):
         presets = self.config.list_presets()
         exists = any(p["name"] == name for p in presets)
         if exists and name != current_name:
-            reply = QMessageBox.question(
+            reply = ThemedMessageBox.question(
                 self, t("预设已存在"),
                 t("预设 '{name}' 已存在，是否覆盖？", name=name),
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
@@ -1692,7 +1922,7 @@ class MainWindow(QMainWindow):
             if reply == QMessageBox.StandardButton.No:
                 return
         elif exists and name == current_name:
-            reply = QMessageBox.question(
+            reply = ThemedMessageBox.question(
                 self, t("覆盖预设"),
                 t("确定覆盖预设 '{name}'？", name=name),
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
@@ -1707,7 +1937,7 @@ class MainWindow(QMainWindow):
             values.pop("model", None)
             values.pop("mmproj", None)
         if not self.config.save_preset(name, values):
-            QMessageBox.warning(self, t("保存失败"),
+            ThemedMessageBox.warning(self, t("保存失败"),
                                 t("预设 '{name}' 保存失败，请检查预设目录权限。", name=name))
             return
         self._refresh_presets(select_name=name)
@@ -1727,7 +1957,7 @@ class MainWindow(QMainWindow):
         name = self.preset_combo.currentText()
         if not name:
             return
-        reply = QMessageBox.question(
+        reply = ThemedMessageBox.question(
             self, t("删除预设"), t("确定删除预设 '{name}'?", name=name),
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
         )
@@ -1748,7 +1978,7 @@ class MainWindow(QMainWindow):
         from core.config import _sanitize_preset_name
         dest_name = _sanitize_preset_name(Path(path).stem)
         if any(p["name"] == dest_name for p in self.config.list_presets()):
-            reply = QMessageBox.question(
+            reply = ThemedMessageBox.question(
                 self, t("预设已存在"),
                 t("预设 '{name}' 已存在，是否覆盖？", name=dest_name),
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
@@ -1762,7 +1992,7 @@ class MainWindow(QMainWindow):
                 self.preset_combo.setCurrentIndex(idx)
             self.statusBar().showMessage(t("预设已导入: {name}", name=dest_name), 2000)
         else:
-            QMessageBox.warning(self, t("导入失败"), t("预设导入失败，请检查文件是否为有效的预设 JSON。"))
+            ThemedMessageBox.warning(self, t("导入失败"), t("预设导入失败，请检查文件是否为有效的预设 JSON。"))
 
     def _export_preset(self):
         name = self.preset_combo.currentText()
@@ -1774,7 +2004,7 @@ class MainWindow(QMainWindow):
         if self.config.export_preset(name, path):
             self.statusBar().showMessage(t("预设已导出: {name}", name=name), 2000)
         else:
-            QMessageBox.warning(self, t("导出失败"), t("预设导出失败，请检查目标路径是否可写。"))
+            ThemedMessageBox.warning(self, t("导出失败"), t("预设导出失败，请检查目标路径是否可写。"))
 
     def _is_port_in_use(self, port, host='127.0.0.1'):
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
@@ -1792,40 +2022,21 @@ class MainWindow(QMainWindow):
         # E1: dialog to view/set the llama-server executable path.
         # Prefilled with the currently effective path (explicit setting first,
         # then the PATH-resolved one); empty only when nothing was found.
-        dialog = QDialog(self)
-        dialog.setWindowTitle(t("llama-server 路径"))
-        form = QFormLayout(dialog)
         resolved = get_server_path()
         explicit = load_server_path()
         # Prefill a dead explicit setting would just re-verify the same miss —
         # fall back to the currently resolved path in that case.
         prefill = explicit if (explicit and Path(explicit).is_file()) else \
             (resolved if resolved != "llama-server" else "")
-        path_edit = QLineEdit(prefill)
-        if not prefill:
-            path_edit.setPlaceholderText(t("未在 PATH 中找到 llama-server，请手动选择"))
-        row = QHBoxLayout()
-        row.addWidget(path_edit, 1)
-        browse_btn = QPushButton(t("浏览..."))
-
-        def _browse():
-            found, _ = QFileDialog.getOpenFileName(
-                dialog, t("llama-server 路径"), path_edit.text() or "",
-                "llama-server (llama-server*.exe);;Executables (*.exe);;All files (*.*)"
-            )
-            if found:
-                path_edit.setText(found)
-
-        browse_btn.clicked.connect(_browse)
-        row.addWidget(browse_btn)
-        form.addRow(t("llama-server 可执行文件路径:"), row)
-        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
-        buttons.accepted.connect(dialog.accept)
-        buttons.rejected.connect(dialog.reject)
-        form.addRow(buttons)
-        if dialog.exec() != QDialog.DialogCode.Accepted:
+        # Themed frameless card dialog (custom header + shadow + accent OK) —
+        # the old plain native dialog had a clashing OS title bar on Windows.
+        from ui.server_path_dialog import ServerPathDialog
+        dialog = ServerPathDialog(self, prefill, resolved, self.theme)
+        result = dialog.exec()
+        dialog.deleteLater()  # don't leave a hidden top-level behind
+        if result != QDialog.DialogCode.Accepted:
             return
-        path = str(Path(path_edit.text().strip()).expanduser())
+        path = str(Path(dialog.path()).expanduser())
         if not path:
             return
         # Validate before saving: the binary must answer --version
@@ -1843,7 +2054,7 @@ class MainWindow(QMainWindow):
             detail = str(e)
         if not verified:
             self.statusBar().showMessage(t("路径验证失败: {e}", e=detail or path), 8000)
-            if QMessageBox.question(self, t("llama-server 路径"),
+            if ThemedMessageBox.question(self, t("llama-server 路径"),
                                     t("路径验证失败，仍要保存吗？")) != QMessageBox.StandardButton.Yes:
                 return
         save_server_path(path)
@@ -1912,7 +2123,9 @@ class MainWindow(QMainWindow):
         # customization entry point.
         from ui.quick_params_dialog import QuickParamsDialog
         dlg = QuickParamsDialog(self, self.basic_panel.get_quick_params())
-        if dlg.exec() == QDialog.DialogCode.Accepted:
+        result = dlg.exec()
+        dlg.deleteLater()  # don't leave a hidden top-level behind
+        if result == QDialog.DialogCode.Accepted:
             keys = list(dlg.result_keys())
             self.basic_panel.set_quick_params(keys)
             save_ui_pref("quick_params", keys)  # persist immediately (E10)
@@ -1934,19 +2147,46 @@ class MainWindow(QMainWindow):
         })
 
     def closeEvent(self, event):
+        # Step-by-step trace: if a "closing" app hangs, the log shows
+        # exactly which step it is in (or that it never got here).
+        log = logging.getLogger("shutdown")
+        # Snapshot what Qt still considers visible (widget level and
+        # QWindow level — the two can disagree on Windows for
+        # frameless/translucent windows; a stale "visible" top-level is
+        # what defeats quitOnLastWindowClosed).
+        from PyQt6.QtGui import QGuiApplication
+        vis_w = [f"{type(w).__name__}#{w.objectName() or '?'}"
+                 for w in QApplication.topLevelWidgets() if w.isVisible()]
+        vis_q = [w.objectName() or type(w).__name__
+                 for w in QGuiApplication.allWindows() if w.isVisible()]
+        log.info("closeEvent: start; visible widgets=%s qwindows=%s",
+                 vis_w or "none", vis_q or "none")
         if self.runner.is_running:
             self.runner.stop(blocking=True)
+            log.info("closeEvent: server stopped")
         self.model_browser.shutdown()
+        log.info("closeEvent: model browser stopped")
         if hasattr(self, '_startup_worker') and self._startup_worker is not None:
             self._startup_worker.quit()
             self._startup_worker.wait(2000)
+            log.info("closeEvent: startup worker stopped")
         self._close_run_log()
         self._save_ui_state()
+        log.info("closeEvent: done, accepting + explicit quit")
+        # Single-window app: end the event loop deterministically instead
+        # of relying on quitOnLastWindowClosed (its visible-window
+        # accounting can desync on Windows once frameless/translucent
+        # dialogs have been shown).
+        QApplication.instance().quit()
         event.accept()
 
     def _create_menu_bar(self):
         from PyQt6.QtGui import QActionGroup
-        menubar = self.menuBar()
+        # E12: standalone menu bar — it moves into the menu-widget slot
+        # below the custom title bar (a frameless window has no system
+        # menu bar area).
+        menubar = QMenuBar()
+        self._menubar = menubar
 
         self.file_menu = menubar.addMenu(t("文件"))
 
@@ -2010,6 +2250,19 @@ class MainWindow(QMainWindow):
         self._about_action.triggered.connect(self._show_about)
         self.help_menu.addAction(self._about_action)
 
+        # E13: a single integrated chrome row in the QMainWindow
+        # menu-widget slot — icon + title + menu + window buttons. The
+        # QMenuBar keeps all its native behaviour (icons, checkables,
+        # shortcuts, popups); it is just hosted in the title-bar row
+        # instead of a separate strip below it.
+        menubar.setObjectName("titleMenuBar")
+        self._title_bar = TitleBar(
+            self.windowTitle(), icon=app_icon(), window=self,
+            min_btn=True, max_btn=True, menu_bar=menubar,
+            height=TITLE_BAR_HEIGHT)
+        self._top_bar = self._title_bar
+        self.setMenuWidget(self._title_bar)
+
     def _create_text_icon(self, text, color, size=16):
         pixmap = QPixmap(size, size)
         pixmap.fill(Qt.GlobalColor.transparent)
@@ -2039,7 +2292,7 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(t("已重置为默认值"), 2000)
 
     def _show_about(self):
-        msg = QMessageBox(self)
+        msg = ThemedMessageBox(self)
         msg.setWindowTitle(t("关于"))
         msg.setIcon(QMessageBox.Icon.Information)
         # Version block: launcher version (build_config), runtime
@@ -2085,6 +2338,7 @@ class MainWindow(QMainWindow):
         )
         msg.setStandardButtons(QMessageBox.StandardButton.Ok)
         msg.exec()
+        msg.deleteLater()  # don't leave a hidden top-level behind
 
     def _create_model_info_group(self):
         group = QGroupBox(t("📊 模型信息"))
@@ -2339,6 +2593,7 @@ class MainWindow(QMainWindow):
         }
         dlg = GGUFInspectorDialog(model_path, launcher_params, parent=self)
         dlg.exec()
+        dlg.deleteLater()  # don't leave a hidden top-level behind
 
     def _check_server_info(self):
         self._startup_worker = _StartupInfoWorker()
@@ -2494,13 +2749,14 @@ class MainWindow(QMainWindow):
                 for k, o, n in self._drift_changed)
         lines.append("")
         lines.append(t("建议点击「恢复默认」以适配当前版本"))
-        box = QMessageBox(self)
+        box = ThemedMessageBox(self)
         box.setWindowTitle(t("参数版本差异"))
         box.setIcon(QMessageBox.Icon.Warning)
         box.setText(t("检测到 {n} 项参数与当前 llama-server 版本不匹配",
                      n=len(self._drift_missing) + len(self._drift_changed)))
         box.setDetailedText("\n".join(lines))
         box.exec()
+        box.deleteLater()  # don't leave a hidden top-level behind
 
     def _switch_language(self, lang):
         set_language(lang)
@@ -2510,6 +2766,8 @@ class MainWindow(QMainWindow):
         self.retranslate_ui()
 
     def retranslate_ui(self):
+        # E12: title bar button tooltips
+        self._title_bar.retranslate_ui()
         # Left panel
         self.model_browser.retranslate_ui()
         self.preset_group.setTitle(t("📦 预设管理"))
@@ -2599,8 +2857,14 @@ class MainWindow(QMainWindow):
         self.advanced_panel.retranslate_ui()
 
     def _create_status_bar(self):
-        self.setStatusBar(QStatusBar(self))
-        self.statusBar().showMessage(t("就绪"))
+        # E13: _ThemedStatusBar — the built-in showMessage label paints at
+        # a fixed x that ignores layout margins (it would float over the
+        # rounded corner band); the subclass routes the message through a
+        # layout-managed label (with its own contents-margin inset) and
+        # drops the native size grip.
+        sb = _ThemedStatusBar(self)
+        self.setStatusBar(sb)
+        sb.showMessage(t("就绪"))
 
     def _apply_theme(self):
         """E5: apply the current theme application-wide.
@@ -2626,6 +2890,9 @@ class MainWindow(QMainWindow):
         # re-applying forces a full re-polish of every top-level window
         if app is not None and app.styleSheet() != qss:
             app.setStyleSheet(qss)
+        # E13: the painted card face + shadow use the theme colours
+        self._chrome_cache = None
+        self.update()
 
     def _toggle_theme(self):
         self.theme = "dark" if self.theme == "light" else "light"
@@ -2735,6 +3002,7 @@ class MainWindow(QMainWindow):
             "stop_dis_bg": "#d8c8c8", "stop_dis_fg": "#9a8a8a",
             "copy_dis_bg": "#c9cdd3", "copy_dis_fg": "#8a8f98",
             "webui_dis_bg": "#c8d0d8", "webui_dis_fg": "#8a9098",
+            "warn": "#b45309",
         },
         # Catppuccin-ish dark, harmonized with the always-dark log areas
         "dark": {
@@ -2748,6 +3016,7 @@ class MainWindow(QMainWindow):
             "stop_dis_bg": "#3d2e2e", "stop_dis_fg": "#8a7474",
             "copy_dis_bg": "#2f3136", "copy_dis_fg": "#767c88",
             "webui_dis_bg": "#2e333d", "webui_dis_fg": "#6b7280",
+            "warn": "#f59e0b",
         },
     }
 
@@ -2922,6 +3191,7 @@ class MainWindow(QMainWindow):
                 color: @@muted@@;
                 border-color: @@border@@;
             }
+            QToolButton#logSearchBtn,
             QPushButton#logSearchBtn {
                 padding: 0px;
             }
@@ -3087,10 +3357,11 @@ class MainWindow(QMainWindow):
                 background: @@border@@;
                 margin: 4px 8px;
             }
+            /* E13: sits on the painted card face — transparent, no divider */
             QStatusBar {
-                background-color: @@field_bg@@;
+                background: transparent;
                 color: @@muted@@;
-                border-top: 1px solid @@border@@;
+                border: none;
                 font-size: 12px;
             }
             QLabel {
@@ -3170,6 +3441,166 @@ class MainWindow(QMainWindow):
                 border: 1px solid @@border@@;
                 border-radius: 4px;
                 padding: 4px 8px;
+            }
+            /* E12/E13: frameless window chrome (main window + all dialogs) */
+            QMainWindow#llamaMainWin {
+                /* E13: translucent top level — the rounded card + drop
+                   shadow are painted in MainWindow.paintEvent, so the
+                   top level itself must stay fully transparent. */
+                background: transparent;
+                border: none;
+            }
+            QDialog#framelessDialog {
+                background: transparent;
+            }
+            QWidget#framelessCard {
+                background-color: @@win_bg@@;
+                border: 1px solid @@border@@;
+                border-radius: 14px;
+            }
+            /* E13.3: the body fills the card edge-to-edge; its generic
+               QWidget background must stay transparent so the card's
+               rounded win_bg (incl. the bottom corners) shows through. */
+            QWidget#framelessBody {
+                background: transparent;
+            }
+            QWidget#titleBar {
+                background: transparent;
+            }
+            QLabel#titleBarTitle {
+                font-size: 13px;
+                font-weight: bold;
+                color: @@text@@;
+            }
+            /* E13: the menu is hosted in the title-bar row — flat pills */
+            QMenuBar#titleMenuBar {
+                background: transparent;
+                border: none;
+                padding: 0;
+                color: @@muted@@;
+            }
+            QMenuBar#titleMenuBar::item {
+                background: transparent;
+                color: @@muted@@;
+                padding: 5px 12px;
+                border-radius: 7px;
+            }
+            QMenuBar#titleMenuBar::item:selected {
+                background: @@hover_bg@@;
+                color: @@text@@;
+            }
+            /* E13: Windows-11-style window controls */
+            QPushButton#titleBarMinBtn, QPushButton#titleBarMaxBtn,
+            QPushButton#titleBarCloseBtn {
+                background: transparent;
+                border: none;
+                border-radius: 7px;
+                color: @@muted@@;
+                font-size: 10px;
+                font-family: "Segoe UI Symbol", "Segoe UI";
+                padding: 0px;
+            }
+            QPushButton#titleBarMinBtn:hover, QPushButton#titleBarMaxBtn:hover {
+                background: @@hover_bg@@;
+                color: @@text@@;
+            }
+            QPushButton#titleBarCloseBtn:hover {
+                background: #e81123;
+                color: #ffffff;
+            }
+            QPushButton#titleBarCloseBtn:pressed {
+                background: #c50f1f;
+            }
+            /* E13: the status bar message sits on the painted card face */
+            QLabel#statusMsg {
+                background: transparent;
+                color: @@muted@@;
+                font-size: 12px;
+            }
+            /* E13: the shadow band around the card is part of the central
+               widget's rect — it must paint nothing there */
+            QWidget#centralArea {
+                background: transparent;
+            }
+            /* E1: server-path dialog specifics */
+            QLabel#serverPathDesc, QLabel#serverPathHintOk {
+                color: @@muted@@;
+                font-size: 12px;
+            }
+            QLabel#serverPathHintWarn {
+                color: @@warn@@;
+                font-size: 12px;
+            }
+            QLineEdit#serverPathEdit {
+                background: @@field_bg@@;
+                color: @@text@@;
+                border: 1px solid @@border@@;
+                border-radius: 6px;
+                padding: 6px 10px;
+                font-family: Consolas, "Cascadia Mono", "Courier New", monospace;
+                font-size: 12px;
+            }
+            QLineEdit#serverPathEdit:focus {
+                border: 1px solid #2563eb;
+            }
+            QPushButton#serverPathBrowse, QPushButton#serverPathCancel {
+                background: @@hover_bg@@;
+                color: @@text@@;
+                border: 1px solid @@border@@;
+                border-radius: 6px;
+                padding: 7px 18px;
+            }
+            QPushButton#serverPathBrowse:hover, QPushButton#serverPathCancel:hover {
+                border-color: #3b82f6;
+            }
+            QPushButton#serverPathOk {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #3b82f6, stop:1 #2563eb);
+                color: #ffffff;
+                border: none;
+                border-radius: 6px;
+                padding: 7px 24px;
+                font-weight: bold;
+            }
+            QPushButton#serverPathOk:hover {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #60a5fa, stop:1 #3b82f6);
+            }
+            /* E12: themed message box (ui/message_box.py) */
+            QLabel#msgBoxText {
+                color: @@text@@;
+                font-size: 13px;
+            }
+            QLabel#msgBoxIconInfo { color: #3b82f6; font-size: 22px; font-weight: bold; }
+            QLabel#msgBoxIconWarn { color: @@warn@@; font-size: 22px; font-weight: bold; }
+            QLabel#msgBoxIconCritical { color: #e81123; font-size: 22px; font-weight: bold; }
+            QLabel#msgBoxIconQuestion { color: @@muted@@; font-size: 22px; font-weight: bold; }
+            QTextEdit#msgBoxDetail {
+                background: @@field_bg@@;
+                color: @@text@@;
+                border: 1px solid @@border@@;
+                border-radius: 6px;
+                font-size: 12px;
+                padding: 6px;
+            }
+            QPushButton#msgBoxBtn {
+                background: @@hover_bg@@;
+                color: @@text@@;
+                border: 1px solid @@border@@;
+                border-radius: 6px;
+                padding: 7px 18px;
+            }
+            QPushButton#msgBoxBtn:hover {
+                border-color: #3b82f6;
+            }
+            QPushButton#msgBoxBtnAccept {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #3b82f6, stop:1 #2563eb);
+                color: #ffffff;
+                border: none;
+                border-radius: 6px;
+                padding: 7px 24px;
+                font-weight: bold;
+            }
+            QPushButton#msgBoxBtnAccept:hover {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #60a5fa, stop:1 #3b82f6);
             }
         """
 

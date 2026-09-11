@@ -161,9 +161,9 @@ def test_load_button_records_last_preset(env):
 
 
 class _StubMsgBox:
-    # Stub (not a subclass): the C++-bound static QMessageBox.question() does
-    # not route through a Python exec() override, so faking the instance
-    # would open a real modal dialog and hang the test.
+    # Stub (not a subclass): ThemedMessageBox.question() would open a real
+    # modal dialog (exec()) and hang the test, so patch the class the
+    # main window calls.
     StandardButton = QMessageBox.StandardButton
 
     @staticmethod
@@ -178,7 +178,7 @@ def test_delete_last_preset_clears_pointer(env, monkeypatch):
     try:
         w._refresh_presets()
         w.preset_combo.setCurrentText("cfg1")
-        monkeypatch.setattr(MW, "QMessageBox", _StubMsgBox)
+        monkeypatch.setattr(MW, "ThemedMessageBox", _StubMsgBox)
         w._delete_preset()
         assert CC.load_last_preset() == ""
         assert w.preset_combo.count() == 0

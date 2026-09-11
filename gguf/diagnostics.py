@@ -1,3 +1,4 @@
+from core.i18n import t
 from .models import GGUFInfo, GGUFDiagnostic
 
 
@@ -27,9 +28,9 @@ def run_diagnostics(info: GGUFInfo, launcher_ctx: int = 0,
         if isinstance(model_ctx, (int, float)) and launcher_ctx > model_ctx:
             diags.append(GGUFDiagnostic(
                 "warning",
-                "Context exceeds model limit",
-                f"Launcher context ({launcher_ctx}) exceeds model "
-                f"{ctx_key} ({int(model_ctx)})."
+                t("上下文超过模型上限"),
+                t("启动器上下文（{launcher_ctx}）超过模型 {ctx_key}（{model_ctx}）。",
+                  launcher_ctx=launcher_ctx, ctx_key=ctx_key, model_ctx=int(model_ctx)),
             ))
 
     # mmproj match check
@@ -40,9 +41,9 @@ def run_diagnostics(info: GGUFInfo, launcher_ctx: int = 0,
         if base_name and base_name.lower() not in mmproj_name.lower():
             diags.append(GGUFDiagnostic(
                 "info",
-                "mmproj name mismatch",
-                f"mmproj filename '{mmproj_name}' does not contain "
-                f"model base name '{base_name}'."
+                t("mmproj 名称不匹配"),
+                t("mmproj 文件名 '{mmproj_name}' 不包含模型基础名称 '{base_name}'。",
+                  mmproj_name=mmproj_name, base_name=base_name),
             ))
 
     # MTP sidecar check
@@ -50,32 +51,32 @@ def run_diagnostics(info: GGUFInfo, launcher_ctx: int = 0,
         if not info.filename_info or info.filename_info.sidecar != "mtp":
             diags.append(GGUFDiagnostic(
                 "info",
-                "MTP spec type without MTP sidecar",
-                "Speculative type is draft-mtp but file is not an mtp sidecar."
+                t("draft-mtp 缺少 MTP 伴随文件"),
+                t("投机类型为 draft-mtp，但文件不是 mtp 伴随文件。"),
             ))
 
     # LoRA / vocab check
     if info.filename_info and info.filename_info.type in ("LoRA", "vocab"):
         diags.append(GGUFDiagnostic(
             "warning",
-            "Special file type",
-            f"This file is a {info.filename_info.type} file and cannot be used "
-            "as a standalone model for inference."
+            t("特殊文件类型"),
+            t("该文件是 {f_type} 文件，不能作为独立模型进行推理。",
+              f_type=info.filename_info.type),
         ))
 
     # Info-level checks
     if "tokenizer.chat_template" in info.metadata:
         diags.append(GGUFDiagnostic(
             "info",
-            "Chat template detected",
-            "tokenizer.chat_template is present in metadata."
+            t("检测到聊天模板"),
+            t("元数据中存在 tokenizer.chat_template。"),
         ))
 
     if "tokenizer.huggingface.json" in info.metadata:
         diags.append(GGUFDiagnostic(
             "info",
-            "HF tokenizer detected",
-            "tokenizer.huggingface.json is present in metadata."
+            t("检测到 HF 分词器"),
+            t("元数据中存在 tokenizer.huggingface.json。"),
         ))
 
     if arch:
@@ -83,23 +84,24 @@ def run_diagnostics(info: GGUFInfo, launcher_ctx: int = 0,
         if rope_key in info.metadata:
             diags.append(GGUFDiagnostic(
                 "info",
-                "RoPE scaling",
-                f"{rope_key} = {info.metadata[rope_key]}"
+                t("RoPE 缩放"),
+                t("{key} = {value}", key=rope_key, value=info.metadata[rope_key]),
             ))
 
         expert_count_key = f"{arch}.expert_count"
         if expert_count_key in info.metadata:
             diags.append(GGUFDiagnostic(
                 "info",
-                "MoE model detected",
-                f"{expert_count_key} = {info.metadata[expert_count_key]}"
+                t("检测到 MoE 模型"),
+                t("{key} = {value}", key=expert_count_key,
+                  value=info.metadata[expert_count_key]),
             ))
 
     if info.filename_info and info.filename_info.shard:
         diags.append(GGUFDiagnostic(
             "info",
-            "Shard detected",
-            f"File is part of a sharded model: {info.filename_info.shard}"
+            t("检测到分片"),
+            t("文件属于分片模型：{shard}", shard=info.filename_info.shard),
         ))
 
     return diags

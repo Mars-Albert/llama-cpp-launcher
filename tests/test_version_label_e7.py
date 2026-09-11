@@ -47,15 +47,44 @@ def test_drift_button_hidden_when_matching(window):
     assert window._drift_missing == [] and window._drift_changed == []
 
 
-class _FakeMsgBox(QMessageBox):
+class _FakeMsgBox:
+    """Records ThemedMessageBox calls — the real box (E12) would open a
+    modal dialog and hang the offscreen test. Plain class: the main
+    window only calls the API methods below."""
     instances = []
 
     def __init__(self, parent=None, *a, **kw):
-        super().__init__(parent)
+        self._text = ""
+        self._detailed = ""
+        self._title = ""
         _FakeMsgBox.instances.append(self)
+
+    def setWindowTitle(self, title):
+        self._title = title
+
+    def setIcon(self, icon):
+        pass
+
+    def setText(self, text):
+        self._text = text
+
+    def setDetailedText(self, text):
+        self._detailed = text
+
+    def setStandardButtons(self, buttons):
+        pass
 
     def exec(self):
         return QMessageBox.StandardButton.Ok
+
+    def deleteLater(self):
+        pass
+
+    def text(self):
+        return self._text
+
+    def detailedText(self):
+        return self._detailed
 
 
 def test_drift_button_shown_and_dialog_lists_all(window, monkeypatch):
@@ -72,7 +101,7 @@ def test_drift_button_shown_and_dialog_lists_all(window, monkeypatch):
     assert {"top_p", "repeat_penalty"} <= keys
 
     _FakeMsgBox.instances.clear()
-    monkeypatch.setattr(MW, "QMessageBox", _FakeMsgBox)
+    monkeypatch.setattr(MW, "ThemedMessageBox", _FakeMsgBox)
     window._show_drift_dialog()
     assert len(_FakeMsgBox.instances) == 1
     box = _FakeMsgBox.instances[0]
@@ -84,7 +113,7 @@ def test_drift_button_shown_and_dialog_lists_all(window, monkeypatch):
 def test_about_dialog_includes_version(window, monkeypatch):
     window._on_version_result("0.4.0", "abc1234", "llama-server version 0.4.0 (build 10825)")
     _FakeMsgBox.instances.clear()
-    monkeypatch.setattr(MW, "QMessageBox", _FakeMsgBox)
+    monkeypatch.setattr(MW, "ThemedMessageBox", _FakeMsgBox)
     window._show_about()
     box = _FakeMsgBox.instances[-1]
     assert "0.4.0" in box.text()

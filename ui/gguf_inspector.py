@@ -8,11 +8,13 @@ from datetime import datetime
 from pathlib import Path
 
 from PyQt6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QTabWidget, QWidget, QLabel,
+    QVBoxLayout, QHBoxLayout, QTabWidget, QWidget, QLabel,
     QPushButton, QTableWidget, QTableWidgetItem, QHeaderView, QMenu, QTableView,
     QFileDialog, QMessageBox, QTextEdit, QAbstractItemView, QApplication,
     QLineEdit, QComboBox, QProgressBar,
 )
+from ui.frameless import FramelessDialog, app_icon
+from ui.message_box import ThemedMessageBox
 from PyQt6.QtCore import (
     Qt, QThread, pyqtSignal, QAbstractTableModel, QModelIndex,
     QSortFilterProxyModel,
@@ -117,7 +119,7 @@ _active_workers: set = set()
 # ---------------------------------------------------------------------------
 
 class MetadataTableModel(QAbstractTableModel):
-    _HEADERS = ["Key", "Type", "Preview"]
+    _HEADERS = ["键", "类型", "预览"]
 
     def __init__(self):
         super().__init__()
@@ -226,9 +228,9 @@ class MetadataTableModel(QAbstractTableModel):
 
 class TensorTableModel(QAbstractTableModel):
     _HEADERS = [
-        "Name", "Shape", "Type", "Params",
-        "Est. Size", "Offset", "Abs Offset",
-        "Layer", "Module"
+        "名称", "形状", "类型", "参数量",
+        "估算大小", "偏移", "绝对偏移",
+        "层", "模块"
     ]
 
     def __init__(self):
@@ -274,12 +276,12 @@ class TensorTableModel(QAbstractTableModel):
 
         if role == Qt.ItemDataRole.ToolTipRole:
             return (
-                f"Name: {t_obj.name}\n"
-                f"Shape: {'x'.join(str(d) for d in t_obj.dims)}\n"
-                f"Type: {t_obj.type_name} (id={t_obj.type_id})\n"
-                f"Params: {t_obj.n_params:,}\n"
-                f"Offset: {t_obj.offset}\n"
-                f"Abs Offset: {t_obj.absolute_offset}"
+                f"{t('名称')}: {t_obj.name}\n"
+                f"{t('形状')}: {'x'.join(str(d) for d in t_obj.dims)}\n"
+                f"{t('类型')}: {t_obj.type_name} (id={t_obj.type_id})\n"
+                f"{t('参数量')}: {t_obj.n_params:,}\n"
+                f"{t('偏移')}: {t_obj.offset}\n"
+                f"{t('绝对偏移')}: {t_obj.absolute_offset}"
             )
 
         return None
@@ -371,9 +373,18 @@ class TensorFilterProxyModel(QSortFilterProxyModel):
 # Inspector dialog
 # ---------------------------------------------------------------------------
 
-class GGUFInspectorDialog(QDialog):
+class GGUFInspectorDialog(FramelessDialog):
     def __init__(self, file_path, launcher_params=None, parent=None):
-        super().__init__(parent)
+        # E12: frameless themed card, resizable (7 tabs need the room),
+        # edge-resize via the shared resize frame.
+        super().__init__(
+            parent,
+            title=t("GGUF 检查器"),
+            icon=app_icon(),
+            resizable=True,
+            size=(1000, 700),
+            min_size=(900, 650),
+        )
         self._path = file_path
         # HTML palette for the rich-text tabs; the dialog is modal, so
         # the app theme cannot change while it is open. Follow the
@@ -400,9 +411,10 @@ class GGUFInspectorDialog(QDialog):
             self._file_options.append((Path(file_path).name, file_path))
 
         self._init_ui()
-        self.setWindowTitle(f"GGUF Inspector — {Path(file_path).name}")
-        self.setMinimumSize(900, 650)
-        self.resize(1000, 700)
+        # Title bar label follows via windowTitleChanged (E12).
+        self.setWindowTitle(
+            t("GGUF 检查器 — {name}").format(name=Path(file_path).name)
+        )
 
         # Try cache
         self._try_cache_or_parse()
@@ -412,7 +424,9 @@ class GGUFInspectorDialog(QDialog):
     # ------------------------------------------------------------------
 
     def _init_ui(self):
-        root = QVBoxLayout(self)
+        # E12: build into the shared card body (keep the tighter 8px
+        # margins the inspector used to have).
+        root = self.content_layout
         root.setContentsMargins(8, 8, 8, 8)
 
         # Top bar
@@ -659,7 +673,7 @@ class GGUFInspectorDialog(QDialog):
         path = self._file_options[index][1]
         if path == self._path and self._info is not None:
             return
-        self.setWindowTitle(f"GGUF Inspector — {Path(path).name}")
+        self.setWindowTitle(t("GGUF 检查器 — {name}").format(name=Path(path).name))
         self._try_cache_or_parse()
 
     def _open_file_dialog(self):
@@ -727,9 +741,11 @@ class GGUFInspectorDialog(QDialog):
         self._btn_reparse.setEnabled(True)
         self._btn_export.setEnabled(True)
         self._lbl_status.setText(
-            f"{info.header.tensor_count} tensors · "
-            f"{len(info.metadata)} metadata · "
-            f"{info.file_size / (1024**3):.2f} GB"
+            t("{tensors} 个张量 · {meta} 条元数据 · {size} GB").format(
+                tensors=info.header.tensor_count,
+                meta=len(info.metadata),
+                size=f"{info.file_size / (1024**3):.2f}",
+            )
         )
 
         self._populate_all_tabs()
@@ -744,7 +760,7 @@ class GGUFInspectorDialog(QDialog):
         self._progress.setVisible(False)
         self._btn_reparse.setEnabled(True)
         self._lbl_status.setText(t("解析失败"))
-        QMessageBox.critical(self, t("解析错误"), msg)
+        ThemedMessageBox.critical(self, t("解析错误"), msg)
 
     # ------------------------------------------------------------------
     # Populate tabs
@@ -930,11 +946,11 @@ class GGUFInspectorDialog(QDialog):
         t_rows = [
             (t("模型"), _meta("tokenizer.ggml.model")),
             (t("词表大小"), self._badge_html(vocab_size)),
-            ("BOS token id", _meta("tokenizer.ggml.bos_token_id")),
-            ("EOS token id", _meta("tokenizer.ggml.eos_token_id")),
-            ("UNK token id", _meta("tokenizer.ggml.unknown_token_id")),
-            ("SEP token id", _meta("tokenizer.ggml.separator_token_id")),
-            ("PAD token id", _meta("tokenizer.ggml.padding_token_id")),
+            (t("BOS 起始符 id"), _meta("tokenizer.ggml.bos_token_id")),
+            (t("EOS 结束符 id"), _meta("tokenizer.ggml.eos_token_id")),
+            (t("UNK 未知符 id"), _meta("tokenizer.ggml.unknown_token_id")),
+            (t("SEP 分隔符 id"), _meta("tokenizer.ggml.separator_token_id")),
+            (t("PAD 填充符 id"), _meta("tokenizer.ggml.padding_token_id")),
             (t("聊天模板"), self._badge_html(t("是"), "ok") if has_template else self._badge_html(t("否"), "bad")),
             (t("HF 分词器 JSON"), self._badge_html(t("是"), "ok") if has_hf else self._badge_html(t("否"), "bad")),
         ]
@@ -1014,7 +1030,7 @@ class GGUFInspectorDialog(QDialog):
                     f'{count}',
                     f'~{_fmt_bytes(est)}',
                 ])
-            parts.append(self._data_table_html([t("Type"), t("分布"), t("张量"), t("Est. Size")], q_rows))
+            parts.append(self._data_table_html([t("类型"), t("分布"), t("张量"), t("估算大小")], q_rows))
 
         # Parameter Concentration
         sorted_tensors = sorted(tensors, key=lambda t: -t.n_params)
@@ -1027,7 +1043,7 @@ class GGUFInspectorDialog(QDialog):
                 pct_val = cum / total * 100
                 bar = self._bar_html(pct_val, 100, width=30)
                 c_rows.append([
-                    f'{t("Top {n}", n=n)}',
+                    f'{t("前 {n} 个", n=n)}',
                     self._badge_html(_fmt_params(cum), "yellow"),
                     f'{bar}',
                     f'{pct_val:.1f}%',
@@ -1073,7 +1089,7 @@ class GGUFInspectorDialog(QDialog):
                     '',
                     _fmt_bytes(non_block_bytes),
                 ])
-            parts.append(self._data_table_html([t("Layer"), t("张量"), t("Params"), t("相对大小"), t("Est. Size")], l_rows))
+            parts.append(self._data_table_html([t("层"), t("张量"), t("参数量"), t("相对大小"), t("估算大小")], l_rows))
 
         # Module Breakdown
         module_data: dict[str, dict] = {}
@@ -1115,7 +1131,7 @@ class GGUFInspectorDialog(QDialog):
                     '',
                     _fmt_bytes(other_bytes),
                 ])
-            parts.append(self._data_table_html([t("Module"), t("张量"), t("Params"), t("相对大小"), t("Est. Size")], m_rows))
+            parts.append(self._data_table_html([t("模块"), t("张量"), t("参数量"), t("相对大小"), t("估算大小")], m_rows))
 
         # Top 20 Largest Tensors
         top_tensors = sorted(tensors, key=lambda t: -(t.estimated_nbytes or 0))[:20]
@@ -1135,7 +1151,7 @@ class GGUFInspectorDialog(QDialog):
                     f'{bar}',
                     _fmt_bytes(t_obj.estimated_nbytes),
                 ])
-            parts.append(self._data_table_html([t("Name"), t("Shape"), t("Type"), t("Params"), "", t("Est. Size")], t_rows))
+            parts.append(self._data_table_html([t("名称"), t("形状"), t("类型"), t("参数量"), "", t("估算大小")], t_rows))
 
         # Tensor Shape Stats
         rank_counts: dict[int, int] = {}
@@ -1223,11 +1239,11 @@ class GGUFInspectorDialog(QDialog):
             (t("模型"), self._badge_html(m.get("tokenizer.ggml.model", "—"))),
             (t("词表大小"), self._badge_html(f"{len(tokens):,}" if isinstance(tokens, list) else "—")),
             (t("合并规则数"), f"{len(merges):,}" if isinstance(merges, list) else "—"),
-            ("BOS token id", str(m.get("tokenizer.ggml.bos_token_id", "—"))),
-            ("EOS token id", str(m.get("tokenizer.ggml.eos_token_id", "—"))),
-            ("UNK token id", str(m.get("tokenizer.ggml.unknown_token_id", "—"))),
-            ("SEP token id", str(m.get("tokenizer.ggml.separator_token_id", "—"))),
-            ("PAD token id", str(m.get("tokenizer.ggml.padding_token_id", "—"))),
+            (t("BOS 起始符 id"), str(m.get("tokenizer.ggml.bos_token_id", "—"))),
+            (t("EOS 结束符 id"), str(m.get("tokenizer.ggml.eos_token_id", "—"))),
+            (t("UNK 未知符 id"), str(m.get("tokenizer.ggml.unknown_token_id", "—"))),
+            (t("SEP 分隔符 id"), str(m.get("tokenizer.ggml.separator_token_id", "—"))),
+            (t("PAD 填充符 id"), str(m.get("tokenizer.ggml.padding_token_id", "—"))),
             (t("HF 分词器 JSON"), self._badge_html(t("是"), "ok") if has_hf else self._badge_html(t("否"), "bad")),
             (t("聊天模板"), self._badge_html(t("是"), "ok") if has_template else self._badge_html(t("否"), "bad")),
         ]))
@@ -1280,13 +1296,13 @@ class GGUFInspectorDialog(QDialog):
                 )
             dash = f'<span style="color:{self._h["muted"]};">—</span>'
             parts.append(self._kv_table_html(label_width=160, rows=[
-                ("Sidecar", self._badge_html(fn.sidecar, "teal") if fn.sidecar else dash),
-                ("BaseName", self._badge_html(fn.base_name, "blue") if fn.base_name else dash),
-                ("SizeLabel", self._badge_html(fn.size_label, "yellow") if fn.size_label else dash),
-                ("FineTune", fn.fine_tune or dash),
-                ("Version", self._badge_html(fn.version, "purple") if fn.version else dash),
+                (t("伴随文件"), self._badge_html(fn.sidecar, "teal") if fn.sidecar else dash),
+                (t("基础名称"), self._badge_html(fn.base_name, "blue") if fn.base_name else dash),
+                (t("大小标签"), self._badge_html(fn.size_label, "yellow") if fn.size_label else dash),
+                (t("微调"), fn.fine_tune or dash),
+                (t("版本"), self._badge_html(fn.version, "purple") if fn.version else dash),
                 (t("编码"), self._badge_html(fn.encoding, "bad") if fn.encoding else dash),
-                ("Type", self._badge_html(fn.type, "warn") if fn.type else dash),
+                (t("类型"), self._badge_html(fn.type, "warn") if fn.type else dash),
                 (t("分片"), fn.shard or dash),
             ]))
         else:
@@ -1300,10 +1316,10 @@ class GGUFInspectorDialog(QDialog):
         # Metadata Comparison
         parts.append(self._section_html(t("元数据对比"), "\U0001F504"))
         comparisons = [
-            (t("BaseName vs general.basename"), fn.base_name if fn else None, m.get("general.basename")),
-            (t("SizeLabel vs general.size_label"), fn.size_label if fn else None, m.get("general.size_label")),
-            (t("Version vs general.version"), fn.version if fn else None, m.get("general.version")),
-            (t("Encoding vs dominant type"), fn.encoding if fn else None, info.stats.dominant_type_name or None),
+            (t("基础名称 vs general.basename"), fn.base_name if fn else None, m.get("general.basename")),
+            (t("大小标签 vs general.size_label"), fn.size_label if fn else None, m.get("general.size_label")),
+            (t("版本 vs general.version"), fn.version if fn else None, m.get("general.version")),
+            (t("编码 vs 主导类型"), fn.encoding if fn else None, info.stats.dominant_type_name or None),
         ]
         cmp_rows = []
         for label, fn_val, meta_val in comparisons:
@@ -1347,7 +1363,9 @@ class GGUFInspectorDialog(QDialog):
 
         self._diag_table.setRowCount(len(diags))
         for i, d in enumerate(diags):
-            level_item = QTableWidgetItem(d.level.upper())
+            level_item = QTableWidgetItem({
+                "error": t("错误"), "warning": t("警告"), "info": t("信息"),
+            }.get(d.level, d.level.upper()))
             level_item.setForeground(level_colors.get(d.level, QColor(h["value"])))
             self._diag_table.setItem(i, 0, level_item)
             self._diag_table.setItem(i, 1, QTableWidgetItem(d.title))
@@ -1491,7 +1509,7 @@ class GGUFInspectorDialog(QDialog):
         data = self._metadata_model.get_all_json()
         with open(path, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2, default=str)
-        QMessageBox.information(self, t("导出完成"), t("元数据已导出到 {path}").format(path=path))
+        ThemedMessageBox.information(self, t("导出完成"), t("元数据已导出到 {path}").format(path=path))
 
     def _export_tensors_csv(self):
         path, _ = QFileDialog.getSaveFileName(
@@ -1506,7 +1524,7 @@ class GGUFInspectorDialog(QDialog):
             writer = csv.DictWriter(f, fieldnames=rows[0].keys())
             writer.writeheader()
             writer.writerows(rows)
-        QMessageBox.information(self, t("导出完成"), t("张量数据已导出到 {path}").format(path=path))
+        ThemedMessageBox.information(self, t("导出完成"), t("张量数据已导出到 {path}").format(path=path))
 
     def _export_report_md(self):
         path, _ = QFileDialog.getSaveFileName(
@@ -1563,7 +1581,7 @@ class GGUFInspectorDialog(QDialog):
 
         with open(path, "w", encoding="utf-8") as f:
             f.write("\n".join(lines))
-        QMessageBox.information(self, t("导出完成"), t("报告已导出到 {path}").format(path=path))
+        ThemedMessageBox.information(self, t("导出完成"), t("报告已导出到 {path}").format(path=path))
 
     # ------------------------------------------------------------------
     # Close

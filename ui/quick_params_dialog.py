@@ -9,31 +9,39 @@ plus a search box (matches key / CLI flag / label) and 恢复默认.
 """
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
-    QDialog, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QListWidget,
+    QHBoxLayout, QHeaderView, QLabel, QLineEdit, QListWidget,
     QListWidgetItem, QPushButton, QToolButton, QTreeWidget,
     QTreeWidgetItem, QVBoxLayout, QWidget,
 )
 
 from core.i18n import t
 from core.params_schema import PARAMS_BY_KEY, TAB_TITLES
+from ui.frameless import FramelessDialog, app_icon
 from ui.quick_params import (
     QUICK_DEFAULT_KEYS, kind_display_name, quick_label_text, quick_short_label,
     quick_eligible, sanitize_quick_keys,
 )
 
 
-class QuickParamsDialog(QDialog):
+class QuickParamsDialog(FramelessDialog):
     """Returns the ordered key list via result_keys() after accept()."""
 
     def __init__(self, parent=None, current_keys=None):
-        super().__init__(parent)
-        self.setWindowTitle(t("自定义快捷开关"))
-        self.resize(680, 460)
+        # E12: frameless themed card; resizable (two wide panes benefit
+        # from extra width), edge-resize via the shared resize frame.
+        super().__init__(
+            parent,
+            title=t("自定义快捷开关"),
+            icon=app_icon(),
+            resizable=True,
+            size=(760, 520),
+            min_size=(660, 460),
+        )
         self._keys = sanitize_quick_keys(current_keys)
         self._tree_items = {}    # key -> QTreeWidgetItem (right pane)
         self._top_items = {}     # tab_key -> QTreeWidgetItem (group header)
 
-        layout = QVBoxLayout(self)
+        layout = self.content_layout
 
         self._search = QLineEdit()
         self._search.setPlaceholderText(t("搜索参数（名称/flag）…"))
@@ -59,19 +67,41 @@ class QuickParamsDialog(QDialog):
         # emoji would render blank in QToolButton on this platform
         # (see basic_panel's dropped ⚙️ button). 🔄 reuses the preset
         # area's 恢复默认 button icon (main_window.btn_reset).
-        for text, slot in ((t("▲ 上移"), self._move_up),
-                           (t("▼ 下移"), self._move_down),
-                           (t("✕ 移除"), self._remove_sel)):
+        # Glyph-only 26×24 like those nav buttons: the full text does not
+        # fit the row (en "▲ Move up" alone is 140px), so the label lives
+        # in the tooltip. The logSearchBtn objectName zeroes the theme's
+        # generic 10px horizontal QToolButton padding, which would
+        # otherwise leave the glyph no room to render.
+        for glyph, text, slot in (
+                ("▲", t("▲ 上移"), self._move_up),
+                ("▼", t("▼ 下移"), self._move_down),
+                ("✕", t("✕ 移除"), self._remove_sel)):
             b = QToolButton()
-            b.setText(text)
+            b.setText(glyph)
             b.setToolTip(text)
+            b.setObjectName("logSearchBtn")
+            b.setFixedSize(26, 24)
             b.clicked.connect(slot)
             btns.addWidget(b)
+        # 恢复默认 shares the row — with the glyphs compact, one action
+        # row replaces two half-empty rows.
+        self._btn_default = QPushButton(t("🔄 恢复默认"))
+        self._btn_default.setToolTip(t("恢复为默认的一组快捷开关"))
+        self._btn_default.clicked.connect(self._reset_default)
+        btns.addWidget(self._btn_default)
         btns.addStretch()
         left_box.addLayout(btns)
         left_w = QWidget()
         left_w.setLayout(left_box)
-        left_w.setFixedWidth(240)
+        # Pane width hugs the button row's natural width: en
+        # "🔄 Reset Default" (210px) vs zh "🔄 恢复默认" (102px) differ by
+        # 108px, and a single fixed width left a dead gap right of the
+        # buttons in one of the languages. The dialog is modal, so the
+        # language cannot change while it is open — no retranslate needed.
+        left_w.setFixedWidth(3 * 26                       # ▲/▼/✕
+                            + self._btn_default.sizeHint().width()
+                            + 3 * 6                       # gaps
+                            + 16)                         # headroom
         center.addWidget(left_w)
 
         # ---- right: available (grouped, checkable) ----------------------
@@ -83,6 +113,10 @@ class QuickParamsDialog(QDialog):
         self._tree.setHeaderLabels([t("参数"), t("类型")])
         self._tree.header().setSectionResizeMode(
             0, QHeaderView.ResizeMode.Stretch)
+        # stretchLastSection defaults to true — without this the 类型
+        # column (short values: Toggle/Combo/Integer/Decimal) swallows
+        # all the spare width instead of the 参数 column growing
+        self._tree.header().setStretchLastSection(False)
         # NB: itemChanged is connected AFTER _populate_tree() below —
         # setFlags() during population fires itemChanged while the check
         # state is still Unchecked, which would make _on_tree_changed
@@ -99,10 +133,6 @@ class QuickParamsDialog(QDialog):
         layout.addLayout(center, 1)
 
         bottom = QHBoxLayout()
-        self._btn_default = QPushButton(t("🔄 恢复默认"))
-        self._btn_default.setToolTip(t("恢复为默认的一组快捷开关"))
-        self._btn_default.clicked.connect(self._reset_default)
-        bottom.addWidget(self._btn_default)
         bottom.addStretch()
         self._ok = QPushButton(t("确定"))
         self._ok.setDefault(True)

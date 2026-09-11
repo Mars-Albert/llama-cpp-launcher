@@ -7,6 +7,7 @@ settings persistence. UI parts run under QT_QPA_PLATFORM=offscreen
 (same pattern as test_param_help_ui.py / test_ui_prefs.py).
 """
 import os
+import re
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -69,6 +70,23 @@ def test_short_label_strips_flag_suffix():
     p = PARAMS_BY_KEY["flash_attn"]
     assert quick_short_label(p) == "Flash Attention"
     assert "(" not in quick_short_label(PARAMS_BY_KEY["draft_max"])
+
+
+def test_quick_label_text_translates_cjk_labels(lang):
+    """_EN keys are the FULL schema labels (incl. the `(--flag):` suffix),
+    so quick_label_text must translate before stripping — stripping first
+    missed every lookup and leaked Chinese into English mode (the ⚡
+    quick-toggles group and the 自定义快捷开关 dialog)."""
+    from ui.quick_params import quick_label_text
+    p = PARAMS_BY_KEY["image_min_tokens"]
+    set_language("zh")
+    assert quick_label_text(p) == "图像最小Token"
+    set_language("en")
+    assert quick_label_text(p) == "Image Min Tokens"
+    # no CJK anywhere in the pool in English mode
+    cjk = re.compile(r"[\u4e00-\u9fff]")
+    for p in quick_eligible():
+        assert not cjk.search(quick_label_text(p)), p.key
 
 
 # ---------------------------------------------------------------------------
@@ -205,7 +223,9 @@ def test_menu_structure_settings_help(app, lang):
     from ui.main_window import MainWindow
     win = MainWindow(work_dir=None, defaults=dict(_FALLBACK_DEFAULTS))
     try:
-        titles = [a.text() for a in win.menuBar().actions()]
+        # E12: the menu bar moved into the menu-widget slot (title bar
+        # above it); win.menuBar() now returns a detached default bar.
+        titles = [a.text() for a in win._menubar.actions()]
         assert titles == ["文件", "设置", "帮助"]
         assert win.settings_menu.actions()[0] is win._quick_params_action
         assert win.settings_menu.actions()[0].text() == "自定义快捷开关…"
@@ -327,6 +347,84 @@ def test_dialog_search_filter(app, lang):
     d._search.setText("")
     assert not d._tree_items["split_mode"].isHidden()
     assert not agent_top.isHidden()
+
+
+def test_dialog_labels_follow_language(app, lang):
+    """Tree + left-pane labels render in the active language (regression:
+    the stripped-label lookup leaked Chinese into the English dialog)."""
+    set_language("en")
+    d = QuickParamsDialog(None, ["image_min_tokens", "flash_attn"])
+    assert d._tree_items["image_min_tokens"].text(0) == "Image Min Tokens"
+    cjk = re.compile(r"[\u4e00-\u9fff]")
+    for i in range(d._tree.topLevelItemCount()):
+        top = d._tree.topLevelItem(i)
+        for j in range(top.childCount()):
+            assert not cjk.search(top.child(j).text(0)), top.child(j).text(0)
+    for i in range(d._sel.count()):
+        assert not cjk.search(d._sel.item(i).text())
+
+
+def test_dialog_type_column_compact(app, lang):
+    """The 类型/Type column keeps its natural width (short values:
+    Toggle/Combo/Integer/Decimal) and the 参数 column absorbs the rest —
+    QHeaderView's stretchLastSection (true by default) used to let the
+    type column swallow all the spare width."""
+    for mode in ("zh", "en"):
+        set_language(mode)
+        d = QuickParamsDialog(None, ["flash_attn"])
+        d.resize(760, 520)
+        d.show()
+        app.processEvents()
+        h = d._tree.header()
+        assert not h.stretchLastSection()
+        assert h.sectionSize(1) <= 160, "type column must stay compact"
+        assert h.sectionSize(0) + h.sectionSize(1) >= d._tree.width() - 16
+        if mode == "en":
+            assert d._tree.headerItem().text(1) == "Type"
+        d.close()
+        d.deleteLater()
+
+
+def test_dialog_nav_buttons_glyph_only_no_elision(app, lang):
+    """The ▲/▼/✕ buttons are glyph-only 26×24 (log-search nav style):
+    the full text (e.g. '▲ Move up') does not fit the row — text buttons
+    elided in both languages (en '▲ ...up'). The single glyph must keep
+    full room, the label lives in the tooltip, and the theme's
+    #logSearchBtn rule must zero the QToolButton padding that would
+    otherwise swallow the glyph. 恢复默认 shares the row (one action row
+    instead of two half-empty rows) and must not be squeezed below its
+    natural width (the pane is sized for en '🔄 Reset Default', 210px)."""
+    import re
+    from PyQt6.QtWidgets import QToolButton
+    from ui import main_window as MW
+    qss = MW.MainWindow._get_stylesheet("light")
+    m = re.search(r"QToolButton#logSearchBtn[^{}]*\{([^}]*)\}", qss)
+    assert m, "theme QSS lost the QToolButton #logSearchBtn rule"
+    assert re.search(r"padding\s*:\s*0", m.group(1)), "padding must be zeroed"
+    for mode in ("zh", "en"):
+        set_language(mode)
+        d = QuickParamsDialog(None, ["flash_attn"])
+        d.resize(760, 520)
+        d.show()
+        app.processEvents()
+        nav = [b for b in d.findChildren(QToolButton)
+               if b.objectName() == "logSearchBtn"]
+        assert len(nav) == 3
+        for b in nav:
+            assert b.width() == 26
+            # 26px box minus 2px border must still fit the single glyph
+            assert b.width() - 2 >= b.fontMetrics().horizontalAdvance(b.text())
+            assert b.toolTip()
+            # 恢复默认 shares the row (one action row, not two)
+            assert b.parentWidget() is d._btn_default.parentWidget()
+        assert d._btn_default.width() >= d._btn_default.sizeHint().width()
+        # the pane hugs the row in both languages — no dead gap right of
+        # 恢复默认 (3×26 glyphs + 3 gaps + default button + ≤16px headroom)
+        pane = d._btn_default.parentWidget()
+        used = 3 * 26 + 3 * 6 + d._btn_default.sizeHint().width()
+        assert pane.width() - used <= 16
+        d.close()
+        d.deleteLater()
 
 
 # ---------------------------------------------------------------------------

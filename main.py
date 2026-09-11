@@ -63,12 +63,49 @@ def _setup_logging():
     root.addHandler(handler)
 
 
+def _log_uncaught(exc_type, exc_value, exc_tb):
+    """Route uncaught exceptions to the log file.
+
+    Exceptions raised inside Qt event handlers / slots are printed to
+    stderr and *swallowed by the event loop* — with a console-less exe
+    they would be invisible. This hook writes them to launcher.log so a
+    misbehaving close path (or any slot) leaves a trace.
+    """
+    logging.getLogger("uncaught").exception(
+        "uncaught %s: %s", exc_type.__name__, exc_value,
+        exc_info=(exc_type, exc_value, exc_tb))
+
+
+def _log_exit_state(app: QApplication):
+    """Log what the app looked like when exec() returned.
+
+    quitOnLastWindowClosed fires only when no WA_QuitOnClose top-level
+    window is VISIBLE any more — so a lingering visible window (or a
+    still-running thread) is exactly what keeps a "closed" app alive.
+    """
+    from PyQt6.QtCore import QThread
+    visible = [
+        f"{type(w).__name__}#{w.objectName() or '?'}"
+        for w in app.topLevelWidgets()
+        if w.isVisible()
+    ]
+    threads = [t.objectName() or type(t).__name__
+               for t in QThread.allThreads()
+               if t.isRunning() and t is not QThread.currentThread()]
+    logging.getLogger("shutdown").info(
+        "exec returned; visible top-levels=%s running threads=%s",
+        visible or "none", threads or "none")
+
+
 def main():
     _setup_logging()
     set_language(load_language())
+    sys.excepthook = _log_uncaught
 
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
+    app.aboutToQuit.connect(
+        lambda: logging.getLogger("shutdown").info("aboutToQuit"))
     # Window title-bar icon: PyInstaller's spec icon only covers the EXE
     # resource, not Qt's runtime window icon — apply it app-wide.
     _apply_app_icon(app)
@@ -80,7 +117,9 @@ def main():
         defaults=dict(_FALLBACK_DEFAULTS),
     )
     window.show()
-    sys.exit(app.exec())
+    rc = app.exec()
+    _log_exit_state(app)
+    sys.exit(rc)
 
 
 if __name__ == "__main__":

@@ -7,7 +7,9 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
 
-from PyQt6.QtWidgets import QApplication, QCheckBox, QDialog
+from PyQt6.QtWidgets import (
+    QApplication, QCheckBox, QDialog, QVBoxLayout, QWidget,
+)
 
 import core.config as CC
 from core.config import ConfigManager
@@ -75,9 +77,24 @@ def window(tmp_path, monkeypatch):
     w.close()
 
 
-class _FakeSaveDialog(QDialog):
-    """Accepts automatically; tests may flip the checkbox before accept."""
+class _FakeSaveDialog(QWidget):
+    """Accepts automatically; tests flip the checkbox via the class flag.
+    E12: _save_preset now builds a FramelessDialog whose body layout is
+    ``content_layout`` — the fake mirrors that surface so the checkbox
+    (created by _save_preset) lands in the fake's child tree."""
     include_paths = True
+
+    def __init__(self, parent=None, title=None, icon=None,
+                 resizable=False, size=(0, 0)):
+        super().__init__(parent)
+        self._body = QWidget(self)
+        self.content_layout = QVBoxLayout(self._body)
+
+    def accept(self):
+        pass
+
+    def reject(self):
+        pass
 
     def exec(self):
         for c in self.findChildren(QCheckBox):
@@ -87,7 +104,7 @@ class _FakeSaveDialog(QDialog):
 
 def _save_via_dialog(w, monkeypatch, include_paths, name="testpreset"):
     _FakeSaveDialog.include_paths = include_paths
-    monkeypatch.setattr(MW, "QDialog", _FakeSaveDialog)
+    monkeypatch.setattr(MW, "FramelessDialog", _FakeSaveDialog)
     # the fake dialog prefills its name field from the combo's current text,
     # so select/insert the target name first
     if w.preset_combo.findText(name) < 0:

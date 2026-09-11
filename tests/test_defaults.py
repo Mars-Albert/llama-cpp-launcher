@@ -95,6 +95,23 @@ class TestParseHelpNewFormat:
         d = _parse_help_to_defaults(HELP_NEW)
         assert d["mmap"] is True
 
+    def test_log_verbosity_default_after_dash_list(self):
+        # The -lv description is a multi-line list whose items start with
+        # "-" (" - 0: generic output" … " - 5: debug"); the continuation
+        # join must keep going over those indented dash lines so the
+        # trailing "(default: 3)" is found. When it was missed the live
+        # default stayed the launcher's fallback 4, CommandBuilder saw
+        # value 4 == "default" 4 and never emitted --log-verbosity, so
+        # the server ran at its built-in 3 while the UI showed 4 (and
+        # the runtime panel kept showing the low-verbosity hint).
+        d = _parse_help_to_defaults(HELP_NEW)
+        assert d["log_verbosity"] == 3
+
+    def test_reasoning_format_default_after_dash_list(self):
+        # Same shape as -lv: list items, then "(default: auto)".
+        d = _parse_help_to_defaults(HELP_NEW)
+        assert d["reasoning_format"] == "auto"
+
 
 # ---------------------------------------------------------------------------
 # Old format (synthetic legacy sample)

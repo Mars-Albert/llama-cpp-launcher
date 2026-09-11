@@ -34,7 +34,9 @@ def test_stylesheets_resolve_all_tokens():
     # only the fixed white-on-accent text colors may survive in dark:
     # the four control-bar gradient buttons (start/stop/copy/webui)
     # + checkbox indicator / list selection / table selection text
-    assert dark.count("#ffffff") <= 7
+    # + server-path OK button + title-bar close-button hover
+    # + themed message-box primary button
+    assert dark.count("#ffffff") <= 10
     # identical structure (same selectors in the same order)
     import re
     selectors = re.findall(r"([A-Za-z][\w:.\-# ]*?)\s*\{", light)

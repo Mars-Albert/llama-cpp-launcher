@@ -508,7 +508,7 @@ class TestDiagnostics:
             metadata={"general.architecture": "llama", "llama.context_length": 4096}
         )
         diags = run_diagnostics(info, launcher_ctx=8192)
-        warnings = [d for d in diags if d.level == "warning" and "Context" in d.title]
+        warnings = [d for d in diags if d.level == "warning" and "上下文" in d.title]
         assert len(warnings) == 1
 
     def test_lora_file_warning(self):
@@ -537,7 +537,7 @@ class TestDiagnostics:
             }
         )
         diags = run_diagnostics(info)
-        template_diags = [d for d in diags if "chat template" in d.title.lower()]
+        template_diags = [d for d in diags if "聊天模板" in d.title]
         assert len(template_diags) == 1
 
 
@@ -622,4 +622,4 @@ class TestIntegration:
 
         # Run launcher-aware diagnostics
         diags = run_diagnostics(info, launcher_ctx=8192)
-        assert any("Context" in d.title for d in diags)
+        assert any("上下文" in d.title for d in diags)
