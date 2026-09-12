@@ -29,6 +29,12 @@ jobs:
           pip install pytest
 
       - name: Run tests
+        env:
+          # The suite is written offscreen (see tests docstrings). Without
+          # this, Qt uses the runner's native platform and a delayed GC/
+          # thread cleanup from an earlier widget test has crashed the
+          # process mid-suite (access violation at ~test 73 on v1.8.1).
+          QT_QPA_PLATFORM: offscreen
         run: python -m pytest tests/ -q
 
       - name: Extract version from tag
