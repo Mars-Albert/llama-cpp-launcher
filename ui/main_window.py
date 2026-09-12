@@ -224,6 +224,15 @@ _DARK_SCROLLBAR_QSS = """
         """
 
 
+# Workers still running when their window closes: module-level references
+# keep the QThread objects alive — destroying a *running* QThread is
+# undefined behaviour in Qt and crashes this PyQt6 build natively (access
+# violation), and a queued signal event whose sender was destroyed is
+# equally fatal. Each worker removes itself when run() returns. (Same
+# pattern as _active_meta_workers below.)
+_active_startup_workers: set = set()
+
+
 class _StartupInfoWorker(QThread):
     """Fetch llama-server version and --help off the main thread (plan A10).
 
@@ -238,6 +247,13 @@ class _StartupInfoWorker(QThread):
     devices_ready = pyqtSignal(list)  # E8: list of device dicts (may be empty = CPU-only)
 
     def run(self):
+        _active_startup_workers.add(self)
+        try:
+            self._run_body()
+        finally:
+            _active_startup_workers.discard(self)
+
+    def _run_body(self):
         # E1: resolved path (settings > PATH > bare name)
         self.server_path = get_server_path()
         try:
@@ -2150,8 +2166,15 @@ class MainWindow(QMainWindow):
         save_server_path(path)
         self.statusBar().showMessage(t("llama-server 路径已设置: {path}", path=path), 8000)
         # Refresh version label + live defaults against the new binary (A10 flow)
-        if hasattr(self, '_startup_worker') and self._startup_worker is not None and self._startup_worker.isRunning():
-            self._startup_worker.wait(2000)
+        old_worker = getattr(self, '_startup_worker', None)
+        if old_worker is not None and old_worker.isRunning():
+            old_worker.wait(2000)
+            if old_worker.isRunning():
+                # wait timed out: _check_server_info() drops the reference
+                # below, so cut the signal links first — the worker itself
+                # is kept alive by _active_startup_workers until run()
+                # returns (destroying a running QThread crashes natively).
+                old_worker.disconnect()
         self._check_server_info()
 
     def _restore_ui_state(self):
@@ -2289,6 +2312,13 @@ class MainWindow(QMainWindow):
         if hasattr(self, '_startup_worker') and self._startup_worker is not None:
             self._startup_worker.quit()
             self._startup_worker.wait(2000)
+            if self._startup_worker.isRunning():
+                # wait timed out (a hung --version/--help probe): the worker
+                # is kept alive by _active_startup_workers, so cut its signal
+                # links to this window before the window is destroyed — a
+                # late emit from a live sender into a dying window is a
+                # native crash.
+                self._startup_worker.disconnect()
             log.info("closeEvent: startup worker stopped")
         self._close_run_log()
         self._save_ui_state()

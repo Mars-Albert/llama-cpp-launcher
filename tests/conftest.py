@@ -5,6 +5,22 @@ import pytest
 from PyQt6.QtWidgets import QApplication
 
 
+@pytest.fixture(scope="session", autouse=True)
+def _qapp_session():
+    """Keep one QApplication alive for the whole session.
+
+    PyQt6 destroys the C++ QCoreApplication when the last Python wrapper
+    is released (and Qt nulls qApp in the destructor). Tests that drop
+    their local `app` reference at teardown can therefore destroy the
+    C++ app in the same instant their MainWindow wrapper is released —
+    and the interleaved C++ destructor chain (window vs app) access-
+    violates. Holding one reference until session end removes the race:
+    windows are always destroyed while the app is alive.
+    """
+    app = QApplication.instance() or QApplication([])
+    yield app
+
+
 @pytest.fixture(autouse=True)
 def _destroy_hidden_windows():
     """Release hidden top-level widgets after each test.
