@@ -1,3 +1,4 @@
+import gc
 import logging
 import os
 import sys
@@ -82,19 +83,39 @@ def _log_exit_state(app: QApplication):
     quitOnLastWindowClosed fires only when no WA_QuitOnClose top-level
     window is VISIBLE any more — so a lingering visible window (or a
     still-running thread) is exactly what keeps a "closed" app alive.
+
+    Must never raise: this is an exit diagnostic, and a failure here
+    would turn a clean shutdown into an unhandled-exception dialog
+    (PyQt6 6.11 does not expose QThread.allThreads(), which crashed the
+    old implementation on every exit — threads are enumerated from the
+    GC instead, and the whole body is guarded).
     """
-    from PyQt6.QtCore import QThread
-    visible = [
-        f"{type(w).__name__}#{w.objectName() or '?'}"
-        for w in app.topLevelWidgets()
-        if w.isVisible()
-    ]
-    threads = [t.objectName() or type(t).__name__
-               for t in QThread.allThreads()
-               if t.isRunning() and t is not QThread.currentThread()]
-    logging.getLogger("shutdown").info(
-        "exec returned; visible top-levels=%s running threads=%s",
-        visible or "none", threads or "none")
+    try:
+        from PyQt6.QtCore import QThread
+        visible = [
+            f"{type(w).__name__}#{w.objectName() or '?'}"
+            for w in app.topLevelWidgets()
+            if w.isVisible()
+        ]
+        threads, seen = [], set()
+        for obj in gc.get_objects():
+            if not isinstance(obj, QThread):
+                continue
+            key = id(obj)
+            if key in seen:
+                continue
+            seen.add(key)
+            try:
+                if obj.isCurrentThread() or not obj.isRunning():
+                    continue
+            except RuntimeError:  # C++ part already destroyed
+                continue
+            threads.append(obj.objectName() or type(obj).__name__)
+        logging.getLogger("shutdown").info(
+            "exec returned; visible top-levels=%s running threads=%s",
+            visible or "none", threads or "none")
+    except Exception:
+        logging.getLogger("shutdown").exception("exit-state logging failed")
 
 
 def main():
