@@ -22,7 +22,7 @@ import heapq
 from collections import deque
 
 from PyQt6.QtCore import (Qt, QTimer, QThread, QEvent, pyqtSignal, QPoint,
-                          QRectF, PYQT_VERSION_STR)
+                          QRect, QRectF, PYQT_VERSION_STR)
 from PyQt6.QtGui import (QAction, QFont, QTextOption, QIcon, QPixmap, QPainter,
                          QColor, QPalette, QTextCursor, QTextDocument, QKeySequence,
                          QShortcut, QImage, QPolygon, QPen)
@@ -74,9 +74,21 @@ class _ThemedStatusBar(QStatusBar):
     x=6 that ignores layout margins — under the rounded card that
     overlaps the transparent corner band (the text would float over the
     drop shadow). A label added through ``addWidget`` goes through the
-    layout, and a small contents-margin keeps the first character on
-    the card face (the status bar's own x offset is ~2px).
+    layout, and its contents-margins keep the text on the painted card
+    face — which the bar's own rect does NOT follow: the bar spans the
+    window's full bottom edge, so its outer ``SHADOW_MARGIN`` px on the
+    left and the bottom are the transparent shadow band (left margin is
+    fixed; the bottom one is synced to the band by ``set_band_inset``,
+    called from ``MainWindow._set_card_inset`` — without it the
+    vertically centred 12px text straddled the card's bottom border and
+    painted its descenders into the band below the card).
     """
+
+    # Left margin: the bar's own ~2px x offset plus this keeps the first
+    # glyph on the card face AND clears the bottom-left corner arc (the
+    # face edge recedes to x = SHADOW_MARGIN + CARD_RADIUS in the lowest
+    # rows) — 15px is the tight value that clears both.
+    _LEFT_MARGIN = 15
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -85,11 +97,22 @@ class _ThemedStatusBar(QStatusBar):
         self.setSizeGripEnabled(False)
         self._msg_label = QLabel(self)
         self._msg_label.setObjectName("statusMsg")
-        self._msg_label.setContentsMargins(15, 0, 0, 0)
+        # Bottom margin = the shadow band (synced by set_band_inset): it
+        # pushes the text up onto the card face's visible strip.
+        self._msg_label.setContentsMargins(self._LEFT_MARGIN, 0, 0,
+                                           CARD_CONTENT_INSET)
         self.addWidget(self._msg_label)
         self._msg_timer = QTimer(self)
         self._msg_timer.setSingleShot(True)
         self._msg_timer.timeout.connect(lambda: self._msg_label.setText(""))
+
+    def set_band_inset(self, band):
+        """Sync the label's bottom margin to the band width *band*
+        (CARD_CONTENT_INSET normally, 0 when maximised — the card then
+        fills the window, so no inset is needed). The bar's height
+        follows the label's sizeHint, so the text re-centres on the
+        visible card strip in both states."""
+        self._msg_label.setContentsMargins(self._LEFT_MARGIN, 0, 0, band)
 
     def showMessage(self, message, timeout=0):
         self._msg_label.setText(message)
@@ -343,6 +366,13 @@ class MainWindow(QMainWindow):
         # Keys a startup-restored preset explicitly set; the live --help
         # defaults merge must not overwrite them (see _apply_startup_defaults)
         self._preset_protected_keys = set()
+        # E14: first-show bookkeeping — showEvent re-applies the intended
+        # window size there (pre-show resize/restoreGeometry is discarded
+        # once the E11 content minimums land during construction; see the
+        # showEvent / _restore_ui_state comments).
+        self._first_show_done = False
+        self._pending_geometry = None
+        self._pending_geometry_raw = None
         self._applying_values = False
         self._pending_webui_url = None
         # QProcess 读取块不保证按行对齐：每个流（stdout/stderr）各挂起一个
@@ -399,12 +429,44 @@ class MainWindow(QMainWindow):
         self._restore_last_preset()
         self._check_server_info()
 
+    @staticmethod
+    def _default_window_size():
+        """E14: first-launch window size.
+
+        Fixed comfortable default (WINDOW_WIDTH × WINDOW_HEIGHT); clamped to
+        the primary screen's available area so the window still opens inside
+        the screen on small laptops. Once the user closes the app, the saved
+        geometry (_restore_ui_state) takes over and this is not revisited.
+        """
+        base_w, base_h = WINDOW_WIDTH, WINDOW_HEIGHT
+        screen = QApplication.primaryScreen()
+        if screen is None:
+            return base_w, base_h
+        avail = screen.availableGeometry()
+        return min(base_w, avail.width()), min(base_h, avail.height())
+
+    @staticmethod
+    def _default_splitter_sizes(width):
+        """E14: first-launch splitter sizes for a window of `width` px.
+
+        Fixed 400px left panel — wide enough to read model names and keep
+        the preset buttons unclipped, narrow enough that the parameter panel
+        keeps the lion's share. The clamp keeps the right side ≥900px (its
+        content minimum is ~850) and stays inside the left panel's 180–500
+        limits; the right side gets the rest.
+        """
+        content = width - 2 * CARD_CONTENT_INSET
+        left = max(300, min(400, content - 900))
+        return [left, max(100, content - left)]
+
     def init_ui(self):
         self.setWindowTitle(f"🦙 llama.cpp Launcher v{APP_VERSION}")
         # E12: objectName drives the frameless chrome QSS (1px border on
         # the transparent top level) — see _THEME_TEMPLATE.
         self.setObjectName("llamaMainWin")
-        self.resize(WINDOW_WIDTH, WINDOW_HEIGHT)
+        # E14: default size (clamped to the screen, see _default_window_size).
+        self._default_w, self._default_h = self._default_window_size()
+        self.resize(self._default_w, self._default_h)
         self.setMinimumSize(MIN_WINDOW_WIDTH, MIN_WINDOW_HEIGHT)
         self._apply_theme()
 
@@ -430,7 +492,9 @@ class MainWindow(QMainWindow):
         right_panel = self._create_right_panel()
         self.splitter.addWidget(right_panel)
 
-        self.splitter.setSizes([280, 920])
+        # E14: fixed 400px left panel (the old 280px squeezed both sides —
+        # model names and the preset buttons clipped).
+        self.splitter.setSizes(self._default_splitter_sizes(self._default_w))
         main_layout.addWidget(self.splitter)
 
         self._create_menu_bar()
@@ -462,11 +526,17 @@ class MainWindow(QMainWindow):
         card's crisp 1px border is never covered (content starts one px
         inside the face edge). The status bar's message label carries its
         own inset (see _ThemedStatusBar) because QStatusBar swaps its
-        internal layout on the first layout pass and would drop margins.
+        internal layout on the first layout pass and would drop margins —
+        its bottom one is synced here, since the bar sits at the window's
+        very bottom and would otherwise span the shadow band below the
+        card (the text would straddle the card's bottom border).
         """
         self._title_bar.setFixedHeight(TITLE_BAR_HEIGHT + m)
         self._title_bar._row.setContentsMargins(10 + m, m, 6 + m, 0)
         self._central_layout.setContentsMargins(m, 0, m, 0)
+        sb = self.statusBar()
+        if isinstance(sb, _ThemedStatusBar):
+            sb.set_band_inset(m)
 
     def _on_card_state_changed(self):
         # Maximized / fullscreen: the band collapses and the card fills
@@ -579,8 +649,8 @@ class MainWindow(QMainWindow):
     def _create_left_panel(self):
         widget = QWidget()
         # C8: no setFixedWidth — the QSplitter handle must stay draggable.
-        # Initial 280px comes from splitter.setSizes(); min/max keep the
-        # drag range sane.
+        # The initial width comes from _default_splitter_sizes() (E14, ~22%
+        # of the content width); min/max keep the drag range sane.
         widget.setMinimumWidth(180)
         widget.setMaximumWidth(500)
         layout = QVBoxLayout(widget)
@@ -1163,6 +1233,26 @@ class MainWindow(QMainWindow):
 
     def showEvent(self, event):
         super().showEvent(event)
+        # E14: re-apply the intended size once, now that the window is
+        # visible — a pre-show resize()/restoreGeometry() is silently
+        # discarded once the E11 content minimums are applied during
+        # construction, so without this the app opens at exactly its
+        # minimum size (cramped on 1080p+ screens). Saved geometry wins
+        # (and is re-clamped to the screen below); first launch gets the
+        # default size + 400px left panel.
+        if not self._first_show_done:
+            self._first_show_done = True
+            if self._pending_geometry is not None:
+                # Synchronous at show time: the window (and the splitter's
+                # width) are at final size immediately, so the saved-splitter
+                # re-apply below lands on the right total.
+                self.setGeometry(self._pending_geometry)
+            elif self._pending_geometry_raw is not None:
+                self.restoreGeometry(self._pending_geometry_raw)
+            else:
+                self.resize(self._default_w, self._default_h)
+                self.splitter.setSizes(
+                    self._default_splitter_sizes(self.width()))
         self._retry_pending_splitter(8)
         # E13: a stale saved geometry can restore the window off-screen
         # before the first Move event arrives — clamp once on show.
@@ -2074,9 +2164,28 @@ class MainWindow(QMainWindow):
         import base64
         from PyQt6.QtCore import QByteArray
         geo = prefs.get("geometry")
-        if isinstance(geo, str) and geo:
+        if isinstance(geo, (list, tuple)) and len(geo) == 4:
+            # E14: plain [x, y, w, h] client-geometry numbers (what
+            # _save_ui_state writes). Applied via setGeometry in showEvent —
+            # deterministic on every platform, where the QByteArray
+            # restoreGeometry form is unreliable (partially applied offscreen)
+            # and a pre-show application is silently discarded once the E11
+            # content minimums land during construction.
             try:
-                self.restoreGeometry(QByteArray(base64.b64decode(geo.encode("ascii"))))
+                x, y, w, h = (int(v) for v in geo)
+                if 200 <= w <= 8000 and 150 <= h <= 8000:
+                    self._pending_geometry = QRect(x, y, w, h)
+            except (TypeError, ValueError):
+                pass
+        elif isinstance(geo, str) and geo:
+            # legacy E2 format (base64 saveGeometry bytes): best effort —
+            # pre-show restore plus a re-apply in showEvent. Kept so existing
+            # settings keep working for one cycle until the close rewrites
+            # them in the numeric format.
+            try:
+                raw = QByteArray(base64.b64decode(geo.encode("ascii")))
+                self.restoreGeometry(raw)
+                self._pending_geometry_raw = raw
             except Exception:
                 pass
         sizes = prefs.get("splitter")
@@ -2135,9 +2244,20 @@ class MainWindow(QMainWindow):
 
     def _save_ui_state(self):
         # E2: persist for the next launch (written on close)
-        import base64
+        # E14: plain [x, y, w, h] client-geometry numbers — restoreGeometry's
+        # QByteArray form was silently discarded pre-show (the window always
+        # opened at its content minimum) and is unreliable offscreen.
+        # While maximized the full-screen rect is not useful as a *normal*
+        # window size, so the previously saved value (or nothing → the E14
+        # screen-relative default on next launch) is kept.
+        if self.isMaximized():
+            prev = load_ui_prefs().get("geometry")
+            geo = prev if (isinstance(prev, (list, tuple))
+                           and len(prev) == 4) else None
+        else:
+            geo = [self.x(), self.y(), self.width(), self.height()]
         save_ui_prefs({
-            "geometry": base64.b64encode(bytes(self.saveGeometry())).decode("ascii"),
+            "geometry": geo,
             "splitter": [int(s) for s in self.splitter.sizes()],
             "mode": self.mode_combo.currentIndex(),
             "adv_tab": self.advanced_panel.tabs.currentIndex(),
@@ -2347,6 +2467,11 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(10, 20, 10, 8)
         layout.setSpacing(6)
         layout.setColumnStretch(1, 1)
+        # 扫描状态行（"已扫描: N 个模型, M 个 mmproj"）放在模型信息区开头：
+        # 标签本体仍在 ModelBrowser 里创建/更新，这里 addWidget 会自动把它
+        # 从浏览器的布局里摘走并重设父级
+        layout.addWidget(self.model_browser.status_label, 0, 0, 1, 2)
+
         # GGUF quick-metadata row state (arch · max ctx · chat template)
         self._model_meta = None          # GGUFQuickInfo for the current model
         self._model_meta_seq = 0         # in-flight parse guard
@@ -2361,7 +2486,7 @@ class MainWindow(QMainWindow):
             ("model_params", "🔢 模型参数量"),
             ("quant_type", "📐 量化类型"),
         ]
-        for row_idx, (key, label_text) in enumerate(info_items):
+        for row_idx, (key, label_text) in enumerate(info_items, start=1):
             lbl = QLabel(t(label_text))
             self._model_info_label_widgets[key] = (lbl, label_text)
             lbl.setStyleSheet("color: #7aa2f7; font-weight: bold; font-size: 12px;")
@@ -2374,7 +2499,7 @@ class MainWindow(QMainWindow):
             self.model_info_labels[key] = val
 
         # GGUF Inspector button
-        btn_row = len(info_items)
+        btn_row = len(info_items) + 1
         self.btn_gguf_inspect = QPushButton(t("🔍 GGUF"))
         self.btn_gguf_inspect.setToolTip(t("请先选择 .gguf 模型"))
         self.btn_gguf_inspect.setEnabled(False)
@@ -2392,7 +2517,8 @@ class MainWindow(QMainWindow):
         f = self.model_meta_label.font()
         f.setPixelSize(11)
         self.model_meta_label.setFont(f)
-        self._set_meta_color("#6b7280")
+        # 文字样式与扫描状态行（#565f89 / 11px）保持一致
+        self._set_meta_color("#565f89")
         btn_container = QWidget()
         btn_layout = QHBoxLayout(btn_container)
         btn_layout.setContentsMargins(0, 0, 0, 0)
@@ -2463,7 +2589,15 @@ class MainWindow(QMainWindow):
 
     def _set_meta_color(self, hexcolor):
         # ElidingLabel paints with the palette Text role, not QSS — see its
-        # docstring. Idle/status gray; amber when ctx exceeds the model limit.
+        # docstring. Idle/status gray (same as the scan-status row);
+        # amber when ctx exceeds the model limit.
+        # The colour also has to live in a widget-level stylesheet: the
+        # app-level QWidget rule (theme text colour, 13px) re-polishes the
+        # widget after show and clobbers whatever palette/font the code set
+        # — an inline sheet wins that fight. The 11px pin keeps the row's
+        # style identical to the scan-status row.
+        self.model_meta_label.setStyleSheet(
+            f"color: {hexcolor}; font-size: 11px;")
         pal = self.model_meta_label.palette()
         pal.setColor(QPalette.ColorRole.Text, QColor(hexcolor))
         self.model_meta_label.setPalette(pal)
@@ -2482,11 +2616,11 @@ class MainWindow(QMainWindow):
         if not (model_path and Path(model_path).exists()):
             label.setText("—")
             label.setToolTip("")
-            self._set_meta_color("#6b7280")
+            self._set_meta_color("#565f89")
             return
         label.setText(t("正在解析..."))
         label.setToolTip(str(model_path))
-        self._set_meta_color("#6b7280")
+        self._set_meta_color("#565f89")
         worker = _ModelMetaWorker(seq, str(model_path), self)
         worker.finished_ok.connect(self._on_model_meta_ok)
         worker.finished_err.connect(self._on_model_meta_err)
@@ -2510,7 +2644,7 @@ class MainWindow(QMainWindow):
         label = self.model_meta_label
         label.setText("—")
         label.setToolTip(t("GGUF 元数据解析失败: {err}", err=msg))
-        self._set_meta_color("#6b7280")
+        self._set_meta_color("#565f89")
 
     def _render_model_meta(self):
         """(Re)build the quick-metadata row text + colour from _model_meta.
@@ -2541,7 +2675,7 @@ class MainWindow(QMainWindow):
             self._set_meta_color("#d97706")
         else:
             label.setToolTip(text)
-            self._set_meta_color("#6b7280")
+            self._set_meta_color("#565f89")
 
     def _estimate_params(self, size_bytes):
         quant = self._guess_quant_type(self.params.get("model", ""))
@@ -2860,8 +2994,9 @@ class MainWindow(QMainWindow):
         # E13: _ThemedStatusBar — the built-in showMessage label paints at
         # a fixed x that ignores layout margins (it would float over the
         # rounded corner band); the subclass routes the message through a
-        # layout-managed label (with its own contents-margin inset) and
-        # drops the native size grip.
+        # layout-managed label (contents-margins keep the text on the card
+        # face: left fixed, bottom synced to the shadow band by
+        # _set_card_inset) and drops the native size grip.
         sb = _ThemedStatusBar(self)
         self.setStatusBar(sb)
         sb.showMessage(t("就绪"))

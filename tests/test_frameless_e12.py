@@ -114,6 +114,16 @@ def test_mainwindow_card_chrome_e13(app, temp_settings):
         msg = w.statusBar().findChild(QLabel, "statusMsg")
         assert msg is not None
         assert msg.contentsMargins().left() >= m - 4  # text on face
+        # the message must sit on the card face: the bar spans the
+        # window's full bottom edge, so without a bottom inset the
+        # centred text straddles the card border (descenders would paint
+        # into the shadow band below the card)
+        w.statusBar().showMessage("🚀 服务已启动: http://127.0.0.1:8080")
+        app.processEvents()
+        text_bottom = (w.statusBar().y() + msg.y()
+                       + msg.contentsRect().bottom())
+        assert text_bottom <= w.height() - SHADOW_MARGIN - 1
+        assert msg.contentsMargins().bottom() == m
         # the band adds to the title row's height
         assert w._title_bar.height() == TITLE_BAR_HEIGHT + m
         # the shadow is part of the minimum size (the band is outside
@@ -144,6 +154,9 @@ def test_mainwindow_card_chrome_e13(app, temp_settings):
         assert w._title_bar.height() == TITLE_BAR_HEIGHT
         cl2, _ct2, cr2, _cb2 = w._central_layout.getContentsMargins()
         assert (cl2, cr2) == (0, 0)
+        # band collapsed → the status message's bottom inset goes with it
+        msg2 = w.statusBar().findChild(QLabel, "statusMsg")
+        assert msg2.contentsMargins().bottom() == 0
         # normal: band restored
         w.showNormal()
         app.processEvents()

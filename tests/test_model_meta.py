@@ -72,8 +72,8 @@ def test_meta_row_shows_arch_ctx(window, tmp_path):
     text = window.model_meta_label.text()
     assert "qwen3" in text
     assert "40,960" in text
-    # idle color (gray), not the amber warning
-    assert window.model_meta_label.palette().color(QPalette.ColorRole.Text).name() == "#6b7280"
+    # idle color (gray, same as the scan-status row), not the amber warning
+    assert window.model_meta_label.palette().color(QPalette.ColorRole.Text).name() == "#565f89"
 
 
 def test_meta_row_ctx_exceeds_model_limit_warns(window, tmp_path):
@@ -95,7 +95,7 @@ def test_meta_row_ctx_exceeds_model_limit_warns(window, tmp_path):
     # dropping back to a legal ctx restores the idle color
     window.basic_panel.ctx_spin.setValue(4096)
     _wait_meta_done(window)
-    assert window.model_meta_label.palette().color(QPalette.ColorRole.Text).name() == "#6b7280"
+    assert window.model_meta_label.palette().color(QPalette.ColorRole.Text).name() == "#565f89"
     assert window.model_meta_label.toolTip() == window.model_meta_label.text()
 
 

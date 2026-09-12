@@ -132,4 +132,9 @@ def test_close_event_saves_ui_state(temp_settings):
     assert prefs["adv_tab"] == 2
     assert prefs["bottom_tab"] == 0
     assert isinstance(prefs["splitter"], list) and len(prefs["splitter"]) == 2
-    assert isinstance(prefs["geometry"], str) and len(prefs["geometry"]) > 0
+    # E14: geometry is saved as plain [x, y, w, h] client-geometry numbers
+    # (the old base64 saveGeometry blob was silently discarded pre-show).
+    geo = prefs["geometry"]
+    assert isinstance(geo, list) and len(geo) == 4
+    assert all(isinstance(v, int) for v in geo)
+    assert geo[2] > 0 and geo[3] > 0

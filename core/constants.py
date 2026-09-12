@@ -4,9 +4,11 @@
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8080
 
-# UI defaults
-WINDOW_WIDTH = 1360
-WINDOW_HEIGHT = 860
+# UI defaults — E14: first-launch window size. Clamped to the primary
+# screen's available area in MainWindow._default_window_size() so small
+# laptops still get a window that fits. Saved geometry wins afterwards.
+WINDOW_WIDTH = 1600
+WINDOW_HEIGHT = 940
 # E11: floors for the window minimum. init_ui() raises these to the live
 # minimumSizeHint when the content needs more (font/DPI dependent), so the
 # window can never shrink into a state where controls overlap. The parameter
