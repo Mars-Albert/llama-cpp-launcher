@@ -36,6 +36,7 @@ All **226** `llama-server` CLI parameters in one panel · live default detection
   - [Per-Parameter Help](#param-help)
   - [GGUF Inspector](#gguf-inspector)
   - [Server Lifecycle](#server-lifecycle)
+  - [Window & UI](#window-ui)
   - [i18n & Themes](#i18n-themes)
 - [Comparison](#comparison)
 - [Development](#development)
@@ -65,15 +66,20 @@ And it stays in sync automatically:
 - **🗂️ Chat template auto-discovery** — templates shipped by your binary appear in the UI automatically.
 - **🖥️ GPU detection** — probes `--list-devices` and shows e.g. `2× GPU: RTX 5090 (32GB) + RTX 2080 (8GB)` next to the offload controls (never auto-fills, always your call).
 
-**🪶 Lightweight & private** — ~10,000 lines of Python, one dependency (PyQt6). No bundled backend, no accounts, no telemetry, no phone home. 100% local.
+**🪶 Lightweight & private** — ~13,000 lines of Python, one dependency (PyQt6). No bundled backend, no accounts, no telemetry, no phone home. 100% local.
 
 <a id="screenshot"></a>
 
-## 📸 Screenshot
+## 📸 Screenshots
 
-*Basic mode with a model running — runtime info parsed live from server logs.*
+*Advanced mode (light theme, left) · Basic mode with a model running (dark theme, right) — runtime info parsed live from server logs.*
 
-![Llama CPP Launcher](en.png)
+<table>
+  <tr>
+    <td width="50%"><img src="en_light.png" width="560" alt="Advanced mode, light theme" /></td>
+    <td width="50%"><img src="en.png" width="560" alt="Basic mode with a model running, dark theme" /></td>
+  </tr>
+</table>
 
 <a id="quick-start"></a>
 
@@ -115,7 +121,7 @@ python main.py          # or double-click run.bat on Windows
 | Sliders for temp / top-p / min-p / repeat penalty, top-k spin | LoRA adapters & scales, control vectors, image token limits |
 | Context quick-picks: Default → 4K → 262K | Model sources: local file, **HF repo**, **URL**, **Docker repo** |
 | GPU layers auto / all / manual, host/port/parallel | Speculative decoding (draft-mtp, ngram, lookup cache) |
-| One-line toggles: FlashAttn, reasoning, split mode, spec type | Full server config: SSL, CORS, slots, embedding/rerank, MCP |
+| ⚡ Quick toggles — **user-configurable** (Settings → Customize): FlashAttn, reasoning, split mode, spec type, draft max… | Full server config: SSL, CORS, slots, embedding/rerank, MCP |
 | *Get a model running in seconds* | *Fine-tune every detail* |
 
 <a id="advanced-tabs"></a>
@@ -141,6 +147,7 @@ python main.py          # or double-click run.bat on Windows
 - 🔎 Background-thread scan of your model directory — the UI never freezes
 - 🏷️ Auto-categorizes `.gguf` files into **Models** / **Multimodal (mmproj)** with sizes
 - 📏 Instant model info: size, estimated parameters, quantization type
+- 🧾 **GGUF quick-metadata row**: architecture + max context of the selected model, parsed from the file *header only* (a few MB, cached, off the GUI thread); the row turns **amber** when your context setting exceeds the model's limit (the server would clamp it at load)
 - 🔗 Auto-matches the mmproj to your model by name
 - 📁 Scan directory remembered across sessions; F5 to re-scan
 
@@ -148,7 +155,7 @@ python main.py          # or double-click run.bat on Windows
 
 ### 📊 Real-time Log Parsing
 
-Every line of `llama-server` output is parsed as it arrives (60 patterns, both old and v9174+ `srv`-prefixed formats) and distilled into the **Runtime Info** panel — 40+ data points across 8 categories:
+Every line of `llama-server` output is parsed as it arrives (74 patterns, both old and v9174+ `srv`-prefixed formats) and distilled into the **Runtime Info** panel — 40+ data points across 8 categories:
 
 | Category | What you see |
 |---|---|
@@ -170,6 +177,7 @@ The panel fills in *live* — offload layers appear during loading, buffer sizes
 - 🔍 **Ctrl+F search** with match count and wrap-around
 - **Level filter** — Debug / Info / Warn / Error (follows Error by default)
 - 📤 Export the visible area or the **full run** (every run is also mirrored to `~/.llama-cpp-launcher/logs/last_run.log`)
+- 🪟 **Per-level history windows** — each level (D/I/W/E) keeps its own 5,000-line window, so a burst of hidden lines (e.g. a debug prompt dump) can never evict the lines you're filtering for
 - Auto-scroll toggle, clear button, colorized by level
 
 <a id="presets"></a>
@@ -210,13 +218,22 @@ A built-in binary inspector (no weights loaded, pure-stdlib parser):
 - ↩️ **Undo** — 800ms-debounced snapshots, up to 20 steps back
 - 📝 **Command preview** — the exact `llama-server` command, updated on every change, one-click copy (paths with spaces are quoted correctly)
 
+<a id="window-ui"></a>
+
+### 🪟 Window & UI
+
+- 🖼️ **Frameless rounded-card window** — the app paints its own card with a soft drop shadow: one integrated title row (icon · title · menu · Win11-style minimize/maximize/close), drag to move, double-click to maximize, edge-resize right at the visible card edge. Maximized, the card goes full-bleed with the system's own rounded corners.
+- 🎴 **Themed dialogs & message boxes** — every dialog, confirm and error box belongs to the same frameless card family (dark/light aware), so nothing pops out of the look.
+- 📐 **Comfortable by default** — first launch opens at 1600×940 (clamped to your screen) with a 400px model column; size, position, mode, tabs and splitter layout are restored on next start.
+- 🧘 **Small windows behave** — the parameter area never gets a vertical scrollbar and no control is squashed or overlapped: quick toggles re-wrap into more rows and the window's minimum size grows instead; very narrow windows scroll the wide rows sideways.
+
 <a id="i18n-themes"></a>
 
 ### 🌐 i18n & Themes
 
 - 🈶/🈷 **Chinese ↔ English live switching** — no restart, preference persisted
-- 🌙 **Dark / light theme** — one click in the Help menu, persisted; the log panel and inspector stay theme-aware
-- Window geometry, mode, active tab and splitter layout are restored on startup
+- 🌙 **Dark / light theme** — one click in the **Settings** menu (File · Settings · Help), persisted; the log panel and inspector stay theme-aware
+- Menu layout: **File** (scan path, llama-server path, refresh, exit) · **Settings** (customize quick toggles, language, theme) · **Help** (about)
 
 <a id="comparison"></a>
 
@@ -239,7 +256,7 @@ A built-in binary inspector (no weights loaded, pure-stdlib parser):
 ## 🛠️ Development
 
 - Python 3.11+, PyQt6 (pinned), pytest for tests
-- ~10,000 lines; the core schema (`core/params_schema.py`) is the single source of truth for the UI, CLI emission, get/set values, and i18n coverage — adding a parameter is one entry
+- ~13,000 lines of application code (+~5,500 lines of tests); the core schema (`core/params_schema.py`) is the single source of truth for the UI, CLI emission, get/set values, and i18n coverage — adding a parameter is one entry
 - `gguf/`, `ui/log_parser.py`, `ui/command_builder.py` are Qt-free and unit-testable headlessly
 
 <details>
@@ -264,15 +281,20 @@ llama-cpp-launcher/
 │   ├── parser.py  models.py  ggml_types.py  filename.py  diagnostics.py
 ├── ui/
 │   ├── main_window.py       # Window orchestration, theme, log panel
-│   ├── basic_panel.py       # Basic mode
+│   ├── frameless.py         # Frameless rounded-card window, title bar, edge-resize
+│   ├── message_box.py       # Themed frameless message boxes & dialog base
+│   ├── basic_panel.py       # Basic mode (incl. user-configurable quick toggles)
 │   ├── advanced_panel.py    # Advanced mode (schema-driven, 9 tabs)
+│   ├── quick_params.py      # Quick-toggles pool + widget factory
+│   ├── quick_params_dialog.py  # Customize-quick-toggles dialog
+│   ├── server_path_dialog.py   # llama-server path dialog
 │   ├── param_help.py        # "?" button + floating help card
 │   ├── model_browser.py     # GGUF scanner (background thread)
 │   ├── gguf_inspector.py    # 7-tab inspector dialog
 │   ├── log_parser.py        # Log line patterns → runtime info (Qt-free)
 │   ├── command_builder.py   # Params → `llama-server` argv (Qt-free)
 │   └── runtime_info.py      # Runtime info HTML (Qt-free)
-├── tests/                   # 17 test modules (headless, in-memory fakes)
+├── tests/                   # 26 test modules (headless, in-memory fakes)
 └── assets/icon.ico|png
 ```
 

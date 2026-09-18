@@ -36,6 +36,7 @@
   - [逐参数帮助](#param-help)
   - [GGUF 检查器](#gguf-inspector)
   - [服务生命周期](#server-lifecycle)
+  - [窗口与界面](#window-ui)
   - [国际化与主题](#i18n-themes)
 - [与其他工具对比](#comparison)
 - [开发](#development)
@@ -65,15 +66,20 @@
 - **🗂️ 聊天模板自动发现** — 你的二进制内置的模板会自动出现在 UI 中。
 - **🖥️ GPU 检测** — 通过 `--list-devices` 探测，在卸载层数控制旁显示如 `检测到 2× GPU：RTX 5090 (32GB) + RTX 2080 (8GB)`（只展示，不自动填写，永远由你决定）。
 
-**🪶 轻量且私密** — 约 10,000 行 Python，唯一运行时依赖是 PyQt6。无内置后端、无账号、无遥测、不联网上报，100% 本地运行。
+**🪶 轻量且私密** — 约 13,000 行 Python，唯一运行时依赖是 PyQt6。无内置后端、无账号、无遥测、不联网上报，100% 本地运行。
 
 <a id="screenshot"></a>
 
 ## 📸 软件截图
 
-*基础模式下模型运行中 — 运行时信息从服务端日志实时解析。*
+*高级模式（浅色主题，左）· 基础模式模型运行中（深色主题，右）— 运行时信息从服务端日志实时解析。*
 
-![Llama CPP Launcher 截图](cn.png)
+<table>
+  <tr>
+    <td width="50%"><img src="cn_light.png" width="560" alt="高级模式（浅色主题）" /></td>
+    <td width="50%"><img src="cn.png" width="560" alt="基础模式运行中（深色主题）" /></td>
+  </tr>
+</table>
 
 <a id="quick-start"></a>
 
@@ -115,7 +121,7 @@ python main.py          # Windows 下也可双击 run.bat
 | 温度 / Top-P / Min-P / 重复惩罚滑块 + Top-K 数值框 | LoRA 适配器与缩放、控制向量、图像 Token 限制 |
 | 上下文快捷按钮：Default → 4K → 262K | 模型来源：本地文件、**HF 仓库**、**URL**、**Docker 仓库** |
 | GPU 层数 auto / all / 手动，host/port/并行数 | 投机解码（draft-mtp、ngram、lookup cache） |
-| 一行快捷开关：FlashAttn、推理、分割模式、投机类型 | 完整服务端配置：SSL、CORS、slots、embedding/rerank、MCP |
+| ⚡ 快捷开关（**可自定义**，设置 → 自定义快捷开关…）：FlashAttn、推理、分割模式、投机类型、草稿 Token 上限… | 完整服务端配置：SSL、CORS、slots、embedding/rerank、MCP |
 | *几秒钟让模型跑起来* | *精细调节每一个细节* |
 
 <a id="advanced-tabs"></a>
@@ -141,6 +147,7 @@ python main.py          # Windows 下也可双击 run.bat
 - 🔎 后台线程扫描模型目录 — 界面永不卡顿
 - 🏷️ 自动把 `.gguf` 文件分类为 **模型** / **多模态 (mmproj)**，并显示大小
 - 📏 即时模型信息：大小、估算参数量、量化类型
+- 🧾 **GGUF 快速元数据行**：当前选中模型的架构 + 最大上下文，只解析文件*头部*（几 MB，有缓存，后台线程执行）；当上下文设置超过模型上限时该行变**琥珀色**提示（启动后会被截断）
 - 🔗 按名称自动匹配 mmproj 到对应模型
 - 📁 扫描目录跨会话记忆；F5 重新扫描
 
@@ -148,7 +155,7 @@ python main.py          # Windows 下也可双击 run.bat
 
 ### 📊 实时日志解析
 
-`llama-server` 的每一行输出都会在被打印的同时解析（60 条规则，兼容新旧两种日志格式，含 v9174+ `srv` 前缀格式），提炼进 **运行时信息** 面板 — 8 大类、40+ 数据点：
+`llama-server` 的每一行输出都会在被打印的同时解析（74 条规则，兼容新旧两种日志格式，含 v9174+ `srv` 前缀格式），提炼进 **运行时信息** 面板 — 8 大类、40+ 数据点：
 
 | 类别 | 你看到的信息 |
 |---|---|
@@ -170,6 +177,7 @@ python main.py          # Windows 下也可双击 run.bat
 - 🔍 **Ctrl+F 搜索**，带匹配计数与循环查找
 - **级别过滤** — 调试 / 信息 / 警告 / 错误（默认跟随"错误"级别）
 - 📤 导出可见区域或**完整运行日志**（每次运行都会完整镜像到 `~/.llama-cpp-launcher/logs/last_run.log`）
+- 🪟 **每级独立历史窗口** — 调试 / 信息 / 警告 / 错误各保留自己 5,000 行的窗口，隐藏级别的日志爆发（如 debug 提示词转储）不会把你正在过滤的级别挤掉
 - 自动滚动开关、清空按钮、按级别着色
 
 <a id="presets"></a>
@@ -210,13 +218,22 @@ python main.py          # Windows 下也可双击 run.bat
 - ↩️ **撤销** — 800ms 防抖快照，最多回退 20 步
 - 📝 **命令预览** — 精确的 `llama-server` 命令，每次修改即时更新，一键复制（含空格路径已正确加引号）
 
+<a id="window-ui"></a>
+
+### 🪟 窗口与界面
+
+- 🖼️ **无边框圆角卡片窗口** — 应用自绘卡片与柔和投影：一体式标题行（图标 · 标题 · 菜单 · Win11 风格最小化/最大化/关闭），拖动移动、双击最大化，贴住可见卡片边缘即可边缘缩放；最大化时卡片铺满全屏并使用系统自身的圆角。
+- 🎴 **主题化对话框与消息框** — 所有对话框、确认框、错误提示都属于同一无边框卡片家族（深色/浅色自适应），风格统一不突兀。
+- 📐 **默认尺寸舒适** — 首次启动以 1600×940（按屏幕可用区钳制）打开，左侧模型栏 400px；窗口大小、位置、模式、当前标签页与分割栏布局在下次启动时自动恢复。
+- 🧘 **小窗体不塌方** — 参数区永不出垂直滚动条，控件不会被压缩或重叠：快捷开关自动换行成更多行并增大窗口最小尺寸；极窄窗口下宽行横向滚动。
+
 <a id="i18n-themes"></a>
 
 ### 🌐 国际化与主题
 
 - 🈶/🈷 **中 ↔ 英实时切换** — 无需重启，偏好持久保存
-- 🌙 **深色 / 浅色主题** — 帮助菜单一键切换，自动记忆；日志面板与检查器均随主题适配
-- 窗口几何、模式、当前标签页与分割栏布局在启动时自动恢复
+- 🌙 **深色 / 浅色主题** — **设置**菜单一键切换（文件 · 设置 · 帮助），自动记忆；日志面板与检查器均随主题适配
+- 菜单布局：**文件**（扫描路径、llama-server 路径、刷新、退出）· **设置**（自定义快捷开关、语言、主题）· **帮助**（关于）
 
 <a id="comparison"></a>
 
@@ -239,7 +256,7 @@ python main.py          # Windows 下也可双击 run.bat
 ## 🛠️ 开发
 
 - Python 3.11+，PyQt6（版本锁定），pytest 测试
-- 约 10,000 行；核心 schema（`core/params_schema.py`）是 UI、CLI 命令生成、get/set 值、i18n 覆盖率的唯一事实来源 — 新增一个参数只需一条记录
+- 约 13,000 行应用代码（另有约 5,500 行测试）；核心 schema（`core/params_schema.py`）是 UI、CLI 命令生成、get/set 值、i18n 覆盖率的唯一事实来源 — 新增一个参数只需一条记录
 - `gguf/`、`ui/log_parser.py`、`ui/command_builder.py` 均不依赖 Qt，可无界面单元测试
 
 <details>
@@ -264,15 +281,20 @@ llama-cpp-launcher/
 │   ├── parser.py  models.py  ggml_types.py  filename.py  diagnostics.py
 ├── ui/
 │   ├── main_window.py       # 窗口编排、主题、日志面板
-│   ├── basic_panel.py       # 基础模式
+│   ├── frameless.py         # 无边框圆角卡片窗口、标题栏、边缘缩放
+│   ├── message_box.py       # 主题化无边框消息框与对话框基类
+│   ├── basic_panel.py       # 基础模式（含可自定义快捷开关）
 │   ├── advanced_panel.py    # 高级模式（schema 驱动，9 标签页）
+│   ├── quick_params.py      # 快捷开关候选池 + 控件工厂
+│   ├── quick_params_dialog.py  # 自定义快捷开关对话框
+│   ├── server_path_dialog.py   # llama-server 路径对话框
 │   ├── param_help.py        # "?" 按钮 + 浮动帮助卡片
 │   ├── model_browser.py     # GGUF 扫描器（后台线程）
 │   ├── gguf_inspector.py    # 7 标签页检查器对话框
 │   ├── log_parser.py        # 日志行模式 → 运行时信息（Qt-free）
 │   ├── command_builder.py   # 参数 → `llama-server` argv（Qt-free）
 │   └── runtime_info.py      # 运行时信息 HTML（Qt-free）
-├── tests/                   # 17 个测试模块（无界面，内存假数据）
+├── tests/                   # 26 个测试模块（无界面，内存假数据）
 └── assets/icon.ico|png
 ```
 
