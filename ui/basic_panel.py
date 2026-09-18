@@ -5,7 +5,7 @@ from PyQt6.QtWidgets import (
     QComboBox, QSpinBox, QSlider, QLineEdit,
     QCheckBox, QPushButton, QLabel, QFileDialog, QScrollArea
 )
-from PyQt6.QtGui import QColor, QPalette, QPainter
+from PyQt6.QtGui import QColor, QPalette, QPainter, QFont, QFontMetrics
 from PyQt6.QtCore import Qt, pyqtSignal, QSize
 from core.i18n import t
 from core.constants import DEFAULT_HOST, DEFAULT_PORT, CONTEXT_SIZE_PRESETS
@@ -17,6 +17,22 @@ from ui.quick_params import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _fit_browse_btn(btn) -> None:
+    """Fit a browse button's fixed width to its current (translated) text.
+
+    The width used to be a hardcoded 80px, sized for the Chinese label
+    "📂 浏览". The English "📂 Browse" is wider — the emoji paints from a
+    fallback font whose glyphs are wider than the advance the primary
+    font's metrics report — so the last letter clipped in English mode.
+    The 12px pixel size matches the QPushButton QSS rule; the extra 38px
+    is the QSS padding (2×14) + border (2×1) + a small safety margin.
+    """
+    f = QFont(btn.font())
+    f.setPixelSize(12)
+    fm = QFontMetrics(f)
+    btn.setFixedWidth(fm.horizontalAdvance(btn.text()) + 38)
 
 
 class ElidingLabel(QLabel):
@@ -136,7 +152,7 @@ class BasicPanel(QWidget):
         row1.addWidget(self.model_combo)
         # C4: previously a hardcoded English-only string, now goes through t()
         self._btn_browse_model = QPushButton(t("📂 浏览"))
-        self._btn_browse_model.setFixedWidth(80)
+        _fit_browse_btn(self._btn_browse_model)
         self._btn_browse_model.clicked.connect(self._browse_model)
         row1.addWidget(self._btn_browse_model)
         layout.addLayout(row1)
@@ -150,7 +166,7 @@ class BasicPanel(QWidget):
         self.mmproj_combo.setEditable(True)
         row2.addWidget(self.mmproj_combo)
         self._btn_browse_mmproj = QPushButton(t("📂 浏览"))
-        self._btn_browse_mmproj.setFixedWidth(80)
+        _fit_browse_btn(self._btn_browse_mmproj)
         self._btn_browse_mmproj.clicked.connect(self._browse_mmproj)
         row2.addWidget(self._btn_browse_mmproj)
         layout.addLayout(row2)
@@ -721,6 +737,8 @@ class BasicPanel(QWidget):
         self._lbl_min_p.setText(t("Min-P:"))
         self._btn_browse_model.setText(t("📂 浏览"))
         self._btn_browse_mmproj.setText(t("📂 浏览"))
+        _fit_browse_btn(self._btn_browse_model)
+        _fit_browse_btn(self._btn_browse_mmproj)
         self._retranslate_quick_toggles()
         for btn in self._help_btns:
             btn.setToolTip(t("查看参数说明"))
