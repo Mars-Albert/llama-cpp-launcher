@@ -59,7 +59,6 @@ class ModelBrowser(QWidget):
         self.loras = []
         self._scanner_thread = None
         self.init_ui()
-        self.model_selected.connect(self.auto_select_mmproj)
         self.scan_models()
 
     def init_ui(self):
@@ -153,19 +152,3 @@ class ModelBrowser(QWidget):
             self.status_label.setText(t("已扫描: {n_models} 个模型, {n_mmprojs} 个 mmproj", n_models=len(self.models), n_mmprojs=len(self.mmprojs)))
         else:
             self.status_label.setText(t("未扫描"))
-
-    def auto_select_mmproj(self, model_path):
-        # A6: only auto-select when the names actually match. The previous
-        # fallback (first mmproj in the folder) silently attached --mmproj to
-        # plain text models. No match -> hint only, never auto-fill.
-        if not model_path:
-            return
-        model_name = Path(model_path).stem.lower()
-        for mmproj in self.mmprojs:
-            if model_name in Path(mmproj).stem.lower():
-                self.mmproj_selected.emit(mmproj)
-                return
-        if self.mmprojs:
-            self.status_label.setText(
-                t("未发现匹配的 mmproj，可手动选择 {n_mmprojs} 个", n_mmprojs=len(self.mmprojs))
-            )

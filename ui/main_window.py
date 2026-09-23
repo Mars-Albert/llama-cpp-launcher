@@ -2471,7 +2471,7 @@ class MainWindow(QMainWindow):
             + t("一个功能丰富的图形化 llama-server 启动器，帮助您轻松管理和运行 GGUF 格式的大语言模型。<br><br>")
             + version_info
             + t("<b>主要功能：</b><br>")
-            + t("📦 <b>模型管理</b> — 递归扫描并自动分类本地 GGUF 文件（模型 / mmproj / LoRA，含大小显示），自动匹配同名 mmproj；高级模式还支持 HuggingFace / Docker / URL 指定模型<br>")
+            + t("📦 <b>模型管理</b> — 递归扫描并自动分类本地 GGUF 文件（模型 / mmproj / LoRA，含大小显示），点击 mmproj 列表项手动选择并填充路径；高级模式还支持 HuggingFace / Docker / URL 指定模型<br>")
             + t("🎛️ <b>基础 / 高级模式</b> — 基础模式滑杆快调常用参数；高级模式 {tabs} 个标签页覆盖 {n} 个 llama-server 参数，每个参数均带 \"?\" 说明<br>",
                 tabs=len(AdvancedPanel._TAB_TITLES), n=len(PARAMS_BY_KEY))
             + t("🖥️ <b>GPU / 性能</b> — 启动时自动检测 GPU 设备（型号 / 显存），GPU 层卸载、Flash Attention、KV Cache 卸载、多 GPU 张量分割<br>")

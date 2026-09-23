@@ -185,7 +185,7 @@ _EN = {
     # About dialog
     "一个功能丰富的图形化 llama-server 启动器，帮助您轻松管理和运行 GGUF 格式的大语言模型。<br><br>": "A feature-rich GUI launcher for llama-server to help you easily manage and run GGUF large language models.<br><br>",
     "<b>主要功能：</b><br>": "<b>Features:</b><br>",
-    "📦 <b>模型管理</b> — 递归扫描并自动分类本地 GGUF 文件（模型 / mmproj / LoRA，含大小显示），自动匹配同名 mmproj；高级模式还支持 HuggingFace / Docker / URL 指定模型<br>": "📦 <b>Model Management</b> — Recursively scan and categorize local GGUF files (models / mmproj / LoRA, with sizes), auto-match mmproj by name; the advanced model tab also accepts HuggingFace / Docker / URL<br>",
+    "📦 <b>模型管理</b> — 递归扫描并自动分类本地 GGUF 文件（模型 / mmproj / LoRA，含大小显示），点击 mmproj 列表项手动选择并填充路径；高级模式还支持 HuggingFace / Docker / URL 指定模型<br>": "📦 <b>Model Management</b> — Recursively scan and categorize local GGUF files (models / mmproj / LoRA, with sizes); click an mmproj in the list to select and fill its path; the advanced model tab also accepts HuggingFace / Docker / URL<br>",
     "🎛️ <b>基础 / 高级模式</b> — 基础模式滑杆快调常用参数；高级模式 {tabs} 个标签页覆盖 {n} 个 llama-server 参数，每个参数均带 \"?\" 说明<br>": "🎛️ <b>Basic / Advanced Mode</b> — Sliders for quick tuning in basic mode; advanced mode covers {n} llama-server parameters across {tabs} tabs, each with a \"?\" explanation<br>",
     "🖥️ <b>GPU / 性能</b> — 启动时自动检测 GPU 设备（型号 / 显存），GPU 层卸载、Flash Attention、KV Cache 卸载、多 GPU 张量分割<br>": "🖥️ <b>GPU / Performance</b> — Auto-detect GPU devices (model / VRAM) at startup; GPU layer offload, Flash Attention, KV cache offload, multi-GPU tensor split<br>",
     "🎲 <b>采样与投机解码</b> — 温度 / Top-P / Top-K / Min-P / 重复惩罚 / DRY / Mirostat 等完整采样参数；草稿模型、ngram、lookup cache 投机解码<br>": "🎲 <b>Sampling & Speculative Decoding</b> — Full sampling suite (temperature / Top-P / Top-K / Min-P / repeat penalty / DRY / Mirostat); draft model, ngram and lookup cache speculative decoding<br>",
@@ -639,7 +639,6 @@ _EN = {
     "未扫描": "Not scanned",
     "扫描中...": "Scanning...",
     "已扫描: {n_models} 个模型, {n_mmprojs} 个 mmproj": "Scanned: {n_models} models, {n_mmprojs} mmproj",
-    "未发现匹配的 mmproj，可手动选择 {n_mmprojs} 个": "No matching mmproj found, {n_mmprojs} available (select manually)",
 
     # === runner.py ===
     "启动 llama-server 失败（{server_path}）。请检查路径是否正确，或确保它在系统 PATH 中。": "Failed to start llama-server ({server_path}). Check the path, or make sure it's in your system PATH.",
