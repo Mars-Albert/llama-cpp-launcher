@@ -12,8 +12,29 @@ def _get_work_dir():
     return os.path.dirname(os.path.abspath(__file__))
 
 
-from PyQt6.QtGui import QIcon
+from PyQt6.QtGui import QFont, QIcon
 from PyQt6.QtWidgets import QApplication
+
+# The app-wide base font is pinned to a guaranteed-present Windows family
+# (Segoe UI ships with every Windows Vista+ install) instead of whatever
+# the system's default UI font resolves to. On some machines the default
+# UI font (a substituted or corrupted "Microsoft YaHei UI") scrambles the
+# Latin DIGIT glyphs — 0→O, 4→×, 5→6, 8→≠, 9→女 — while letters stay
+# normal, so QSpinBox/QDoubleSpinBox values rendered as mojibake while
+# labels and explicitly-named fonts (Segoe UI title row, Consolas preview)
+# looked fine (reported 2026-09). Pinning the family means the broken
+# default face is never consulted for Latin text; CJK characters are not
+# in Segoe UI and fall back per character through the family list to a
+# system CJK font.
+APP_FONT_FAMILIES = ["Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", "Arial"]
+
+
+def _app_base_font(app: QApplication) -> QFont:
+    """Base font for the whole app: pinned family, system point size."""
+    size = app.font().pointSize()
+    font = QFont(APP_FONT_FAMILIES[0], size if size > 0 else 9)
+    font.setFamilies(list(APP_FONT_FAMILIES))
+    return font
 
 
 def _app_icon_path():
@@ -125,6 +146,10 @@ def main():
 
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
+    # Pin the base font family before any widget is built (see the
+    # APP_FONT_FAMILIES comment): a broken or substituted system default
+    # UI font must not decide how the digits render.
+    app.setFont(_app_base_font(app))
     app.aboutToQuit.connect(
         lambda: logging.getLogger("shutdown").info("aboutToQuit"))
     # Window title-bar icon: PyInstaller's spec icon only covers the EXE
