@@ -12,29 +12,55 @@ def _get_work_dir():
     return os.path.dirname(os.path.abspath(__file__))
 
 
-from PyQt6.QtGui import QFont, QFontInfo, QFontMetrics, QIcon
+from PyQt6.QtGui import QFont, QFontDatabase, QFontInfo, QFontMetrics, QIcon
 from PyQt6.QtWidgets import QApplication
 
-# The app-wide base font is picked at runtime from a list of
-# guaranteed-present Windows families (Segoe UI ships with every Windows
-# Vista+ install) instead of inheriting whatever the system's default UI
-# font resolves to. On some machines a font face with the right family name
-# is corrupted or substituted and scrambles the Latin DIGIT glyphs —
-# 0→O, 4→×, 5→6, 8→≠, 9→女 — while letters stay normal, so spinbox values
-# rendered as mojibake (reported 2026-09, still broken on v1.8.3 where the
-# family was pinned statically: the broken face IS what the name resolves
-# to on that machine — a third-party "font beautification" file apparently
-# registers under several family names at once, shadowing the real faces,
-# while the BOLD face and other files — Consolas preview, Segoe UI Symbol —
-# stay healthy). Each candidate is therefore probed: in a healthy
-# face the ASCII digits advance ~0.3–0.6em per glyph, while a face whose
-# digit code points map to CJK/symbol glyphs advances ~1em for them.
-# The probe rejects broken faces; every probe result (installed?, resolved
-# family, per-digit advance) is logged to launcher.log (logger "font") so
-# a report machine can be diagnosed from its log alone.
+# The app-wide base font comes from the **bundled Inter TTF** first
+# (assets/fonts/Inter-Regular.ttf, OFL license), registered at startup via
+# QFontDatabase.addApplicationFont: it is loaded from a file inside the exe,
+# so no state of the machine's font store can affect it. History (user
+# report 2026-09/10): one machine scrambled the Latin DIGIT glyphs (0→O,
+# 4→×, 5→6, 8→≠, 9→女) while letters stayed normal — spinbox values were
+# mojibake; static family pinning (Segoe UI, v1.8.3) did not help, i.e. the
+# broken face IS what those family names resolve to there (a third-party
+# font file registering under several family names at once). A bundled font
+# cannot be shadowed by name, so digits/Latin always render from our file.
+# CJK characters (absent from Inter) fall back per character through the
+# family list to a system CJK font (CJK rendered fine on the report
+# machine). As a second layer every candidate is still probed — in a
+# healthy face each ASCII digit advances ~0.3–0.6em, a face whose digit
+# code points map to wide CJK/symbol glyphs advances ~1em — and every
+# probe result is logged to launcher.log (logger "font") so a report
+# machine can be diagnosed from its log alone.
 APP_FONT_CANDIDATES = ["Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", "Arial", "Tahoma", "Verdana"]
+_FONT_CJK_FALLBACKS = ["Microsoft YaHei UI", "Microsoft YaHei", "Segoe UI", "Arial"]
 _DIGIT_PROBE = "0123456789"
 _DIGIT_MAX_ADVANCE_EM = 0.75
+_BUNDLED_FONT = os.path.join("assets", "fonts", "Inter-Regular.ttf")
+
+
+def _bundled_font_path() -> str:
+    """Path of the bundled UI font (frozen: extracted <_MEIPASS>/assets)."""
+    if getattr(sys, "frozen", False):
+        return os.path.join(sys._MEIPASS, _BUNDLED_FONT)
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)), _BUNDLED_FONT)
+
+
+def _load_bundled_font() -> str:
+    """Register the bundled Inter font; return its family name or ""."""
+    log = logging.getLogger("font")
+    path = _bundled_font_path()
+    if not os.path.exists(path):
+        log.warning("bundled font missing: %s — falling back to system fonts", path)
+        return ""
+    fid = QFontDatabase.addApplicationFont(path)
+    if fid < 0:
+        log.warning("bundled font failed to load: %s", path)
+        return ""
+    fams = QFontDatabase.applicationFontFamilies(fid)
+    log.info("bundled font %r loaded (id=%d, families=%s)",
+             os.path.basename(path), fid, fams)
+    return fams[0] if fams else ""
 
 
 def _font_digits_healthy(font: QFont) -> bool:
@@ -45,19 +71,32 @@ def _font_digits_healthy(font: QFont) -> bool:
                for ch in _DIGIT_PROBE)
 
 
+_AUTO = object()
+
+
 def _pick_healthy_font(app: QApplication,
-                       healthy=_font_digits_healthy) -> QFont:
-    """Base font for the whole app: first candidate with healthy digits."""
+                       healthy=_font_digits_healthy,
+                       bundled_family=_AUTO) -> QFont:
+    """Base font for the whole app: bundled Inter first, then the probed
+    system chain. `bundled_family` accepts an explicit name/"" for tests
+    (``_AUTO`` = load the bundled font, the default in the app)."""
     log = logging.getLogger("font")
+    if bundled_family is _AUTO:
+        bundled_family = _load_bundled_font()
     size = app.font().pointSize()
     if size <= 0:
         size = 9
     try:
-        from PyQt6.QtGui import QFontDatabase
         installed = set(QFontDatabase.families())
     except Exception:  # offscreen/no font DB — log "?" instead of crashing
         installed = set()
+    candidates = []
+    if bundled_family:
+        candidates.append(bundled_family)
     for fam in APP_FONT_CANDIDATES:
+        if fam != bundled_family and fam not in candidates:
+            candidates.append(fam)
+    for fam in candidates:
         f = QFont(fam, size)
         resolved = QFontInfo(f).family()
         fm = QFontMetrics(f)
@@ -71,15 +110,14 @@ def _pick_healthy_font(app: QApplication,
             " ".join(f"{w:.2f}" for w in widths),
             "OK" if ok else "REJECTED (broken digit glyphs?)")
         if ok:
-            f.setFamilies(list(dict.fromkeys(
-                [fam] + APP_FONT_CANDIDATES)))  # CJK fallback chain
+            f.setFamilies(list(dict.fromkeys([fam] + _FONT_CJK_FALLBACKS)))
             log.info("font selected: %r (resolved %r, size %d)", fam, resolved, size)
             return f
     log.warning(
         "font: no healthy candidate (all digit probes abnormal); "
-        "falling back to %r anyway", APP_FONT_CANDIDATES[0])
-    f = QFont(APP_FONT_CANDIDATES[0], size)
-    f.setFamilies(list(dict.fromkeys([APP_FONT_CANDIDATES[0]] + APP_FONT_CANDIDATES)))
+        "falling back to %r anyway", candidates[0])
+    f = QFont(candidates[0], size)
+    f.setFamilies(list(dict.fromkeys([candidates[0]] + _FONT_CJK_FALLBACKS)))
     return f
 
 
@@ -192,10 +230,10 @@ def main():
 
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
-    # Pin the base font family before any widget is built (see the
-    # APP_FONT_CANDIDATES comment): a broken or substituted font face must
-    # not decide how the digits render. The picker probes each candidate's
-    # digit glyphs and logs everything to launcher.log (logger "font").
+    # Base font before any widget is built (see the APP_FONT_CANDIDATES
+    # comment): the bundled Inter TTF is the primary face — immune to the
+    # machine's font-store state — and every candidate is probed + logged
+    # to launcher.log (logger "font") for diagnostics.
     app.setFont(_pick_healthy_font(app))
     app.aboutToQuit.connect(
         lambda: logging.getLogger("shutdown").info("aboutToQuit"))
