@@ -12,29 +12,75 @@ def _get_work_dir():
     return os.path.dirname(os.path.abspath(__file__))
 
 
-from PyQt6.QtGui import QFont, QIcon
+from PyQt6.QtGui import QFont, QFontInfo, QFontMetrics, QIcon
 from PyQt6.QtWidgets import QApplication
 
-# The app-wide base font is pinned to a guaranteed-present Windows family
-# (Segoe UI ships with every Windows Vista+ install) instead of whatever
-# the system's default UI font resolves to. On some machines the default
-# UI font (a substituted or corrupted "Microsoft YaHei UI") scrambles the
-# Latin DIGIT glyphs — 0→O, 4→×, 5→6, 8→≠, 9→女 — while letters stay
-# normal, so QSpinBox/QDoubleSpinBox values rendered as mojibake while
-# labels and explicitly-named fonts (Segoe UI title row, Consolas preview)
-# looked fine (reported 2026-09). Pinning the family means the broken
-# default face is never consulted for Latin text; CJK characters are not
-# in Segoe UI and fall back per character through the family list to a
-# system CJK font.
-APP_FONT_FAMILIES = ["Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", "Arial"]
+# The app-wide base font is picked at runtime from a list of
+# guaranteed-present Windows families (Segoe UI ships with every Windows
+# Vista+ install) instead of inheriting whatever the system's default UI
+# font resolves to. On some machines a font face with the right family name
+# is corrupted or substituted and scrambles the Latin DIGIT glyphs —
+# 0→O, 4→×, 5→6, 8→≠, 9→女 — while letters stay normal, so spinbox values
+# rendered as mojibake (reported 2026-09, still broken on v1.8.3 where the
+# family was pinned statically: the broken face IS what the name resolves
+# to on that machine — a third-party "font beautification" file apparently
+# registers under several family names at once, shadowing the real faces,
+# while the BOLD face and other files — Consolas preview, Segoe UI Symbol —
+# stay healthy). Each candidate is therefore probed: in a healthy
+# face the ASCII digits advance ~0.3–0.6em per glyph, while a face whose
+# digit code points map to CJK/symbol glyphs advances ~1em for them.
+# The probe rejects broken faces; every probe result (installed?, resolved
+# family, per-digit advance) is logged to launcher.log (logger "font") so
+# a report machine can be diagnosed from its log alone.
+APP_FONT_CANDIDATES = ["Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", "Arial", "Tahoma", "Verdana"]
+_DIGIT_PROBE = "0123456789"
+_DIGIT_MAX_ADVANCE_EM = 0.75
 
 
-def _app_base_font(app: QApplication) -> QFont:
-    """Base font for the whole app: pinned family, system point size."""
+def _font_digits_healthy(font: QFont) -> bool:
+    """True when every ASCII digit advances like a digit (not a wide glyph)."""
+    fm = QFontMetrics(font)
+    em = max(1, fm.height())
+    return all(fm.horizontalAdvance(ch) / em < _DIGIT_MAX_ADVANCE_EM
+               for ch in _DIGIT_PROBE)
+
+
+def _pick_healthy_font(app: QApplication,
+                       healthy=_font_digits_healthy) -> QFont:
+    """Base font for the whole app: first candidate with healthy digits."""
+    log = logging.getLogger("font")
     size = app.font().pointSize()
-    font = QFont(APP_FONT_FAMILIES[0], size if size > 0 else 9)
-    font.setFamilies(list(APP_FONT_FAMILIES))
-    return font
+    if size <= 0:
+        size = 9
+    try:
+        from PyQt6.QtGui import QFontDatabase
+        installed = set(QFontDatabase.families())
+    except Exception:  # offscreen/no font DB — log "?" instead of crashing
+        installed = set()
+    for fam in APP_FONT_CANDIDATES:
+        f = QFont(fam, size)
+        resolved = QFontInfo(f).family()
+        fm = QFontMetrics(f)
+        em = max(1, fm.height())
+        widths = [fm.horizontalAdvance(ch) / em for ch in _DIGIT_PROBE]
+        ok = healthy(f)
+        log.info(
+            "font candidate %r installed=%s resolved=%r pointsize=%d "
+            "digit-advance(em)=%s -> %s",
+            fam, fam in installed if installed else "?", resolved, size,
+            " ".join(f"{w:.2f}" for w in widths),
+            "OK" if ok else "REJECTED (broken digit glyphs?)")
+        if ok:
+            f.setFamilies(list(dict.fromkeys(
+                [fam] + APP_FONT_CANDIDATES)))  # CJK fallback chain
+            log.info("font selected: %r (resolved %r, size %d)", fam, resolved, size)
+            return f
+    log.warning(
+        "font: no healthy candidate (all digit probes abnormal); "
+        "falling back to %r anyway", APP_FONT_CANDIDATES[0])
+    f = QFont(APP_FONT_CANDIDATES[0], size)
+    f.setFamilies(list(dict.fromkeys([APP_FONT_CANDIDATES[0]] + APP_FONT_CANDIDATES)))
+    return f
 
 
 def _app_icon_path():
@@ -147,9 +193,10 @@ def main():
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
     # Pin the base font family before any widget is built (see the
-    # APP_FONT_FAMILIES comment): a broken or substituted system default
-    # UI font must not decide how the digits render.
-    app.setFont(_app_base_font(app))
+    # APP_FONT_CANDIDATES comment): a broken or substituted font face must
+    # not decide how the digits render. The picker probes each candidate's
+    # digit glyphs and logs everything to launcher.log (logger "font").
+    app.setFont(_pick_healthy_font(app))
     app.aboutToQuit.connect(
         lambda: logging.getLogger("shutdown").info("aboutToQuit"))
     # Window title-bar icon: PyInstaller's spec icon only covers the EXE
