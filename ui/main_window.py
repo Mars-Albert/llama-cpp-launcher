@@ -676,9 +676,8 @@ class MainWindow(QMainWindow):
         self.model_browser = ModelBrowser(search_dir=self.model_dir)
         self.model_browser.model_selected.connect(self._on_model_selected)
         self.model_browser.mmproj_selected.connect(self._on_mmproj_selected)
-        layout.addWidget(self.model_browser)
 
-        layout.addWidget(self._create_model_info_group())
+        model_info_group = self._create_model_info_group()
 
         self.preset_group = QGroupBox(t("📦 预设管理"))
         preset_layout = QVBoxLayout(self.preset_group)
@@ -710,7 +709,10 @@ class MainWindow(QMainWindow):
         preset_io.addWidget(self.btn_export)
         preset_layout.addLayout(preset_io)
 
+        # Preset management on top, then the model browser + model info
         layout.addWidget(self.preset_group)
+        layout.addWidget(self.model_browser)
+        layout.addWidget(model_info_group)
         layout.addStretch()
         return widget
 
