@@ -17,14 +17,24 @@ from PyQt6.QtWidgets import QApplication
 
 # The app-wide base font comes from the **bundled Inter TTF** first
 # (assets/fonts/Inter-Regular.ttf, OFL license), registered at startup via
-# QFontDatabase.addApplicationFont: it is loaded from a file inside the exe,
-# so no state of the machine's font store can affect it. History (user
-# report 2026-09/10): one machine scrambled the Latin DIGIT glyphs (0→O,
-# 4→×, 5→6, 8→≠, 9→女) while letters stayed normal — spinbox values were
-# mojibake; static family pinning (Segoe UI, v1.8.3) did not help, i.e. the
-# broken face IS what those family names resolve to there (a third-party
-# font file registering under several family names at once). A bundled font
-# cannot be shadowed by name, so digits/Latin always render from our file.
+# QFontDatabase.addApplicationFont. The TTF's family name is NOT "Inter" but
+# the private "LlamaCPPLauncher" (name table renamed in-repo; it is still
+# the Inter 4.001 face). Why: the name "Inter" is squat-able — the report
+# machine's font store (2026-09/10 user reports) carries a third-party
+# "font beautification" file registered under several common family names at
+# once, with scrambled Latin DIGIT glyphs (0→O,
+# 4→×, 5→6, 8→≠, 9→女; letters and CJK stay intact). While that file
+# claimed the name "Inter", Qt's per-glyph resolution of the ambiguous
+# family pulled some digits from our bundled file (healthy) and others from
+# the fake (mojibake) — spinbox values rendered ×O/≠O≠/I while
+# buttons/labels looked fine, and the digit-ADVANCE probe below cannot catch
+# such narrow-glyph swaps (O/×/≠ advance like normal digits). A private
+# family name cannot be plausibly squatted, so the bundled file resolves
+# unambiguously and digits/Latin always render from our file. History: a
+# static family pin (Segoe UI, v1.8.3) did not help — the broken face IS
+# what those names resolve to there; the first bundled-font fix (family
+# still "Inter") was still collision-prone (reproduced 2026-10: fake
+# "Inter" + bundled Inter → per-glyph mixed mojibake).
 # CJK characters (absent from Inter) fall back per character through the
 # family list to a system CJK font (CJK rendered fine on the report
 # machine). As a second layer every candidate is still probed — in a
@@ -47,7 +57,9 @@ def _bundled_font_path() -> str:
 
 
 def _load_bundled_font() -> str:
-    """Register the bundled Inter font; return its family name or ""."""
+    """Register the bundled UI font (Inter, private family name
+    "LlamaCPPLauncher" — see the module comment); return its family name
+    or ""."""
     log = logging.getLogger("font")
     path = _bundled_font_path()
     if not os.path.exists(path):
@@ -77,7 +89,7 @@ _AUTO = object()
 def _pick_healthy_font(app: QApplication,
                        healthy=_font_digits_healthy,
                        bundled_family=_AUTO) -> QFont:
-    """Base font for the whole app: bundled Inter first, then the probed
+    """Base font for the whole app: bundled face (private family name) first, then the probed
     system chain. `bundled_family` accepts an explicit name/"" for tests
     (``_AUTO`` = load the bundled font, the default in the app)."""
     log = logging.getLogger("font")
@@ -231,9 +243,10 @@ def main():
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
     # Base font before any widget is built (see the APP_FONT_CANDIDATES
-    # comment): the bundled Inter TTF is the primary face — immune to the
-    # machine's font-store state — and every candidate is probed + logged
-    # to launcher.log (logger "font") for diagnostics.
+    # comment): the bundled Inter TTF (private family name "LlamaCPPLauncher"
+    # — immune to name-squatted faces in the machine's font store) is the
+    # primary face, and every candidate is probed + logged to launcher.log
+    # (logger "font") for diagnostics.
     app.setFont(_pick_healthy_font(app))
     app.aboutToQuit.connect(
         lambda: logging.getLogger("shutdown").info("aboutToQuit"))

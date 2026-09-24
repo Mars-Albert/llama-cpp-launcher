@@ -1,16 +1,21 @@
 # -*- coding: utf-8 -*-
-"""App base-font selection: bundled Inter TTF first, probed system chain second.
+"""App base-font selection: bundled font (private family name) first, probed system chain second.
 
 The primary base font is the **bundled** assets/fonts/Inter-Regular.ttf
-(OFL, registered at startup via QFontDatabase.addApplicationFont) — a file
-inside the exe cannot be shadowed/corrupted by the machine's font store.
-User report 2026-09/10: a machine scrambled the Latin DIGIT glyphs
-(0→O, 4→×, 5→6, 8→≠, 9→女) while letters stayed normal; static family
-pinning (v1.8.3) did not help because the broken face IS what the family
-name resolves to there. As a second layer every candidate's digit glyphs
-are probed (a healthy face advances digits ~0.3–0.6em; a face mapping
-digits to wide CJK/symbol glyphs advances ~1em) and all probes are logged
-to launcher.log (logger "font").
+(OFL, registered at startup via QFontDatabase.addApplicationFont). Its
+family name is the private "LlamaCPPLauncher", not "Inter": a report
+machine's font store carried a third-party "font beautification" file
+registered under common family names (2026-09/10 user reports) with
+scrambled Latin DIGIT glyphs (0→O, 4→×, 5→6, 8→≠, 9→女; letters and CJK
+intact). While that file claimed the name "Inter", Qt resolved the
+ambiguous family per glyph — some digits from our bundled file (healthy),
+the rest from the fake (mojibake: spinboxes ×O/≠O≠/I while buttons/labels
+looked fine) — and the narrow-glyph swaps even pass the digit-advance
+probe. A private family name cannot be plausibly squatted, so the bundled
+file resolves unambiguously. As a second layer every system candidate's
+digit glyphs are still probed (a healthy face advances digits ~0.3–0.6em;
+a face mapping digits to wide CJK/symbol glyphs advances ~1em) and all
+probes are logged to launcher.log (logger "font").
 """
 import os
 
@@ -50,7 +55,11 @@ def test_load_bundled_font_returns_family(app):
     import main as main_mod
     fam = main_mod._load_bundled_font()
     assert fam, "bundled font must load and report a family"
-    assert "inter" in fam.lower()
+    # the bundled TTF must register under the PRIVATE family name — never
+    # "Inter": a name-squatted machine font claiming "Inter" used to win
+    # per-glyph resolution and scramble the digit glyphs (2026-10 report)
+    assert fam == "LlamaCPPLauncher", fam
+    assert fam.lower() != "inter"
 
 
 def test_bundled_font_path_dev():

@@ -13,7 +13,9 @@ a = Analysis(
     # Bundle the window icon and the UI font as data files so main.py can
     # apply them at runtime (the EXE's PE icon below only covers
     # file-explorer/shortcut/taskbar, not Qt's title-bar icon; the bundled
-    # Inter TTF is the app's primary font face — see main.py comments). 
+    # Inter TTF is the app's primary font face, registered under the
+    # private family name "LlamaCPPLauncher" (renamed in-repo so a
+    # name-squatted machine font cannot shadow it — see main.py comments).
     # Both extract under <_MEIPASS>/assets/.
     datas=(
         [('assets/icon.ico', 'assets')] if os.path.exists('assets/icon.ico') else []
