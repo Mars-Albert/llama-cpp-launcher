@@ -35,6 +35,13 @@ TITLE_BAR_HEIGHT = 44
 # screen with nothing left to grab — _clamp_to_screen() keeps at least this
 # many px of the top row visible.
 TITLE_GRAB_MIN = 44
+# The QSS `QSplitter::handle { width: 3px; height: 3px }` rule (ui/
+# main_window.py _THEME_TEMPLATE) makes the handle occupy real layout
+# width, so any setSizes() request must fit within (splitter width −
+# handle); a request whose sum includes the handle gets proportionally
+# scaled down and the left side lands ~1px short of the requested width.
+# Keep in sync with the QSS rule.
+SPLITTER_HANDLE_W = 3
 # E3 log window. Per level: each log level (D/I/W/E/F, plus the prefix-less
 # group) keeps its own most-recent-N window, so a narrow filter view is never
 # starved by a flood of hidden levels (a -lv 5 debug burst used to evict the

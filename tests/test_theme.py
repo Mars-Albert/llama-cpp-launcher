@@ -128,21 +128,26 @@ def test_combo_popup_container_follows_theme(tmp_path, monkeypatch):
         app.setStyleSheet("")
 
 
-def test_bottom_tabs_qss_follows_theme(tmp_path, monkeypatch):
-    """E5 follow-up: the bottom log/info tab widget carries its own (inline)
-    QSS; it must be theme-aware, not a hardcoded light sheet."""
+def test_right_tabs_use_app_theme_with_dark_content(tmp_path, monkeypatch):
+    """E15: the right-column tab widget (参数配置 / 日志输出 / 运行信息)
+    carries no widget-level QSS — the app-level theme sheet styles its
+    tab bar/pane (pre-E15 the bottom tab widget had a separate
+    theme-aware sheet, now gone with the tab reorganisation). The
+    log/info content keeps its always-dark inline QSS in both themes."""
     app = _qapp()
     monkeypatch.setattr(CC, "SETTINGS_FILE", tmp_path / "settings.json")
     from core.defaults import _FALLBACK_DEFAULTS
     w = MainWindow(work_dir=None, defaults=dict(_FALLBACK_DEFAULTS), theme="dark")
     try:
-        # dark: catppuccin crust/mantle/accent, no light leftovers
-        assert "#11111b" in w.tab_widget.styleSheet()
-        assert "#ffffff" not in w.tab_widget.styleSheet()
-        # toggle to light: the pre-E5 sheet, verbatim
+        assert w.tab_widget.styleSheet() == ""
+        # the log/info content stays always-dark under the dark theme
+        assert "#121212" in w.log_output.styleSheet()
+        assert "#121212" in w.info_display.styleSheet()
+        # toggle to light: still no widget-level sheet, content still dark
         w._theme_action.trigger()
-        assert "#ffffff" in w.tab_widget.styleSheet()
-        assert "#11111b" not in w.tab_widget.styleSheet()
+        assert w.theme == "light"
+        assert w.tab_widget.styleSheet() == ""
+        assert "#121212" in w.log_output.styleSheet()
     finally:
         w.close()
         app.setStyleSheet("")

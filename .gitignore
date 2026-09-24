@@ -13,6 +13,9 @@ CLAUDE.md
 dist/
 build/
 
+# Windows reserved-name junk (0-byte; can't be removed normally)
+nul
+
 # Reference docs
 gguf.md
 verbose.txt

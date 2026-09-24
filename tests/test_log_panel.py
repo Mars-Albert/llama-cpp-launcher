@@ -349,7 +349,8 @@ def test_search_finds_counts_and_not_found(window):
     # isHidden(): the fixture window is never shown(), so isVisible()
     # would stay False no matter what
     assert not w.log_search_bar.isHidden()
-    assert w.tab_widget.currentIndex() == 0
+    # E15: 日志输出 is tab 1 (tab 0 is 参数配置)
+    assert w.tab_widget.currentIndex() == 1
 
     w.log_search_edit.setText("hello")
     w._log_search_find(True)

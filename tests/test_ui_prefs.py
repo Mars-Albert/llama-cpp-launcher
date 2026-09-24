@@ -60,7 +60,8 @@ def test_mainwindow_restores_valid_prefs(temp_settings, monkeypatch):
     assert w.mode_combo.currentIndex() == 1
     assert w.is_advanced is True
     assert w.advanced_panel.tabs.currentIndex() == 4
-    assert w.tab_widget.currentIndex() == 1
+    # E15 legacy mapping: pre-E15 bottom_tab 1 (运行信息) → right tab 2
+    assert w.tab_widget.currentIndex() == 2
     # show the window so showEvent applies the saved left width against the
     # real splitter width. The offscreen restoreGeometry quirk clamps the
     # window to ~1100px, which is too narrow for the right panel's layout
@@ -130,7 +131,10 @@ def test_close_event_saves_ui_state(temp_settings):
     prefs = CC.load_ui_prefs()
     assert prefs["mode"] == 1
     assert prefs["adv_tab"] == 2
-    assert prefs["bottom_tab"] == 0
+    # E15: the bottom_tab pref was replaced by right_tab (0=参数配置 is
+    # the default tab)
+    assert prefs["right_tab"] == 0
+    assert "bottom_tab" not in prefs
     assert isinstance(prefs["splitter"], list) and len(prefs["splitter"]) == 2
     # E14: geometry is saved as plain [x, y, w, h] client-geometry numbers
     # (the old base64 saveGeometry blob was silently discarded pre-show).

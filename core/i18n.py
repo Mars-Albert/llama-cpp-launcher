@@ -66,6 +66,7 @@ _EN = {
 
     # Command preview & controls
     "📝 启动命令预览": "📝 Launch Command Preview",
+    "⚙️ 参数配置": "⚙️ Parameter Config",
     "▶ 启动服务": "▶ Start",
     "■ 停止服务": "■ Stop",
     "📋 复制命令": "📋 Copy Cmd",

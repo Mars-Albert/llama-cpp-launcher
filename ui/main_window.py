@@ -14,9 +14,9 @@ from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QSplitter,
     QPushButton, QLabel, QPlainTextEdit, QComboBox, QInputDialog,
     QMessageBox, QFileDialog, QStatusBar,
-    QCheckBox, QGroupBox, QTabWidget, QTextEdit,
+    QCheckBox, QGroupBox, QTabWidget, QTextEdit, QSpinBox, QDoubleSpinBox,
     QDialog, QDialogButtonBox, QFormLayout, QLineEdit, QToolButton,
-    QScrollArea, QFrame, QMenuBar
+    QScrollArea, QFrame, QMenuBar, QSizePolicy
 )
 import heapq
 from collections import deque
@@ -39,6 +39,7 @@ from core.constants import (
     WINDOW_WIDTH, WINDOW_HEIGHT, MIN_WINDOW_WIDTH, MIN_WINDOW_HEIGHT,
     SHADOW_MARGIN, CARD_RADIUS, CARD_CONTENT_INSET, TITLE_BAR_HEIGHT,
     TITLE_GRAB_MIN,
+    SPLITTER_HANDLE_W,
     LOG_MAX_BLOCK_COUNT, LOG_DOC_MAX_BLOCK_COUNT,
     UNDO_HISTORY_MAX, PREVIEW_TIMER_MS, UNDO_DEBOUNCE_MS,
     VERSION_CHECK_TIMEOUT_S,
@@ -65,6 +66,25 @@ try:
     from build_config import VERSION as APP_VERSION
 except ImportError:
     APP_VERSION = "dev"
+
+
+class _ParamScrollArea(QScrollArea):
+    """E15 follow-up (user request 2026-10): the 参数配置 column's extra
+    vertical space belongs to the command preview, not the parameter
+    panel. A plain QScrollArea re-derives its size policy from its
+    content during layout passes (Qt's calcScrollBars), which wipes any
+    one-time ``setSizePolicy`` (measured: Expanding again after the first
+    show) — so the vertical policy is pinned in the ``sizePolicy()``
+    override itself, which the layout reads on every pass: the panel
+    keeps its natural height (E11: full rows, never squashed, no vertical
+    scroll) and the stretchable preview absorbs the rest.
+    """
+
+    def sizePolicy(self):
+        sp = super().sizePolicy()
+        if sp.verticalPolicy() != QSizePolicy.Policy.Preferred:
+            sp.setVerticalPolicy(QSizePolicy.Policy.Preferred)
+        return sp
 
 
 class _ThemedStatusBar(QStatusBar):
@@ -95,24 +115,38 @@ class _ThemedStatusBar(QStatusBar):
         # The frameless window is edge-resized by the app-level filter;
         # the native grip would also paint square into the corner band.
         self.setSizeGripEnabled(False)
+        # (label, left-margin) pairs whose bottom margin must follow the
+        # shadow band (set_band_inset). The message label is tracked here;
+        # the always-visible run-state labels are added via add_band_label
+        # (E15, from _create_status_bar).
+        self._band = CARD_CONTENT_INSET
+        self._band_labels = []
         self._msg_label = QLabel(self)
         self._msg_label.setObjectName("statusMsg")
         # Bottom margin = the shadow band (synced by set_band_inset): it
         # pushes the text up onto the card face's visible strip.
-        self._msg_label.setContentsMargins(self._LEFT_MARGIN, 0, 0,
-                                           CARD_CONTENT_INSET)
+        self.add_band_label(self._msg_label, self._LEFT_MARGIN)
         self.addWidget(self._msg_label)
         self._msg_timer = QTimer(self)
         self._msg_timer.setSingleShot(True)
         self._msg_timer.timeout.connect(lambda: self._msg_label.setText(""))
 
+    def add_band_label(self, label, left_margin):
+        """Track a layout-managed label whose bottom margin must follow
+        the shadow band (E15: the run-state labels added from
+        _create_status_bar)."""
+        self._band_labels.append((label, left_margin))
+        label.setContentsMargins(left_margin, 0, 0, self._band)
+
     def set_band_inset(self, band):
-        """Sync the label's bottom margin to the band width *band*
-        (CARD_CONTENT_INSET normally, 0 when maximised — the card then
-        fills the window, so no inset is needed). The bar's height
+        """Sync every tracked label's bottom margin to the band width
+        *band* (CARD_CONTENT_INSET normally, 0 when maximised — the card
+        then fills the window, so no inset is needed). The bar's height
         follows the label's sizeHint, so the text re-centres on the
         visible card strip in both states."""
-        self._msg_label.setContentsMargins(self._LEFT_MARGIN, 0, 0, band)
+        self._band = band
+        for label, left in self._band_labels:
+            label.setContentsMargins(left, 0, 0, band)
 
     def showMessage(self, message, timeout=0):
         self._msg_label.setText(message)
@@ -123,40 +157,6 @@ class _ThemedStatusBar(QStatusBar):
         # QStatusBar.currentMessage() reads the internal label we no
         # longer use — mirror our own so the public API stays truthful
         return self._msg_label.text()
-
-
-def _ensure_arrow_image(direction: str, color: str) -> Path:
-    """Return a cached PNG of a small triangle arrow in *color*.
-
-    Qt Style Sheets cannot render the CSS border-triangle trick on
-    ``QComboBox::down-arrow`` / ``QSpinBox::up-arrow`` subcontrols —
-    once QSS takes over, native triangles are not drawn (borders draw a
-    rectangle, and unstyled spinbox arrows are simply missing). So the
-    arrows are real images, generated once per color and cached in
-    CONFIG_DIR (same dir as logs/settings).
-
-    ``direction`` is ``"up"`` or ``"down"``. The down triangle keeps the
-    legacy ``combo_arrow_*.png`` filename so existing caches are reused.
-    """
-    hex_color = color.lstrip("#").lower()
-    name = "combo_arrow" if direction == "down" else "spin_arrow_up"
-    path = CONFIG_DIR / f"{name}_{hex_color}.png"
-    if path.exists():
-        return path
-    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-    img = QImage(12, 8, QImage.Format.Format_ARGB32)
-    img.fill(Qt.GlobalColor.transparent)
-    painter = QPainter(img)
-    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-    painter.setPen(Qt.PenStyle.NoPen)
-    painter.setBrush(QColor(color))
-    if direction == "down":
-        painter.drawPolygon(QPolygon([QPoint(1, 1), QPoint(11, 1), QPoint(6, 7)]))
-    else:
-        painter.drawPolygon(QPolygon([QPoint(6, 1), QPoint(1, 7), QPoint(11, 7)]))
-    painter.end()
-    img.save(str(path))
-    return path
 
 
 def _ensure_check_image() -> Path:
@@ -469,9 +469,12 @@ class MainWindow(QMainWindow):
         the preset buttons unclipped, narrow enough that the parameter panel
         keeps the lion's share. The clamp keeps the right side ≥900px (its
         content minimum is ~850) and stays inside the left panel's 180–500
-        limits; the right side gets the rest.
+        limits; the right side gets the rest. The 3px QSS splitter handle
+        eats layout width out of the content total (SPLITTER_HANDLE_W):
+        a request whose sum includes the handle makes QSplitter scale both
+        sides down proportionally and the left panel lands ~1px short.
         """
-        content = width - 2 * CARD_CONTENT_INSET
+        content = width - 2 * CARD_CONTENT_INSET - SPLITTER_HANDLE_W
         left = max(300, min(400, content - 900))
         return [left, max(100, content - left)]
 
@@ -512,7 +515,6 @@ class MainWindow(QMainWindow):
         # model names and the preset buttons clipped).
         self.splitter.setSizes(self._default_splitter_sizes(self._default_w))
         main_layout.addWidget(self.splitter)
-
         self._create_menu_bar()
         self._create_status_bar()
         # E12/E13: frameless window chrome — flags + edge-resize overlay.
@@ -528,8 +530,10 @@ class MainWindow(QMainWindow):
         # E13: watch our own WindowStateChange / Move events (card band
         # collapse + keep-on-screen clamping — see eventFilter)
         self.installEventFilter(self)
+        self._card_band = None
         self._set_card_inset(CARD_CONTENT_INSET)
 
+        self._apply_field_heights()
         self._sync_panel_min()
 
     # ------------------------------------------------- E13: card chrome
@@ -546,7 +550,12 @@ class MainWindow(QMainWindow):
         its bottom one is synced here, since the bar sits at the window's
         very bottom and would otherwise span the shadow band below the
         card (the text would straddle the card's bottom border).
+
+        ``m`` is recorded on ``_card_band`` so ``_on_card_state_changed``
+        can skip the no-op re-sync (it now runs on every top-level
+        resize, not only on state flips).
         """
+        self._card_band = m
         self._title_bar.setFixedHeight(TITLE_BAR_HEIGHT + m)
         self._title_bar._row.setContentsMargins(10 + m, m, 6 + m, 0)
         self._central_layout.setContentsMargins(m, 0, m, 0)
@@ -554,14 +563,53 @@ class MainWindow(QMainWindow):
         if isinstance(sb, _ThemedStatusBar):
             sb.set_band_inset(m)
 
+    def _card_full_state(self):
+        """Whether the card should fill the window edge-to-edge (square,
+        no shadow band): fullscreen, or maximized *with the geometry
+        actually covering the screen*.
+
+        A frameless top-level on Windows can keep ``Qt.WindowMaximized``
+        stuck in ``windowState()`` after the WM restores it (our own
+        restore button's ``showNormal`` / a taskbar click — no follow-up
+        WindowStateChange clears the flag). The flag then keeps
+        ``paintEvent`` on the band-less square card and the margins at 0
+        for a normal-sized window (user report 2026-10: restored window
+        rendered as a plain square rectangle — no rounding, no shadow).
+        Trusting the flag only while the window really covers its screen
+        makes every consumer geometry-robust; the Resize handler
+        re-syncs the band so a stuck flag self-heals on the restore's
+        own geometry change.
+        """
+        if self.isFullScreen():
+            return True
+        if not self.isMaximized():
+            return False
+        scr = self.screen()
+        if scr is None:
+            return True
+        avail = scr.availableGeometry()
+        fr = self.frameGeometry()
+        return (fr.width() >= avail.width() - 2
+                and fr.height() >= avail.height() - 2)
+
     def _on_card_state_changed(self):
         # Maximized / fullscreen: the band collapses and the card fills
-        # the screen edge-to-edge (driven from eventFilter on
-        # WindowStateChange, so Win+Up / Aero Snap flips are covered).
-        full = self.isMaximized() or self.isFullScreen()
-        self._set_card_inset(0 if full else CARD_CONTENT_INSET)
+        # the screen edge-to-edge (square — the DWM rounds a maximized
+        # window on Win11, which is the look we want there; normal-state
+        # DWM rounding hits the transparent band and is invisible, so
+        # there is deliberately no ``DwmSetWindowAttribute`` opt-out).
+        # Driven from eventFilter on WindowStateChange (Win+Up / Aero
+        # Snap flips) AND re-checked on every top-level resize (a stuck
+        # Maximized flag self-heals on the restore's geometry change).
+        band = 0 if self._card_full_state() else CARD_CONTENT_INSET
+        if band == self._card_band:
+            return
+        self._set_card_inset(band)
         self._chrome_cache = None
         self.update()
+        tb = getattr(self, "_top_bar", None)
+        if tb is not None and hasattr(tb, "refresh_max_state"):
+            tb.refresh_max_state()
 
     def _clamp_to_screen(self):
         """E13: keep a frameless window grabbable after being dragged away.
@@ -571,10 +619,11 @@ class MainWindow(QMainWindow):
         geometry) partially off-screen — past a point where nothing is
         left to grab. Keep at least TITLE_GRAB_MIN px of the top row and
         a 24 px sliver on the other sides visible. Maximized / fullscreen
-        rects are WM-managed and skipped; a window larger than its screen
-        has no valid clamp.
+        rects are WM-managed and skipped (geometry-checked — a stuck
+        Maximized flag must not disable the clamp for a normal window);
+        a window larger than its screen has no valid clamp.
         """
-        if self.isMaximized() or self.isFullScreen():
+        if self._card_full_state():
             return
         from PyQt6.QtGui import QGuiApplication
         screen = (QGuiApplication.screenAt(self.frameGeometry().center())
@@ -652,7 +701,7 @@ class MainWindow(QMainWindow):
         # paint their content on top; their edge strips are transparent
         # so the face shows through the rounded corners.
         p = QPainter(self)
-        if self.isMaximized() or self.isFullScreen():
+        if self._card_full_state():
             # Band collapsed: the card fills the screen edge-to-edge
             # (square — the DWM rounds a maximized window's corners on
             # Windows 11, which is the look we want there).
@@ -709,18 +758,45 @@ class MainWindow(QMainWindow):
         preset_io.addWidget(self.btn_export)
         preset_layout.addLayout(preset_io)
 
-        # Preset management on top, then the model browser + model info
+        # Preset management on top, then the model browser (its list
+        # absorbs the slack — a file browser fills the panel height; a
+        # trailing stretch used to leave a face-coloured gap below the
+        # 模型信息 group whenever the window was taller than the
+        # content) + the model info group.
         layout.addWidget(self.preset_group)
-        layout.addWidget(self.model_browser)
+        layout.addWidget(self.model_browser, 1)
         layout.addWidget(model_info_group)
-        layout.addStretch()
         return widget
 
     def _create_right_panel(self):
+        """E15: the right column is a 3-tab widget — 参数配置 / 日志输出 /
+        运行信息 — so every tab owns the column's full height. Before E15
+        the log/info tabs shared the bottom slice left over from the
+        stacked parameter area: on a 1080p screen (window ~940px tall)
+        the log got ~150-250px. Now each tab gets the whole column
+        (~800px+).
+
+        Tab 1 (参数配置) carries the old stacked blocks (mode bar,
+        parameter area, command preview, control bar) unchanged and keeps
+        E11's rules: the parameter area never scrolls vertically and the
+        window minimum follows the page's hard minimum (see
+        _sync_panel_min). The run-state indicator + runtime (old
+        control-bar children) moved to the main status bar so they stay
+        visible on every tab.
+        """
         widget = QWidget()
+        self._right_panel = widget
         layout = QVBoxLayout(widget)
         layout.setContentsMargins(4, 4, 4, 4)
-        layout.setSpacing(6)
+        layout.setSpacing(0)
+
+        self.tab_widget = QTabWidget()
+
+        # ---- tab 1: 参数配置 (the pre-E15 stacked right column) ----
+        self.params_tab = QWidget()
+        ptab = QVBoxLayout(self.params_tab)
+        ptab.setContentsMargins(4, 4, 4, 4)
+        ptab.setSpacing(6)
 
         mode_bar = QHBoxLayout()
         self.mode_label = QLabel(t("模式:"))
@@ -754,8 +830,7 @@ class MainWindow(QMainWindow):
         self.btn_reset.setFixedHeight(28)
         self.btn_reset.clicked.connect(self._reset_to_defaults)
         mode_bar.addWidget(self.btn_reset)
-        layout.addLayout(mode_bar)
-
+        ptab.addLayout(mode_bar)
         self.stacked = QWidget()
         self.stacked_layout = QVBoxLayout(self.stacked)
         self.stacked_layout.setContentsMargins(0, 0, 0, 0)
@@ -763,6 +838,11 @@ class MainWindow(QMainWindow):
         self.basic_panel = BasicPanel(defaults=self.defaults)
         self.advanced_panel = AdvancedPanel(defaults=self.defaults, chat_templates=self.chat_templates)
         self.advanced_panel.hide()
+        # E11 (advanced mode): the visible advanced tab determines the
+        # scroll area's hard minimum — re-sync when the user switches tabs
+        # (the quick-grid re-wrap trigger only covers the basic panel).
+        self.advanced_panel.tabs.currentChanged.connect(
+            lambda _i: self._sync_panel_min())
 
         self.stacked_layout.addWidget(self.basic_panel)
         self.stacked_layout.addWidget(self.advanced_panel)
@@ -775,12 +855,25 @@ class MainWindow(QMainWindow):
         # area is kept for the horizontal direction only: when the window
         # is very narrow (or the left pane is dragged wide), the fixed rows
         # scroll sideways instead of clipping.
-        self.panel_scroll = QScrollArea()
+        self.panel_scroll = _ParamScrollArea()
         self.panel_scroll.setWidgetResizable(True)
         self.panel_scroll.setFrameShape(QFrame.Shape.NoFrame)
         self.panel_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.panel_scroll.setWidget(self.stacked)
-        layout.addWidget(self.panel_scroll)
+        # E15 follow-up (user request 2026-10): a draggable divider between
+        # the parameter area and the command preview — a vertical
+        # QSplitter, like the left/right panel's (same 3px line style —
+        # the QSS QSplitter::handle rule carries both width and height). The top side keeps the
+        # E11 hard minimum (a drag clamps at the panel's natural height —
+        # rows can never be squashed); the bottom keeps the 80px floor.
+        # Stretch factors (0, 1): extra window height flows to the preview.
+        # The split persists as ui.cmd_split (applied in the showEvent
+        # retry — a setSizes before the first layout pass is silently
+        # ignored, the same trap as the main splitter's saved width).
+        self.cmd_split = QSplitter(Qt.Orientation.Vertical)
+        self.cmd_split.setObjectName("paramSplitter")
+        self.cmd_split.setHandleWidth(3)
+        self.cmd_split.addWidget(self.panel_scroll)
 
         # E11 (option A): the viewport is resized *before* the panel's own
         # layout pass, so reacting here lets us re-wrap the quick-toggles
@@ -792,19 +885,34 @@ class MainWindow(QMainWindow):
 
         self._update_panel_content_min()
 
+        self.cmd_box = QWidget()
+        self.cmd_box_layout = QVBoxLayout(self.cmd_box)
+        self.cmd_box_layout.setContentsMargins(0, 0, 0, 0)
+        self.cmd_box_layout.setSpacing(6)
         self.cmd_label = QLabel(t("📝 启动命令预览"))
         self.cmd_label.setStyleSheet("font-weight: bold; color: #7aa2f7; font-size: 13px;")
-        layout.addWidget(self.cmd_label)
+        self.cmd_box_layout.addWidget(self.cmd_label)
 
+        # Stretchable (user request 2026-10): the preview absorbs the
+        # column's extra vertical space instead of a dead gap; the 80px
+        # floor keeps the minimum-height layout unchanged.
         self.cmd_preview = QPlainTextEdit()
         self.cmd_preview.setReadOnly(True)
         self.cmd_preview.setFont(QFont("Consolas", 9))
         self.cmd_preview.setStyleSheet("background: #121212; color: #7ab0e0; border: 1px solid #444; border-radius: 4px; padding: 4px;")
-        self.cmd_preview.setFixedHeight(80)
+        self.cmd_preview.setMinimumHeight(80)
         self.cmd_preview.setWordWrapMode(QTextOption.WrapMode.WordWrap)
         self.cmd_preview.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.cmd_preview.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        layout.addWidget(self.cmd_preview)
+        self.cmd_box_layout.addWidget(self.cmd_preview, 1)
+        self.cmd_split.addWidget(self.cmd_box)
+        # setCollapsible only after both children exist (index-based —
+        # Qt logs "Index out of range" for calls before addWidget)
+        self.cmd_split.setCollapsible(0, False)
+        self.cmd_split.setCollapsible(1, False)
+        self.cmd_split.setStretchFactor(0, 0)
+        self.cmd_split.setStretchFactor(1, 1)
+        ptab.addWidget(self.cmd_split)
 
         control_bar = QHBoxLayout()
         # One visual language for all four (objectName -> dedicated gradient
@@ -865,6 +973,10 @@ class MainWindow(QMainWindow):
         self.drift_button.setVisible(False)
         control_bar.addWidget(self.drift_button)
 
+        # The run-state indicator + runtime trail the control bar (E15
+        # briefly moved them to the main status bar — reverted per user
+        # report: on their machine the status-bar area rendered as a
+        # wrong white box, so the labels went back to their old spot).
         self.status_indicator = QLabel(t("⏸ 未运行"))
         self.status_indicator.setObjectName("statusStopped")
         self.status_indicator.setStyleSheet("color: #6b7280; font-weight: bold; font-size: 13px;")
@@ -874,14 +986,7 @@ class MainWindow(QMainWindow):
         self.run_time_label.setStyleSheet("color: #6b7280; font-size: 12px;")
         control_bar.addWidget(self.run_time_label)
 
-        layout.addLayout(control_bar)
-
-        self.tab_widget = QTabWidget()
-        # The bottom log/info tabs carry their own QSS (the log area is always
-        # dark in both themes); it must be theme-aware or it overrides the app
-        # stylesheet with light colors in dark mode (E5 follow-up).
-        self.tab_widget.setStyleSheet(self._bottom_tabs_qss(self.theme))
-
+        ptab.addLayout(control_bar)
         self.log_output = QPlainTextEdit()
         self.log_output.setReadOnly(True)
         self.log_output.setFont(QFont("Consolas", 10))
@@ -983,78 +1088,176 @@ class MainWindow(QMainWindow):
         """ + _DARK_SCROLLBAR_QSS)
         self.info_display.setHtml(empty_info_html())
 
+        # E15: tab assembly — 参数配置 first (the default tab), then the
+        # two former bottom tabs. The log/info content keeps its
+        # always-dark inline QSS on the content widgets themselves, so
+        # moving up one level into the theme-styled tab widget is purely
+        # visual.
+        self.log_tab = log_tab
+        self.tab_widget.addTab(self.params_tab, t("⚙️ 参数配置"))
         self.tab_widget.addTab(log_tab, t("📄 日志输出"))
         self.tab_widget.addTab(self.info_display, t("📊 运行信息"))
-        layout.addWidget(self.tab_widget, 1)
+        layout.addWidget(self.tab_widget)
 
         return widget
 
-    def _sync_panel_min(self):
-        """E11: keep the scrollable parameter area — and the window
-        minimum — in sync with the content's hard minimums.
+    def _apply_field_heights(self):
+        """Unify the single-line field heights (user request 2026-10: the
+        spinbox and combo heights no longer matched — the QSS-styled combo
+        was ~6px taller than the now-unstyled spinbox, breaking the row's
+        harmony in the ngl combo+spin composite row).
 
-        QScrollArea does not propagate its content's minimum *height* to
-        its own (it just squashes widgetResizable content), so the scroll
-        area is given an explicit minimum height equal to the basic
+        Both widget families render with the default (Fusion) style, but
+        their native sizeHints come from different formulas (spinbox
+        ~font+7, combo ~font+8 plus frame), leaving a visible ~3px step
+        in rows that carry both. Pin every QSpinBox / QDoubleSpinBox /
+        QComboBox in the parameter area to one common height — the tallest
+        live sizeHint among the representatives, so nothing is squashed
+        below its natural height and the value tracks the resolved app
+        font (DPI-safe). Only the frame height is pinned; the unstyled
+        rendering (and its font path) is untouched. Re-run after a
+        quick-toggles rebuild (new widgets — see _customize_quick_toggles).
+        """
+        h = max(self.basic_panel.ngl_spin.sizeHint().height(),
+                self.basic_panel.ngl_combo.sizeHint().height())
+        for widget in self._right_panel.findChildren(
+                (QSpinBox, QDoubleSpinBox, QComboBox)):
+            widget.setFixedHeight(h)
+
+    def _sync_panel_min(self):
+        """E11/E15: keep the parameter area — and the window minimum — in
+        sync with the content's hard minimums.
+
+        E11: QScrollArea does not propagate its content's minimum *height*
+        to its own (it just squashes widgetResizable content), so the
+        scroll area is given an explicit minimum height equal to the basic
         panel's hard minimum height (which equals the panel's natural
         height — see BasicPanel._rebuild_quick_toggles). Together with the
         live window minimum (the static MIN_WINDOW_* floors can be below
-        what the content needs on this font/DPI — the old 1100x700
-        minimum was, which is exactly what let the window shrink into
-        overlapping controls), the window can never be resized into a
-        state that squashes the rows.
+        what the content needs on this font/DPI), the window can never be
+        resized into a state that squashes the rows.
+
+        E15: the right column is a 3-tab widget (参数配置 / 日志输出 /
+        运行信息). Tab 1 keeps E11's rules — the parameter area never
+        scrolls vertically — so the page's hard minimum (mode bar +
+        panel + command preview + control bar) is pinned on the outer tab
+        widget (+ the tab bar) and the window minimum follows it; the
+        log/info tabs have far smaller minimums and never grow the window
+        minimum. WIDTH: the tab widget gets an explicit minimum width too
+        — the layout-derived width would include the quick-toggles grid's
+        *current column count* minimum (a moving target that self-locks
+        the window wide: a 1-row grid keeps the window wide enough to
+        stay 1-row, so the re-wrap that would raise the height minimum
+        never happens). The fixed content minimum (_panel_fixed_min_width)
+        is used instead; the grid re-wraps as the viewport narrows and
+        the re-wrap re-syncs this minimum. TRAP: a plain QWidget's
+        minimumSize() stays 0 until setMinimumSize() is called (Qt does
+        not fall back to the layout minimum) and QStackedLayout's minimum
+        only counts explicit minimums — so every page and the outer tab
+        widget get explicit minimums pinned from their live layout
+        minimums (same one-event-loop lag as E11, covered by the
+        changed-flag resync below).
         """
         self._update_panel_content_min()
         # The panel's natural height depends on the resolved font, so re-pin
         # it from the live layout every time (construction-time value is an
         # approximation; after the first show it is the real one).
         self.basic_panel.resync_min_height()
-        new_min = self.basic_panel.minimumHeight() + 2
+        # QScrollArea re-derives its size policy from its content during
+        # layout passes (Qt's calcScrollBars), wiping the one-time
+        # Preferred set at construction — re-assert here (every sync
+        # triggers a re-layout afterwards), or the extra column space
+        # stretches the panel instead of the command preview (user
+        # request 2026-10: no dead gap between the quick toggles and the
+        # preview when the window is tall).
+        _sp = self.panel_scroll.sizePolicy()
+        if _sp.verticalPolicy() != QSizePolicy.Policy.Preferred:
+            _sp.setVerticalPolicy(QSizePolicy.Policy.Preferred)
+            self.panel_scroll.setSizePolicy(_sp)
+        # The scroll area's explicit minimum must fit the TALLER of the two
+        # mode panels (E11 applies to both: at the window minimum the
+        # advanced tab's rows must not overflow the panel's bottom onto the
+        # command caption either) — not just the basic panel's quick-grid
+        # minimum.
+        new_min = max(self.basic_panel.minimumHeight(),
+                      self.advanced_panel.sizeHint().height()) + 2
         changed = new_min != self.panel_scroll.minimumHeight()
         self.panel_scroll.setMinimumHeight(new_min)
-        hint = self.minimumSizeHint()
-        # The window minimum height is computed directly as the sum of the
-        # right column's children minimums (+ menu/status bars, central
-        # margins) rather than from minimumSizeHint(): the hint
-        # under-reports the scroll area's explicit minimum, and a QVBox
-        # with a stretchy log-tab area squashes the scroll area (the
-        # most-expandable child) before the window is tall enough for the
-        # full panel.
-        right = self.panel_scroll.parentWidget().layout()
+        # E11/E15 staleness trap: the page layout's minimumSizeHint is
+        # cached and lags one event-loop pass behind the setMinimumHeight()
+        # above (reading it immediately returns the PREVIOUS minimum, and
+        # the changed-flag resync chain then converges on the stale value —
+        # the window minimum ended up ~17px short of the content and the
+        # 参数配置 page's children overlapped at the smallest size in
+        # advanced mode). Force the recompute before pinning.
+        self.params_tab.layout().invalidate()
+        self.params_tab.updateGeometry()
+
+        # E15: pin the page containers' and the outer tab widget's
+        # minimums explicitly. Trap: a plain QWidget's minimumSize() stays
+        # 0 until setMinimumSize() is called (Qt does NOT fall back to the
+        # layout minimum), and QStackedLayout's minimum only counts
+        # explicit minimums — without this the tab widget's minimum
+        # collapses to (0, tab bar) and the window minimum falls to the
+        # static floors, squashing the 参数配置 page at the smallest size.
+        # Height: each page's live layout minimum (the 参数配置 page's
+        # includes the panel scroll area's E11 explicit minimum; the log/
+        # info pages' are far smaller, so the max is tab 1). Width: the
+        # 参数配置 page's fixed-content minimum — the quick grid's current
+        # column count is deliberately excluded (see above).
+        self.params_tab.setMinimumHeight(self.params_tab.minimumSizeHint().height())
+        self.log_tab.setMinimumHeight(self.log_tab.minimumSizeHint().height())
+        self.info_display.setMinimumHeight(self.info_display.minimumSizeHint().height())
+        tab_min_h = (max(self.params_tab.minimumSize().height(),
+                         self.log_tab.minimumSize().height(),
+                         self.info_display.minimumSize().height())
+                     + self.tab_widget.tabBar().sizeHint().height())
+        tab_min_w = (max(self.params_tab.minimumSizeHint().width(),
+                         self.log_tab.minimumSizeHint().width(),
+                         self.info_display.minimumSizeHint().width()))
+        if (tab_min_h != self.tab_widget.minimumHeight()
+                or tab_min_w != self.tab_widget.minimumWidth()):
+            changed = True
+        self.tab_widget.setMinimumHeight(tab_min_h)
+        self.tab_widget.setMinimumWidth(tab_min_w)
+        # The window minimum HEIGHT is computed directly from the right
+        # panel's *layout* minimum (the explicit tab-widget minimum + its
+        # layout margins) plus title/status bars and central margins — not
+        # from the panel widget's minimumSize() (0 — see above) or from
+        # minimumSizeHint(), which under-reports (E11). The title/status
+        # bars contribute max(sizeHint, minimumSizeHint, minimumHeight):
+        # the integrated TitleBar's sizeHint under-reports its fixed
+        # height (41 vs 55 — it would leave a 14px hole that squashes the
+        # 参数配置 page onto the status bar at the smallest width).
+        right_min = self._right_panel.layout().minimumSize()
         cm = self.centralWidget().layout().contentsMargins()
-        min_h = (right.minimumSize().height()
-                 # E12: the menu-widget slot now carries title bar + menu
-                 # bar (self._top_bar); menuBar() is null once a menu
-                 # widget is set.
-                 + self._top_bar.sizeHint().height()
-                 + self.statusBar().sizeHint().height()
+        top_h = max(self._top_bar.sizeHint().height(),
+                    self._top_bar.minimumSizeHint().height(),
+                    self._top_bar.minimumHeight())
+        status_h = max(self.statusBar().sizeHint().height(),
+                       self.statusBar().minimumSizeHint().height(),
+                       self.statusBar().minimumHeight())
+        min_h = (right_min.height()
+                 + top_h
+                 + status_h
                  + cm.top() + cm.bottom())
-        # The window minimum WIDTH is computed the same way (explicitly, not
-        # from hint.width()): the scroll area's own minimum includes the
-        # quick-toggles grid's *current column count* minimum — a moving
-        # target that self-locks the window wide (a 1-row grid keeps the
-        # window wide enough to stay a 1-row grid, so the re-wrap that
-        # would raise the height minimum never happens). The scroll area
-        # contributes its fixed-content minimum instead; the grid re-wraps
-        # as the viewport narrows (see BasicPanel._quick_cols) and the
-        # re-wrap re-syncs this minimum.
+        # The window minimum WIDTH is computed the same way: left panel
+        # minimum + splitter handle + the right panel's explicit minimum
+        # (the 参数配置 page's fixed-content minimum — the quick grid's
+        # current column count is deliberately excluded, see above).
         left_w = self.splitter.widget(0).minimumSize().width()
-        right_w = 0
-        for i in range(right.count()):
-            item = right.itemAt(i)
-            wdt = (self._panel_fixed_min_width
-                   if item.widget() is self.panel_scroll
-                   else item.minimumSize().width())
-            right_w = max(right_w, wdt)
         # handleWidth() is -1 until the splitter's first layout — floor it
         # so the pre-layout sync cannot pin a too-small minimum.
         # E13: + the central area's left/right shadow-band insets.
-        min_w = (left_w + max(self.splitter.handleWidth(), 10) + right_w
+        min_w = (left_w + max(self.splitter.handleWidth(), 10)
+                 + right_min.width()
                  + 2 * CARD_CONTENT_INSET)
-        self.setMinimumSize(
-            max(MIN_WINDOW_WIDTH, min_w),
-            max(MIN_WINDOW_HEIGHT, min_h, hint.height()),
-        )
+        hint = self.minimumSizeHint()
+        new_w = max(MIN_WINDOW_WIDTH, min_w)
+        new_h = max(MIN_WINDOW_HEIGHT, min_h, hint.height())
+        if (new_w, new_h) != (self.minimumWidth(), self.minimumHeight()):
+            changed = True
+        self.setMinimumSize(new_w, new_h)
         if changed:
             # Qt's layout-minimum caches settle one event-loop pass after a
             # grid re-wrap (inside a resize cascade the just-rewrapped
@@ -1136,6 +1339,10 @@ class MainWindow(QMainWindow):
             self.basic_panel.show()
         self._apply_params_to_current()
         self._mode_switching = False
+        # The other panel now determines the E11 hard minimum (and the
+        # window minimum follows it) — the quick-grid re-wrap trigger alone
+        # would not fire on a plain mode switch.
+        self._sync_panel_min()
         self.preview_timer.start(PREVIEW_TIMER_MS)
         self._update_cmd_preview()
 
@@ -1225,24 +1432,44 @@ class MainWindow(QMainWindow):
         # showEvent (via _retry_pending_splitter) until the first layout
         # pass gives the splitter its real width.
         left = getattr(self, "_pending_splitter_left", None)
-        if left is None:
-            return False
-        total = self.splitter.width()
-        if total <= left + 100:
-            return False
-        self.splitter.setSizes([left, max(100, total - left)])
-        # Verify Qt honored the request: in a narrow window the right
-        # panel's layout minimum (its QTabWidget / log area) can squeeze
-        # the left one back down to its minimum. In that case keep the
-        # pending value and retry (the window may still be growing).
-        actual = self.splitter.sizes()[0]
-        if abs(actual - left) <= 20:
-            self._pending_splitter_left = None
-            return True
-        return False
+        pending_left = False
+        if left is not None:
+            total = self.splitter.width()
+            # The handle eats width out of the children's total (3px via
+            # the QSS QSplitter::handle rule — E15 added the height part,
+            # so the handle now really occupies layout width; before that
+            # it resolved to -1 pre-layout and the overshoot went unseen).
+            # Request a sum that fits the children's available total, or
+            # QSplitter proportionally scales the request down and the
+            # left side lands ~1px short of the saved width.
+            handle = max(self.splitter.handleWidth(), SPLITTER_HANDLE_W)
+            avail = total - handle
+            if avail <= left + 100:
+                pending_left = True
+            else:
+                self.splitter.setSizes([left, max(100, avail - left)])
+                # Verify Qt honored the request: in a narrow window the
+                # right panel's layout minimum (its QTabWidget / log area)
+                # can squeeze the left one back down to its minimum. In
+                # that case keep the pending value and retry (the window
+                # may still be growing).
+                actual = self.splitter.sizes()[0]
+                pending_left = abs(actual - left) > 20
+                if not pending_left:
+                    self._pending_splitter_left = None
+        # E15 follow-up: the saved command-preview split. Once the first
+        # layout pass has happened (the retry guarantees that), setSizes is
+        # honored as-is (the splitter clamps each side to its own minimum
+        # — E11's hard panel minimum on top, the label+80px floor below).
+        csizes = getattr(self, "_pending_cmd_split", None)
+        if csizes is not None:
+            self.cmd_split.setSizes(csizes)
+            self._pending_cmd_split = None
+        return not pending_left
 
     def _retry_pending_splitter(self, tries):
-        if getattr(self, "_pending_splitter_left", None) is None:
+        if (getattr(self, "_pending_splitter_left", None) is None
+                and getattr(self, "_pending_cmd_split", None) is None):
             return
         if self._apply_pending_splitter():
             return
@@ -1681,8 +1908,9 @@ class MainWindow(QMainWindow):
         sb.setValue(sb.maximum())
 
     def _show_log_search(self):
-        if self.tab_widget.currentIndex() != 0:
-            self.tab_widget.setCurrentIndex(0)
+        # E15: 日志输出 is tab 1 (tab 0 is 参数配置).
+        if self.tab_widget.currentIndex() != 1:
+            self.tab_widget.setCurrentIndex(1)
         self.log_search_bar.show()
         self.log_search_edit.setFocus()
         self.log_search_edit.selectAll()
@@ -1735,18 +1963,30 @@ class MainWindow(QMainWindow):
         # have no caption for the WM to constrain).
         elif obj is self and event.type() == QEvent.Type.Move:
             self._clamp_to_screen()
+        # A maximized→normal restore resizes the window; if the Maximized
+        # flag is stuck (frameless, Windows — see _card_full_state) the
+        # state-only trigger never re-fires, so re-sync the card band
+        # from the real geometry on every top-level resize (idempotent).
+        elif obj is self and event.type() == QEvent.Type.Resize:
+            self._on_card_state_changed()
         # E11 (option A): the panel viewport is resized before the panel's
         # own layout pass — re-wrapping the quick-toggles grid here (and
         # re-syncing the hard minimums via quick_wrap_changed) means an
         # extra grid row never has to borrow height from the other groups.
-        if obj is self.panel_scroll.viewport() and \
+        # getattr guards: during construction this filter (installed on the
+        # panel viewport) can receive a synchronous event before the later
+        # widgets exist — an AttributeError escaping into the C++ event
+        # dispatch path is a silent hard crash (0xC0000409, no traceback).
+        ps = getattr(self, "panel_scroll", None)
+        if ps is not None and obj is ps.viewport() and \
                 event.type() == QEvent.Type.Resize:
             self.basic_panel._arrange_quick_toggles()
         # E3: Shift+Enter in the search box searches backwards.
         # PyQt6 enums are class-scoped — QKeyEvent instances do not carry
         # Key/Modifier/Type (that PyQt5-style access raises AttributeError
         # on the first keypress in the search box).
-        if obj is self.log_search_edit and event.type() == QEvent.Type.KeyPress:
+        se = getattr(self, "log_search_edit", None)
+        if se is not None and obj is se and event.type() == QEvent.Type.KeyPress:
             if event.key() == Qt.Key.Key_Return and \
                     (event.modifiers() & Qt.KeyboardModifier.ShiftModifier):
                 self._log_search_find(False)
@@ -2230,6 +2470,19 @@ class MainWindow(QMainWindow):
         if isinstance(prefs.get("mode"), int) and not isinstance(prefs.get("mode"), bool) \
                 and prefs["mode"] in (0, 1):
             self.mode_combo.setCurrentIndex(prefs["mode"])
+        # E15 follow-up: the command-preview split (panel top / preview
+        # bottom). Stored as [top, bottom]; the preview side keeps its
+        # label+80px floor at restore time. Applied in the showEvent
+        # retry (a setSizes before the first layout pass is silently
+        # ignored — same trap as the main splitter's saved width).
+        csizes = prefs.get("cmd_split")
+        if isinstance(csizes, (list, tuple)) and len(csizes) == 2:
+            try:
+                ctop, cbottom = int(csizes[0]), int(csizes[1])
+                if ctop > 0 and 90 <= cbottom <= 5000:
+                    self._pending_cmd_split = [ctop, cbottom]
+            except (TypeError, ValueError):
+                pass
         # adv_tab_key (stable tab key) wins over adv_tab (index) — the tab
         # order changed with the 9-tab semantic regrouping, so a saved index
         # from an older version can point at the wrong tab.
@@ -2242,10 +2495,15 @@ class MainWindow(QMainWindow):
             if isinstance(adv_tab, int) and not isinstance(adv_tab, bool) \
                     and 0 <= adv_tab < self.advanced_panel.tabs.count():
                 self.advanced_panel.tabs.setCurrentIndex(adv_tab)
-        bot_tab = prefs.get("bottom_tab")
-        if isinstance(bot_tab, int) and not isinstance(bot_tab, bool) \
-                and 0 <= bot_tab < self.tab_widget.count():
-            self.tab_widget.setCurrentIndex(bot_tab)
+        # E15: the right-column tab (0=参数配置 1=日志输出 2=运行信息).
+        # Legacy mapping: the pre-E15 bottom_tab (0=日志输出 1=运行信息)
+        # maps to +1 on the new tab widget.
+        rtab = prefs.get("right_tab")
+        if rtab is None and prefs.get("bottom_tab") is not None:
+            rtab = prefs["bottom_tab"] + 1
+        if isinstance(rtab, int) and not isinstance(rtab, bool) \
+                and 0 <= rtab < self.tab_widget.count():
+            self.tab_widget.setCurrentIndex(rtab)
         # E10: user-configured quick toggles (validated/sanitized inside;
         # an all-invalid list degrades to the built-in default set)
         if prefs.get("quick_params") is not None:
@@ -2262,6 +2520,7 @@ class MainWindow(QMainWindow):
         if result == QDialog.DialogCode.Accepted:
             keys = list(dlg.result_keys())
             self.basic_panel.set_quick_params(keys)
+            self._apply_field_heights()  # re-pin the (re)built quick fields
             save_ui_pref("quick_params", keys)  # persist immediately (E10)
             self._sync_panel_min()  # E11: more keys can grow the panel's min height
             QTimer.singleShot(0, self._sync_panel_min)  # ...and once more on the settled layout
@@ -2275,7 +2534,7 @@ class MainWindow(QMainWindow):
         # While maximized the full-screen rect is not useful as a *normal*
         # window size, so the previously saved value (or nothing → the E14
         # screen-relative default on next launch) is kept.
-        if self.isMaximized():
+        if self._card_full_state():
             prev = load_ui_prefs().get("geometry")
             geo = prev if (isinstance(prev, (list, tuple))
                            and len(prev) == 4) else None
@@ -2284,10 +2543,11 @@ class MainWindow(QMainWindow):
         save_ui_prefs({
             "geometry": geo,
             "splitter": [int(s) for s in self.splitter.sizes()],
+            "cmd_split": [int(s) for s in self.cmd_split.sizes()],
             "mode": self.mode_combo.currentIndex(),
             "adv_tab": self.advanced_panel.tabs.currentIndex(),
             "adv_tab_key": self.advanced_panel.current_tab_key(),
-            "bottom_tab": self.tab_widget.currentIndex(),
+            "right_tab": self.tab_widget.currentIndex(),
             "quick_params": self.basic_panel.get_quick_params(),
         })
 
@@ -2978,8 +3238,9 @@ class MainWindow(QMainWindow):
         for lvl, name in (("D", t("调试")), ("I", t("信息")), ("W", t("警告")), ("E", t("错误"))):
             self._log_level_boxes[lvl].setText(name)
             self._log_level_boxes[lvl].setToolTip(name)
-        self.tab_widget.setTabText(0, t("📄 日志输出"))
-        self.tab_widget.setTabText(1, t("📊 运行信息"))
+        self.tab_widget.setTabText(0, t("⚙️ 参数配置"))
+        self.tab_widget.setTabText(1, t("📄 日志输出"))
+        self.tab_widget.setTabText(2, t("📊 运行信息"))
 
         # Version/status labels
         state = getattr(self, '_current_state', None)
@@ -3029,6 +3290,8 @@ class MainWindow(QMainWindow):
         # layout-managed label (contents-margins keep the text on the card
         # face: left fixed, bottom synced to the shadow band by
         # _set_card_inset) and drops the native size grip.
+        # (E15 once hosted the run-state labels here too — reverted: they
+        # trail the 参数配置 tab's control bar again.)
         sb = _ThemedStatusBar(self)
         self.setStatusBar(sb)
         sb.showMessage(t("就绪"))
@@ -3046,12 +3309,6 @@ class MainWindow(QMainWindow):
         dialog (GGUF inspector, path dialogs) alike.
         """
         qss = self._get_stylesheet(self.theme)
-        # Theme-aware sheet for the bottom tabs (their inline QSS would
-        # otherwise override the app dark rules); init_ui() calls
-        # _apply_theme() before the tab widget exists, hence the guard
-        tabs = getattr(self, "tab_widget", None)
-        if tabs is not None:
-            tabs.setStyleSheet(self._bottom_tabs_qss(self.theme))
         app = QApplication.instance()
         # Skip the app-level apply when the sheet is already identical —
         # re-applying forces a full re-polish of every top-level window
@@ -3071,66 +3328,6 @@ class MainWindow(QMainWindow):
         )
 
     @staticmethod
-    def _bottom_tabs_qss(theme="light"):
-        """Theme-aware QSS for the bottom log/info tab widget (E5 follow-up).
-
-        The light string is the original pre-E5 sheet, kept verbatim so the
-        light theme stays pixel-identical; dark mirrors it on the Catppuccin
-        palette and blends with the always-dark log content (#121212).
-        """
-        if theme == "dark":
-            return """
-            QTabWidget::pane {
-                border: 1px solid #313244;
-                border-radius: 4px;
-                background: #11111b;
-            }
-            QTabBar::tab {
-                background: #1e1e2e;
-                color: #a6adc8;
-                padding: 6px 16px;
-                margin-right: 2px;
-                border: 1px solid #313244;
-                border-bottom: none;
-                border-top-left-radius: 4px;
-                border-top-right-radius: 4px;
-            }
-            QTabBar::tab:selected {
-                background: #11111b;
-                color: #7aa2f7;
-                font-weight: bold;
-            }
-            QTabBar::tab:hover:!selected {
-                background: #2a2a3d;
-            }
-        """
-        return """
-            QTabWidget::pane {
-                border: 1px solid #d0d4dc;
-                border-radius: 4px;
-                background: #ffffff;
-            }
-            QTabBar::tab {
-                background: #e8ecf0;
-                color: #4a5568;
-                padding: 6px 16px;
-                margin-right: 2px;
-                border: 1px solid #d0d4dc;
-                border-bottom: none;
-                border-top-left-radius: 4px;
-                border-top-right-radius: 4px;
-            }
-            QTabBar::tab:selected {
-                background: #ffffff;
-                color: #2563eb;
-                font-weight: bold;
-            }
-            QTabBar::tab:hover:!selected {
-                background: #d8dce4;
-            }
-        """
-
-    @staticmethod
     def _get_stylesheet(theme="light"):
         """E5: build the window QSS from a palette template.
 
@@ -3140,16 +3337,6 @@ class MainWindow(QMainWindow):
         palette = MainWindow._THEME_PALETTES[theme]
         tokens = dict(palette)
 
-        def _img(direction: str) -> str:
-            # Qt QSS cannot draw CSS border-triangles on arrow subcontrols,
-            # so every arrow is a generated PNG; forward slashes + quotes
-            # keep Windows paths safe inside url().
-            return 'url("{}")'.format(
-                str(_ensure_arrow_image(direction, palette["combo_arrow"])).replace("\\", "/"))
-
-        tokens["combo_arrow_img"] = _img("down")
-        tokens["spin_up_img"] = _img("up")
-        tokens["spin_down_img"] = _img("down")
         tokens["check_img"] = 'url("{}")'.format(
             str(_ensure_check_image()).replace("\\", "/"))
         qss = MainWindow._THEME_TEMPLATE
@@ -3268,7 +3455,7 @@ class MainWindow(QMainWindow):
                 padding: 8px;
                 selection-background-color: #3b82f6;
             }
-            QComboBox, QDoubleSpinBox, QLineEdit, QTextEdit {
+            QLineEdit, QTextEdit {
                 background: @@field_bg@@;
                 color: @@text@@;
                 border: 1px solid @@border@@;
@@ -3280,55 +3467,25 @@ class MainWindow(QMainWindow):
                 font-family: Consolas, monospace;
                 font-size: 12px;
             }
-            QSpinBox, QDoubleSpinBox {
-                background: @@field_bg@@;
-                color: @@text@@;
-                border: 1px solid @@border@@;
-                border-radius: 6px;
-                padding: 4px 8px;
-                selection-background-color: #3b82f6;
-                min-width: 60px;
-            }
-            QComboBox:hover, QSpinBox:hover, QDoubleSpinBox:hover, QLineEdit:hover {
+            QLineEdit:hover {
                 border-color: #3b82f6;
             }
-            QComboBox:focus, QSpinBox:focus, QDoubleSpinBox:focus, QLineEdit:focus {
+            QLineEdit:focus {
                 border-color: #2563eb;
             }
-            QComboBox::drop-down {
+            /* QComboBox carries no frame QSS: it is rendered by the default
+               (Fusion) style so it sits at the same height as the unstyled
+               QSpinBox (the QSS-styled combo was ~6px taller than the
+               spinbox, breaking the row's harmony). The editable combo's
+               internal QLineEdit is neutralised below so the global
+               QLineEdit rule (padding/border) doesn't inflate it; only the
+               dropdown list keeps the themed look. */
+            QComboBox QLineEdit {
                 border: none;
-                width: 28px;
-            }
-            QComboBox::down-arrow {
-                image: @@combo_arrow_img@@;
-            }
-            QSpinBox::up-button, QDoubleSpinBox::up-button {
-                subcontrol-origin: border;
-                subcontrol-position: top right;
-                width: 22px;
-                border-left: 1px solid @@border@@;
-                border-bottom: 1px solid @@border@@;
-                border-top-right-radius: 5px;
-                background: @@field_bg@@;
-            }
-            QSpinBox::down-button, QDoubleSpinBox::down-button {
-                subcontrol-origin: border;
-                subcontrol-position: bottom right;
-                width: 22px;
-                border-left: 1px solid @@border@@;
-                border-top: 1px solid @@border@@;
-                border-bottom-right-radius: 5px;
-                background: @@field_bg@@;
-            }
-            QSpinBox::up-button:hover, QDoubleSpinBox::up-button:hover,
-            QSpinBox::down-button:hover, QDoubleSpinBox::down-button:hover {
-                background: @@hover_bg@@;
-            }
-            QSpinBox::up-arrow, QDoubleSpinBox::up-arrow {
-                image: @@spin_up_img@@;
-            }
-            QSpinBox::down-arrow, QDoubleSpinBox::down-arrow {
-                image: @@spin_down_img@@;
+                padding: 0px;
+                margin: 0px;
+                border-radius: 0px;
+                background: transparent;
             }
             QComboBox QAbstractItemView {
                 background-color: @@field_bg@@;
@@ -3492,6 +3649,7 @@ class MainWindow(QMainWindow):
             QSplitter::handle {
                 background-color: @@border@@;
                 width: 3px;
+                height: 3px;
                 border-radius: 1px;
             }
             QSplitter::handle:hover {

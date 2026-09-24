@@ -73,12 +73,14 @@ def test_default_window_size_small_screen_clamped(monkeypatch):
 
 def test_default_splitter_sizes():
     from ui.main_window import MainWindow
-    from core.constants import CARD_CONTENT_INSET
+    from core.constants import CARD_CONTENT_INSET, SPLITTER_HANDLE_W
     width = 1600
     content = width - 2 * CARD_CONTENT_INSET
     left, right = MainWindow._default_splitter_sizes(width)
     assert left == 400
-    assert left + right == content
+    # the children's total must exclude the QSS handle width (a sum that
+    # includes it gets proportionally scaled down by QSplitter)
+    assert left + right == content - SPLITTER_HANDLE_W
     # clamps stay inside the left panel's 180-500 limits and the right
     # side never drops below 100 at any legal width
     for w in (900, 1053, 1360, 1600, 1920, 2560):

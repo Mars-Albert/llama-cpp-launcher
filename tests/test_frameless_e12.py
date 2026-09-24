@@ -166,6 +166,56 @@ def test_mainwindow_card_chrome_e13(app, temp_settings):
         w.close()
 
 
+def test_stuck_maximized_flag_self_heals_on_resize(app, temp_settings):
+    """E15 follow-up (user report): a frameless top-level on Windows can
+    keep ``Qt.WindowMaximized`` stuck in windowState after the WM
+    restores it (restore button's showNormal / taskbar click — no
+    follow-up WindowStateChange clears the flag). paintEvent reads the
+    state live, so the window kept painting the band-less SQUARE card
+    (no rounding, no shadow) at a normal size. The band must follow the
+    real geometry: the Resize re-sync (and the geometry check inside
+    _card_full_state) restores the rounded card when the window no
+    longer covers its screen.
+    """
+    from PyQt6.QtCore import QRect
+    from core.constants import CARD_CONTENT_INSET
+    from ui.main_window import MainWindow
+
+    class _BigScreen:
+        def availableGeometry(self):
+            return QRect(0, 0, 1920, 1032)
+
+    w = MainWindow(work_dir=None, defaults=dict(_FALLBACK_DEFAULTS))
+    try:
+        w.show()
+        app.processEvents()
+        w.resize(1600, 900)
+        app.processEvents()
+        assert w._card_band == CARD_CONTENT_INSET
+        # Simulate the stuck flag: windowState claims maximized while
+        # the geometry is a restored, non-covering rect.
+        w.isMaximized = lambda: True
+        w.screen = lambda: _BigScreen()
+        assert w._card_full_state() is False   # geometry wins
+        w.resize(1400, 850)                    # triggers the Resize re-sync
+        app.processEvents()
+        assert w._card_band == CARD_CONTENT_INSET
+        cl, _t, cr, _b = w._central_layout.getContentsMargins()
+        assert (cl, cr) == (CARD_CONTENT_INSET, CARD_CONTENT_INSET)
+        # the painted card is banded + rounded again
+        img = w.grab().toImage()
+        assert img.pixelColor(2, 2).alpha() == 0          # corner: desktop
+        assert img.pixelColor(w.width() // 2,
+                              w.height() // 2).alpha() > 0
+        # and a genuinely covering rect still collapses the band
+        w.resize(1920, 1032)
+        app.processEvents()
+        assert w._card_full_state() is True
+        assert w._card_band == 0
+    finally:
+        w.close()
+
+
 def test_mainwindow_titlebar_actions(app, temp_settings):
     from ui.main_window import MainWindow
     from ui.message_box import ThemedMessageBox  # noqa: F401  (import check)

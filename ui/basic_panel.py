@@ -380,18 +380,50 @@ class BasicPanel(QWidget):
         panel sits in a scroll area (E11) that is the viewport width — not
         the group width, which may sit at the content's minimum while the
         viewport is narrower. Wrapping to the viewport is what avoids a
-        horizontal scrollbar. Group/grid margins are subtracted."""
+        horizontal scrollbar.
+
+        The budget subtracts *every* margin between the budget edge and the
+        grid columns, measured live: panel layout margins (viewport path
+        only), the group box frame, the group's outer margins and the grid
+        contents margins. A hard-coded constant (group outer 12 + grid 8)
+        under-counted by the panel margins + group frame (~16px) and let a
+        column layout whose natural width barely overflowed the budget get
+        chosen — QGridLayout then compresses the pinned column minimums and
+        the widest label clips by a few px (E15 regression: the tab pane's
+        margins narrowed the viewport by ~10px and pushed the English
+        minimum-size layout over the edge)."""
         w = None
+        in_scroll = False
         p = self._toggles_group.parentWidget()
         while p is not None:
             if isinstance(p, QScrollArea):
                 w = p.viewport().width()
+                in_scroll = True
                 break
             p = p.parentWidget()
-        if w is None:
+        if not in_scroll:
             w = self._toggles_group.width()
-        # group outer margins (6+6) + grid contents margins (4+4)
-        return max(0, w - 20)
+        if w <= 0:
+            return 0
+        avail = w
+        if in_scroll:
+            pm = self.layout().contentsMargins()
+            avail -= pm.left() + pm.right()
+        # Group frame + group outer margins + grid contents margins:
+        # measured live from the group's layout rect (frameWidth() is not
+        # exposed by PyQt6's QGroupBox and the styled frame can differ
+        # from the base style). Before the first layout the margin sum is
+        # a close stand-in — the pre-show target only feeds the initial
+        # arrange, which the first show/resize re-runs anyway.
+        g = self._toggles_group
+        qm = self._quick_grid.contentsMargins()
+        lr = g.layout().contentsRect()
+        if lr.width() > 0:
+            avail -= (g.width() - lr.width()) + qm.left() + qm.right()
+        else:
+            gm = g.layout().contentsMargins()
+            avail -= gm.left() + gm.right() + qm.left() + qm.right()
+        return max(0, avail)
 
     def _quick_slot_widths(self):
         """Each slot's natural (sizeHint) width — label + control + help

@@ -291,6 +291,41 @@
 - 第三轮实测（真实字体，7 快捷项）：1180（用户截图宽度）4 列 2 行、最小宽 937 3 列 3 行、1360 4 列 2 行——全部标签完整显示（KV Cache K类型 / KV Cache V类型 / 适配内存不再被截断），无水平/垂直滚动条，各组零压缩。
 - 测试：`tests/test_small_window.py` 4 测试（窗口最小≥内容最小、6 个尺寸×模式组合零重叠、3 个尺寸下面板完整高度+无垂直滚动条+grid ≥2 列、**7 项快捷开关宽→窄场景 grid 折行不压缩任何组且窗口最小跟随**）；stash 回退验证旧代码必挂。
 
+### E15. 右侧 3-tab 布局（参数配置 / 日志输出 / 运行信息）✅（2026-10，用户反馈：1080p 屏幕高度太低，底部日志很难查看；与用户确认：第 3 tab = 现有运行信息，状态指示移状态栏，沿用 E11 不纵滚）
+- **现状**：右侧单列 = 模式栏 + 参数区（E11：只横滚、不纵滚、硬最小高）+ 命令预览（80px）+ 控制按钮栏 + 底部 tab（📄 日志输出 / 📊 运行信息，stretch=1 吃剩余）。1080p 默认窗口 940px 高时日志只剩 ~150-250px。
+- **设计**：右侧整列改为一个 3-tab QTabWidget：①⚙️ 参数配置 = 原①②③④区块整体移入（E11 规则不变）；②📄 日志输出 = 原底部日志 tab 原样上移（搜索/过滤/清空/导出/自动滚动零改动）；③📊 运行信息 = 原底部信息 tab。每个 tab 独占整列（~800px+）。激活 tab 持久化为 `ui.right_tab`（旧 `bottom_tab` 值映射 +1 兼容：0=日志输出→1，1=运行信息→2）。（E15 曾把运行状态 ⏸/▶ + ⏱ 时长从控制栏移到主状态栏以便全 tab 可见——用户机器上状态栏区域渲染异常（白色方框），按用户决定已回退：两标签回到控制栏尾部原位置，状态栏只保留瞬时消息。）
+- **实现要点**：
+  - `_create_right_panel`：外层 QTabWidget（**无** widget 级 QSS，走 app 主题；日志/信息内容自带恒暗内联 QSS 挂在内容 widget 上，不受影响）；参数页 `params_tab` 承载模式栏/panel_scroll/cmd_preview/control_bar；`_bottom_tabs_qss` 删除（连同 `_apply_theme` 里的应用逻辑与旧测试）。
+  - **Qt 陷阱（实测，此 PyQt6 构建）**：普通 QWidget 的 `minimumSize()` 在未经 `setMinimumSize` 前恒为 0（不回退 layout 最小值），且 QStackedLayout 的最小只算**显式**最小 → 不显式 pin 每个页面 + 外层 tab 的最小值，窗口最小会塌到静态地板（900×719），最小尺寸下参数页被压扁、控件重叠。`_sync_panel_min` 现从各页 live layout 最小 pin 页面与外层 tab 显式最小（高度 = 参数页硬最小 + tab 栏；宽度 = 各页最大最小宽，参数页仍用固定内容最小宽 `_panel_fixed_min_width`——快捷网格当前列数照旧排除，E11 宽度自锁防护在 tab 化后同样成立，有回归测试）。
+  - 窗口最小高 = 右面板 **layout** 最小 + 标题栏 + 状态栏 + central margins；标题栏/状态栏取 `max(sizeHint, minimumSizeHint, minimumHeight)`——集成 TitleBar 的 sizeHint 少报固定高（41 vs 55），少算 14px 会让最小宽下参数页按钮压到状态栏上（实测重叠）。
+  - `_ThemedStatusBar` 泛化 band 标签跟踪（`add_band_label`）：运行状态/时长标签与消息标签同样跟随阴影带（最大化时 0）。
+  - Ctrl+F 搜索切换目标改为日志 tab（索引 1，tab 0 是参数配置）；i18n 新串「⚙️ 参数配置」。
+- **顺带修复（E11 的兄弟陷阱，全量测试间歇失败暴露）**：`_quick_target_width()` 原硬编码扣 20px（组外边距 12 + grid 边距 8），漏了面板 layout 边距 + 组框边（~16px）——自然宽超预算几 px 的列布局仍会被选中，QGridLayout 压缩列最小宽、最宽标签裁 5-6px。E15 的 tab pane 边距让 viewport 窄了 ~10px，把**英文**最小尺寸场景推过临界（全量跑间歇失败、单独跑通过 = 边界 flaky 特征；语言状态由前序测试留下）。改为实测每段边距：面板 margin（仅 scroll-area 路径）+ `group.layout().contentsRect()` 反推 frame+组外 margin + grid margin。修后英文最小宽 1173×841→878（grid 3 列 2 行→2 列 3 行，最小高正确跟随）。
+- 测试：`tests/test_right_tabs_e15.py` 6 测试（3-tab 结构与内容归属、控制栏尾部状态标签顺序（原状态栏方案已回退）、right_tab 持久化 + 旧 bottom_tab 映射、Ctrl+F 切日志 tab、1360×860 下日志 tab 全高 ≥600px、re-wrap 后外层 tab 最小宽不随列数变）；适配 `test_small_window`（行为断言全保留）、`test_ui_prefs`（right_tab 保存/旧值映射）、`test_log_panel`（搜索切 tab 索引 0→1）、`test_theme`（外层 tab 无 widget QSS、内容恒暗）。全量 415 测试 × 2 连跑通过。
+
+### E15 后续修复（用户截图反馈，2026-10-18）：还原后窗口渲染成方形无阴影带
+- **现象**：用户 1080p 截图：窗口左下角方形直角、卡片边框贴着窗口边缘、无 10px 阴影带（像素测量：border 208,212,220 在 x=57 贴边，face 直到底边 y=247，圆角/色带全无）——即最大化态的卡片 chrome 被画在了正常尺寸窗口上。
+- **根因**：Windows 上无边框窗口经 `showNormal`（我们的还原按钮）/任务栏还原后，`windowState()` 的 `Qt.WindowMaximized` 标志可能**卡住**（无后续 WindowStateChange 清标志），而 `paintEvent` 实时读 `isMaximized()` → 持续走“band=0 方形卡片”分支；margin（标题行/central/状态标签）同样停在 0。
+- **修复**：新 `MainWindow._card_full_state()`——仅当 fullscreen，或 maximized **且** `frameGeometry ⊇ screen.availableGeometry`（±2px）时才算“全屏卡片”；`paintEvent` / `_on_card_state_changed`（幂等化，记录 `_card_band`，band 变化时顺带刷新 TitleBar 最大化 glyph）/ `_clamp_to_screen` 跳过判定 / 关窗时几何保存判定，以及 `frameless._window_screens_filled()`（TitleBar 最大化-还原 glyph + 点击动作 + `_ResizeFilter` 边缘缩放 opt-out——卡住时会错误禁用边缘缩放）全部改走此判定。eventFilter 在**每个顶层 Resize** 上重新同步 band（还原本身伴随几何变化 → 卡住的标志当场自愈）。离屏验证：stuck flag + 非覆盖 rect → band 恢复 11 + 角落 alpha=0；真覆盖 rect 仍 band=0。
+- **顺带修复**：左面板底部 `addStretch()` 残留——窗口高于内容时 模型信息 组下方出现面色 gap（用户截图中同一角落）；改为 `model_browser` 带 stretch factor（列表本身 Expanding，吸收空高，像文件浏览器一样填满）。
+- 测试：`tests/test_frameless_e12.py::test_stuck_maximized_flag_self_heals_on_resize`（真窗口 + 猴补 stuck flag + 假大屏：band/central margin/像素角落探针 + 真覆盖几何仍折叠）。全量 416 通过。
+
+### E15 后续修复 2（用户截图反馈，2026-10-18）：窗口拉伸时快捷开关与命令预览之间的大片空白
+- **现象**：窗口拉高后，参数区（快捷开关组）与「📝 启动命令预览」之间出现大片面色空白——QScrollArea 默认 Expanding 策略吸收了全部多余高度，把面板拉得比自然高度高。
+- **用户决定**：改为下面的命令行框（命令预览）伸缩。
+- **实现**：
+  - `cmd_preview`：`setFixedHeight(80)` → `setMinimumHeight(80)` + 布局 stretch=1（吸收参数页全部多余高度；最小高下仍是 80px，布局不变）。
+  - **`_ParamScrollArea`（QScrollArea 子类）**：垂直 sizePolicy 钉为 Preferred（面板保持自然高度，E11 不变量）。必须在 `sizePolicy()` **覆写**里钉：Qt 的 QScrollArea 在布局过程中（calcScrollBars）会从内容重新推导 size policy，任何一次性 `setSizePolicy` 在首次 show 后就被抹掉（实测：构造时设 Preferred，show 后变回 Expanding）——覆写在每次布局查询时生效，绕不过。
+- **连带修复（同一改动暴露的 E11/E15 陈旧最小值 bug，全量测试暴露）**：`_sync_panel_min` 在 `panel_scroll.setMinimumHeight()` 之后立即读 `params_tab.minimumSizeHint()`——QLayout 的最小值缓存滞后一个事件循环（E11 已知的 staleness），读到的是旧值；而 `changed` 标志只跟踪 panel_scroll 的最小值，重同步链在旧值上收敛——窗口最小高比内容实际需要短 ~17px，最小尺寸下参数页子项互相重叠（高级模式 + 全量测试的字体状态下触发；旧布局的伸缩分配碰巧没重叠 ≥4px 而掩盖了它）。修复：pin 之前 `layout().invalidate() + updateGeometry()` 强制重算；`changed` 扩展为同时跟踪 tab widget / 窗口最小值变化；`panel_scroll` 的显式最小高改为 **两个模式面板的最大值**（`max(basic.minimumHeight, advanced.sizeHint)+2`——高级模式同样不得被压扁/溢出到命令标题上）；模式切换（`_on_mode_changed`）与 advanced tab 切换（`tabs.currentChanged`）触发重新同步。
+- 验证：最小高下 panel=自然高、preview=80；拉高后 panel 不变、preview 吸收全部增量（98→275→355）；advanced 模式同样；复现序列（前序全量文件 + 失败测试）× 新旧代码对照。全量 416 × 2 连跑通过。
+
+### E15 后续修复 3（用户要求，2026-10-18）：参数区与命令预览之间可拖拽分割条
+- **用户要求**：在「参数区」与「📝 启动命令预览」之间加一个可手动拖拽的 bar，像左侧面板与右侧之间的分割条一样。
+- **实现**：参数页内 `panel_scroll` 与预览框之间改为垂直 `QSplitter`（`#paramSplitter`，`setCollapsible(False, False)`——须写在两个 `addWidget` 之后，索引式 API 提前调用会在启动时打 `Index out of range` 警告）；下侧是一个 `cmd_box`（标题 + 预览框）。句柄样式与左右分割条统一：全局 `QSplitter::handle` QSS 规则同时带 `width: 3px`（水平）与 `height: 3px`（垂直）——垂直分割条只认 `height`，之前垂直句柄落到代码值 8px，与水平 3px 明显不一致（用户反馈）。拉伸因子 (0, 1)：窗口多出的高度仍流向预览（上一轮用户要求不变）；上侧受 E11 硬最小钳制——拖拽时面板永不被压扁，下侧 80px 地板。
+- **持久化**：`ui.cmd_split = [top, bottom]`（关窗保存），`_restore_ui_state` 校验（top>0、90≤bottom≤5000——真实最小是 99，门槛 100 会误拒）后存 `_pending_cmd_split`，在 showEvent 的 `_retry_pending_splitter` 重试链中应用（首布局前的 `setSizes` 被 Qt 静默忽略，与主 splitter 宽度同一陷阱）；此构建 `setSizes` 语义：同总量比例互换且 top 不低于最小 → 照办；top 低于最小 → 钳制（面板 E11 最小挡住）。
+- **重大附带发现（本轮改动触发的静默硬崩溃，0xC0000409 无堆栈）**：`MainWindow.eventFilter` 在构造期间（viewport 事件过滤器在 `init_ui` 中段安装）可能同步收到事件，而它访问 `self.log_search_edit` / `self.panel_scroll` —— 这些属性在构造后段才创建 → **AttributeError 从 C++ 事件分发路径逸出 = 进程静默 fastfail（0xC0000409，无 Python 堆栈、无 qFatal 输出，faulthandler 也抓不到）**。触发条件：`ptab.addWidget(self.cmd_split)` 时的同步几何事件（旧布局里 viewport 在构造后段才入布局，从未在构造期收到事件，所以潜伏至今）。修复：eventFilter 内两个属性访问改 `getattr(self, ..., None)` 守卫（注释说明原因）。排查过程（二分 + 逐行构造期探针 + 隔离复现失败后转向"构造期不完整状态"假设）是下次遇到同类静默崩溃的参考路径。
+- 测试：`tests/test_right_tabs_e15.py` 结构断言改钉 splitter 结构（`cmd_split.widget(0/1)`、`cmd_box` 内容归属）+ 新增 `test_cmd_split_persisted_and_restored`（拉伸行为钉住：多余高度入预览侧；拖拽钳制；保存/重启恢复 ±20px，恢复窗体用与保存时相同的几何）。全量 417 × 2 连跑通过。
+
 ---
 
 ## 附：审查时确认过、无需改的点（避免重复排查）

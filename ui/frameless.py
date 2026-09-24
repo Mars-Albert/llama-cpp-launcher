@@ -67,6 +67,31 @@ def app_icon() -> QIcon:
     return QIcon(path) if os.path.exists(path) else QIcon()
 
 
+def _window_screens_filled(win) -> bool:
+    """True when *win* is maximized *and* its geometry actually covers
+    the screen (fullscreen counts as filled).
+
+    A frameless top-level on Windows can keep ``Qt.WindowMaximized``
+    stuck in ``windowState()`` after the WM restores it (``showNormal``
+    / a taskbar click — no follow-up WindowStateChange clears the flag).
+    Consumers deciding chrome from the flag (card band collapse, the
+    max/restore glyph, the edge-resize opt-out) would then keep treating
+    a normal-sized window as maximized, so the flag is only trusted
+    while the window really covers its screen.
+    """
+    if win.isFullScreen():
+        return True
+    if not win.isMaximized():
+        return False
+    scr = win.screen()
+    if scr is None:
+        return True
+    avail = scr.availableGeometry()
+    fr = win.frameGeometry()
+    return (fr.width() >= avail.width() - 2
+            and fr.height() >= avail.height() - 2)
+
+
 class TitleBar(QWidget):
     """Custom title strip. Buttons are optional (dialogs: close only).
 
@@ -165,7 +190,7 @@ class TitleBar(QWidget):
         w = self._window()
         if w is None or w is self:
             return
-        if w.isMaximized():
+        if _window_screens_filled(w):
             w.showNormal()
         else:
             w.showMaximized()
@@ -177,7 +202,8 @@ class TitleBar(QWidget):
         if self._max_btn is None:
             return
         w = self._window()
-        maximized = w is not None and w is not self and w.isMaximized()
+        maximized = (w is not None and w is not self
+                     and _window_screens_filled(w))
         self._max_btn.setText(self._RESTORE_GLYPH if maximized else self._MAX_GLYPH)
         self._max_btn.setToolTip(t("还原") if maximized else t("最大化"))
 
@@ -293,7 +319,7 @@ class _ResizeFilter(QObject):
         margin = win.property("_e12_resize")
         if not margin:
             return False
-        if win.isMaximized():
+        if _window_screens_filled(win):
             self._sync_cursor(win, 0)
             return False
         fr = win.frameGeometry()
