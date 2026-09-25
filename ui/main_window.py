@@ -820,7 +820,20 @@ class MainWindow(QMainWindow):
         self.mode_combo.currentIndexChanged.connect(self._on_mode_changed)
         mode_bar.addWidget(self.mode_label)
         mode_bar.addWidget(self.mode_combo)
+        # E8（2026-10 应用户要求从参数面板移到模式行，靠右）：检测到的 GPU
+        # 设备行，放在 stretch 之后、撤销/恢复默认之前。
+        # ElidingLabel：长设备列表不能撑宽窗口，完整文本在 tooltip。
+        # 统一次级信息样式（主题感知）——见 _sync_secondary_info_labels。
+        self.gpu_info_label = ElidingLabel("")
+        self.gpu_info_label.setObjectName("secondaryInfo")
+        f = self.gpu_info_label.font()
+        f.setPixelSize(11)
+        self.gpu_info_label.setFont(f)
+        self.gpu_info_label.setStyleSheet("font-size: 11px;")
+        self.gpu_info_label.setVisible(False)
+        self._gpu_devices = None  # None = probe 尚未完成
         mode_bar.addStretch()
+        mode_bar.addWidget(self.gpu_info_label)
         self.btn_undo = QPushButton(t("↩ 撤销"))
         self.btn_undo.setFixedHeight(28)
         self.btn_undo.clicked.connect(self._undo)
@@ -1115,14 +1128,27 @@ class MainWindow(QMainWindow):
         live sizeHint among the representatives, so nothing is squashed
         below its natural height and the value tracks the resolved app
         font (DPI-safe). Only the frame height is pinned; the unstyled
-        rendering (and its font path) is untouched. Re-run after a
-        quick-toggles rebuild (new widgets — see _customize_quick_toggles).
+        rendering (and its font path) is untouched. Re-run after every
+        quick-toggles rebuild (new widgets — startup restore in
+        _restore_ui_state and _customize_quick_toggles).
+
+        Spin widths too: with the old QSS gone (which carried
+        min-width: 60px), a native spinbox sizes to the digit count of
+        its maximum — draft_max (max=256) rendered visibly narrower than
+        the 6-digit ranges. A code-level 60px floor restores the old
+        minimums without any QSS (widgets that already have a fixed
+        width are untouched; the content minimums match the pre-QSS
+        state, so the E11 window minimums are unchanged).
         """
         h = max(self.basic_panel.ngl_spin.sizeHint().height(),
                 self.basic_panel.ngl_combo.sizeHint().height())
         for widget in self._right_panel.findChildren(
                 (QSpinBox, QDoubleSpinBox, QComboBox)):
             widget.setFixedHeight(h)
+        for widget in self._right_panel.findChildren(
+                (QSpinBox, QDoubleSpinBox)):
+            if widget.minimumWidth() < 60:
+                widget.setMinimumWidth(60)
 
     def _sync_panel_min(self):
         """E11/E15: keep the parameter area — and the window minimum — in
@@ -2508,6 +2534,12 @@ class MainWindow(QMainWindow):
         # an all-invalid list degrades to the built-in default set)
         if prefs.get("quick_params") is not None:
             self.basic_panel.set_quick_params(prefs["quick_params"])
+            # set_quick_params rebuilds the quick chips (new widgets) when
+            # the saved set differs from the built-in default — re-pin the
+            # field dimensions, or the restored chips miss the unified
+            # height (user report 2026-10: restored quick spin rendered ~6px
+            # shorter than its quick combo).
+            self._apply_field_heights()
 
     def _customize_quick_toggles(self):
         # E10: 设置-menu entry for the quick-toggles group — the panel-level
@@ -2806,11 +2838,15 @@ class MainWindow(QMainWindow):
         # fills the space left of the GGUF button. Eliding so the label
         # never widens the group (full text in the tooltip).
         self.model_meta_label = ElidingLabel("—")
+        # Unified secondary-info style (theme-aware): idle = the theme's info
+        # colour via _set_meta_idle / _sync_secondary_info_labels; amber only
+        # for the ctx-over-limit warning.
+        self.model_meta_label.setObjectName("secondaryInfo")
         f = self.model_meta_label.font()
         f.setPixelSize(11)
         self.model_meta_label.setFont(f)
-        # 文字样式与扫描状态行（#565f89 / 11px）保持一致
-        self._set_meta_color("#565f89")
+        # 文字样式与扫描状态行统一（主题感知，见 _sync_secondary_info_labels）
+        self._set_meta_idle()
         btn_container = QWidget()
         btn_layout = QHBoxLayout(btn_container)
         btn_layout.setContentsMargins(0, 0, 0, 0)
@@ -2879,15 +2915,21 @@ class MainWindow(QMainWindow):
     # GGUF quick-metadata row (arch · max ctx)
     # ------------------------------------------------------------------
 
+    def _set_meta_idle(self):
+        """Idle (non-warning) colour: the theme's info colour — the unified
+        secondary-info style shared with the scan-status / GPU rows."""
+        self._meta_warn = False
+        self._set_meta_color(MainWindow._THEME_PALETTES[self.theme]["info"])
+
     def _set_meta_color(self, hexcolor):
         # ElidingLabel paints with the palette Text role, not QSS — see its
-        # docstring. Idle/status gray (same as the scan-status row);
+        # docstring. Idle = the theme info colour (via _set_meta_idle);
         # amber when ctx exceeds the model limit.
         # The colour also has to live in a widget-level stylesheet: the
         # app-level QWidget rule (theme text colour, 13px) re-polishes the
         # widget after show and clobbers whatever palette/font the code set
         # — an inline sheet wins that fight. The 11px pin keeps the row's
-        # style identical to the scan-status row.
+        # style identical to the other #secondaryInfo labels.
         self.model_meta_label.setStyleSheet(
             f"color: {hexcolor}; font-size: 11px;")
         pal = self.model_meta_label.palette()
@@ -2908,11 +2950,11 @@ class MainWindow(QMainWindow):
         if not (model_path and Path(model_path).exists()):
             label.setText("—")
             label.setToolTip("")
-            self._set_meta_color("#565f89")
+            self._set_meta_idle()
             return
         label.setText(t("正在解析..."))
         label.setToolTip(str(model_path))
-        self._set_meta_color("#565f89")
+        self._set_meta_idle()
         worker = _ModelMetaWorker(seq, str(model_path), self)
         worker.finished_ok.connect(self._on_model_meta_ok)
         worker.finished_err.connect(self._on_model_meta_err)
@@ -2936,7 +2978,7 @@ class MainWindow(QMainWindow):
         label = self.model_meta_label
         label.setText("—")
         label.setToolTip(t("GGUF 元数据解析失败: {err}", err=msg))
-        self._set_meta_color("#565f89")
+        self._set_meta_idle()
 
     def _render_model_meta(self):
         """(Re)build the quick-metadata row text + colour from _model_meta.
@@ -2964,10 +3006,11 @@ class MainWindow(QMainWindow):
                 text + "\n" + t(
                     "⚠ 当前设置的上下文 {ctx} 超过模型上限 {max}（启动后会被截断）",
                     ctx=f"{ctx:,}", max=f"{info.context_length:,}"))
+            self._meta_warn = True
             self._set_meta_color("#d97706")
         else:
             label.setToolTip(text)
-            self._set_meta_color("#565f89")
+            self._set_meta_idle()
 
     def _estimate_params(self, size_bytes):
         quant = self._guess_quant_type(self.params.get("model", ""))
@@ -3030,17 +3073,32 @@ class MainWindow(QMainWindow):
         self._startup_worker.start()
 
     def _on_devices_ready(self, devices):
-        # E8: show detected GPU devices next to the ngl / split-mode controls.
-        # Deliberately no auto-filling of ngl — "auto" is already the right
-        # llama.cpp default and the probe cannot know the model size.
+        # E8: show detected GPU devices on the 参数配置 tab's mode bar (moved
+        # there from the ngl / split-mode controls — both panels — per user
+        # request, 2026-10). Deliberately no auto-filling of ngl — "auto" is
+        # already the right llama.cpp default and the probe cannot know the
+        # model size.
         self._gpu_devices = devices or []
-        self.basic_panel.set_gpu_info(self._gpu_devices)
-        self.advanced_panel.set_gpu_info(self._gpu_devices)
-        # E11: the GPU-info label appears late (the probe is async) and
-        # grows the panel's natural height — defer the resync so it reads
-        # the settled layout minimum (same reasoning as
-        # _on_quick_wrap_changed).
-        QTimer.singleShot(0, self._sync_panel_min)
+        self._render_gpu_info()
+
+    def _render_gpu_info(self):
+        """E8: render the detected GPU devices (or CPU-only) on the mode bar.
+        Re-called from retranslate_ui (the text is translated). Hidden until
+        the --list-devices probe finishes."""
+        label = self.gpu_info_label
+        devs = self._gpu_devices
+        if devs is None:
+            return  # probe not finished yet
+        if not devs:
+            label.setText(t("仅 CPU（未检测到 GPU 设备）"))
+            label.setToolTip(t("未检测到 GPU 设备"))
+        else:
+            parts = [f"{d['name']} ({round(d['total_mib'] / 1024)}GB)" for d in devs]
+            label.setText(t("检测到 {n}× GPU: {names}", n=len(devs), names=" + ".join(parts)))
+            label.setToolTip("\n".join(
+                f"{d['index']}: {d['name']} (total {d['total_mib']:,} MiB, "
+                f"free {d['free_mib']:,} MiB)" for d in devs))
+        label.setVisible(True)
 
     def _on_startup_defaults(self, defaults, chat_templates):
         """Live-parsed defaults arrive from the startup worker (plan A10)."""
@@ -3207,6 +3265,8 @@ class MainWindow(QMainWindow):
         self.model_info_group.setTitle(t("📊 模型信息"))
         # 快速元数据行的文案随语言变化（arch/数值不变）
         self._render_model_meta()
+        # GPU 设备行同样随语言重渲染（probe 未完成时保持隐藏）
+        self._render_gpu_info()
         for key, (lbl, label_text) in self._model_info_label_widgets.items():
             lbl.setText(t(label_text))
         self.btn_gguf_inspect.setText(t("🔍 GGUF"))
@@ -3316,7 +3376,35 @@ class MainWindow(QMainWindow):
             app.setStyleSheet(qss)
         # E13: the painted card face + shadow use the theme colours
         self._chrome_cache = None
+        # ElidingLabel #secondaryInfo variants paint via palette, not QSS:
+        # sync their palette + inline sheet with the theme's info colour
+        self._sync_secondary_info_labels()
         self.update()
+
+    def _sync_secondary_info_labels(self):
+        """Theme-sync the ElidingLabel #secondaryInfo labels.
+
+        ElidingLabel.paintEvent reads the palette Text role — a QSS colour
+        is invisible to it — and the app-level QWidget rule re-polishes the
+        widget after show, clobbering code-set palette/font (see the
+        _set_meta_color docstring). Each variant therefore gets an inline
+        sheet (wins the re-polish, holds the 11px font + colour) and a
+        palette (feeds the custom paint). The model-meta label keeps its
+        amber ctx-warning state across theme switches; idle follows the
+        theme's info colour.
+        """
+        info = MainWindow._THEME_PALETTES[self.theme]["info"]
+        if hasattr(self, "gpu_info_label"):
+            label = self.gpu_info_label
+            label.setStyleSheet(f"color: {info}; font-size: 11px;")
+            pal = label.palette()
+            pal.setColor(QPalette.ColorRole.Text, QColor(info))
+            label.setPalette(pal)
+        if hasattr(self, "model_meta_label"):
+            if getattr(self, "_meta_warn", False):
+                self._set_meta_color("#d97706")  # re-assert the warning
+            else:
+                self._set_meta_idle()
 
     def _toggle_theme(self):
         self.theme = "dark" if self.theme == "light" else "light"
@@ -3347,7 +3435,8 @@ class MainWindow(QMainWindow):
     _THEME_PALETTES = {
         "light": {
             "win_bg": "#f0f2f5", "text": "#1a1a2e", "field_bg": "#ffffff",
-            "border": "#d0d4dc", "muted": "#666", "hover_bg": "#e8ecf0",
+            "border": "#d0d4dc", "muted": "#666", "info": "#6b7280",
+            "hover_bg": "#e8ecf0",
             "pressed_bg": "#d8dce0", "sub_border": "#b0b8c0",
             "sb_hover": "#8a9098", "combo_arrow": "#333",
             "slider_rim": "#ffffff", "tab_sel_bg": "#ffffff",
@@ -3361,7 +3450,8 @@ class MainWindow(QMainWindow):
         # Catppuccin-ish dark, harmonized with the always-dark log areas
         "dark": {
             "win_bg": "#1e1e2e", "text": "#cdd6f4", "field_bg": "#181825",
-            "border": "#313244", "muted": "#7f849c", "hover_bg": "#2a2a3d",
+            "border": "#313244", "muted": "#7f849c", "info": "#9399b2",
+            "hover_bg": "#2a2a3d",
             "pressed_bg": "#313244", "sub_border": "#45475a",
             "sb_hover": "#585b70", "combo_arrow": "#cdd6f4",
             "slider_rim": "#1e1e2e", "tab_sel_bg": "#1e1e2e",
@@ -3382,6 +3472,15 @@ class MainWindow(QMainWindow):
                 background-color: @@win_bg@@;
                 color: @@text@@;
                 font-size: 13px;
+            }
+            /* Unified secondary-info labels (GPU rows, scan status, model
+               meta): 11px + the theme's info colour. The ElidingLabel
+               variants additionally carry the colour in their palette
+               (they paint via palette Text, not QSS) — _apply_theme keeps
+               those in step with the theme. */
+            QLabel#secondaryInfo {
+                color: @@info@@;
+                font-size: 11px;
             }
             QPushButton#startBtn {
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #22c55e, stop:1 #16a34a);

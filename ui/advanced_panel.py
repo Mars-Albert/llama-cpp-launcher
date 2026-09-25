@@ -160,12 +160,6 @@ class AdvancedPanel(QWidget):
             form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
         for p in tab_params(tab_key):
             self._build_param_row(form, p)
-            if tab_key == "gpu" and p.key == "tensor_split":
-                # E8: detected GPU devices (from the `--list-devices` probe)
-                self.gpu_info_label = QLabel("")
-                self.gpu_info_label.setStyleSheet("color: #6b7280; font-size: 11px;")
-                self.gpu_info_label.setVisible(False)
-                form.addRow(self.gpu_info_label)
         scroll.setWidget(content)
         tab_layout = QVBoxLayout(tab)
         tab_layout.addWidget(scroll)
@@ -423,29 +417,6 @@ class AdvancedPanel(QWidget):
                 continue  # unknown key or schema-only param (prio_batch)
             self._write_param(p, val)
 
-    def set_gpu_info(self, devices):
-        """E8: render detected GPU devices (or CPU-only) in the GPU/perf tab."""
-        self._gpu_devices = list(devices or [])
-        self._render_gpu_info()
-
-    def _render_gpu_info(self):
-        label = getattr(self, "gpu_info_label", None)
-        if label is None:
-            return
-        devs = getattr(self, "_gpu_devices", None)
-        if devs is None:
-            return  # probe not finished yet
-        if not devs:
-            label.setText(t("仅 CPU（未检测到 GPU 设备）"))
-            label.setToolTip(t("未检测到 GPU 设备"))
-        else:
-            parts = [f"{d['name']} ({round(d['total_mib'] / 1024)}GB)" for d in devs]
-            label.setText(t("检测到 {n}× GPU: {names}", n=len(devs), names=" + ".join(parts)))
-            label.setToolTip("\n".join(
-                f"{d['index']}: {d['name']} (total {d['total_mib']:,} MiB, "
-                f"free {d['free_mib']:,} MiB)" for d in devs))
-        label.setVisible(True)
-
     def retranslate_ui(self):
         # Tab titles (from _TAB_TITLES — same source as init_ui)
         for i, (_, tab_name) in enumerate(self._TAB_TITLES):
@@ -475,7 +446,6 @@ class AdvancedPanel(QWidget):
             if p.placeholder and self._CJK_RE.search(p.placeholder):
                 w = getattr(self, p.wattr)
                 w.setPlaceholderText(t(p.placeholder))
-        self._render_gpu_info()
 
         # Help buttons (? tooltips)
         for btn in self._help_btns:

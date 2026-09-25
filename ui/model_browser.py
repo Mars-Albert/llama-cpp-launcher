@@ -81,7 +81,10 @@ class ModelBrowser(QWidget):
         layout.addWidget(self._mmproj_group)
 
         self.status_label = QLabel(t("未扫描"))
-        self.status_label.setStyleSheet("color: #565f89; font-size: 11px;")
+        # Unified secondary-info style (theme-aware): the QLabel#secondaryInfo
+        # rule in the app QSS sets the colour + 11px (was a hard-coded
+        # colour that ignored themes)
+        self.status_label.setObjectName("secondaryInfo")
         layout.addWidget(self.status_label)
 
     def scan_models(self):

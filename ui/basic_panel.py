@@ -5,7 +5,7 @@ from PyQt6.QtWidgets import (
     QComboBox, QSpinBox, QSlider, QLineEdit,
     QCheckBox, QPushButton, QLabel, QFileDialog, QScrollArea
 )
-from PyQt6.QtGui import QColor, QPalette, QPainter, QFont, QFontMetrics
+from PyQt6.QtGui import QPalette, QPainter, QFont, QFontMetrics
 from PyQt6.QtCore import Qt, pyqtSignal, QSize
 from core.i18n import t
 from core.constants import DEFAULT_HOST, DEFAULT_PORT, CONTEXT_SIZE_PRESETS
@@ -217,18 +217,6 @@ class BasicPanel(QWidget):
             row4.addWidget(btn)
         row4.addStretch()
         layout.addLayout(row4)
-        # E8: detected GPU devices (from the `--list-devices` probe).
-        # E11: eliding label — see ElidingLabel (a plain QLabel's full
-        # text width would pin the window minimum width too wide).
-        self.gpu_info_label = ElidingLabel("")
-        f = self.gpu_info_label.font()
-        f.setPixelSize(11)
-        self.gpu_info_label.setFont(f)
-        pal = self.gpu_info_label.palette()
-        pal.setColor(QPalette.ColorRole.Text, QColor("#6b7280"))
-        self.gpu_info_label.setPalette(pal)
-        self.gpu_info_label.setVisible(False)
-        layout.addWidget(self.gpu_info_label)
         return self._model_group
 
     def _create_sampling_group(self):
@@ -633,29 +621,6 @@ class BasicPanel(QWidget):
     def _on_repeat_penalty_changed(self, value):
         self.repeat_penalty_label.setText(f"{value / 100:.2f}")
 
-    def set_gpu_info(self, devices):
-        """E8: render detected GPU devices (or CPU-only) next to the ngl control."""
-        self._gpu_devices = list(devices or [])
-        self._render_gpu_info()
-
-    def _render_gpu_info(self):
-        label = getattr(self, "gpu_info_label", None)
-        if label is None:
-            return
-        devs = getattr(self, "_gpu_devices", None)
-        if devs is None:
-            return  # probe not finished yet
-        if not devs:
-            label.setText(t("仅 CPU（未检测到 GPU 设备）"))
-            label.setToolTip(t("未检测到 GPU 设备"))
-        else:
-            parts = [f"{d['name']} ({round(d['total_mib'] / 1024)}GB)" for d in devs]
-            label.setText(t("检测到 {n}× GPU: {names}", n=len(devs), names=" + ".join(parts)))
-            label.setToolTip("\n".join(
-                f"{d['index']}: {d['name']} (total {d['total_mib']:,} MiB, "
-                f"free {d['free_mib']:,} MiB)" for d in devs))
-        label.setVisible(True)
-
     def get_values(self):
         out = {
             "model": self.model_combo.currentText(),
@@ -774,4 +739,3 @@ class BasicPanel(QWidget):
         self._retranslate_quick_toggles()
         for btn in self._help_btns:
             btn.setToolTip(t("查看参数说明"))
-        self._render_gpu_info()

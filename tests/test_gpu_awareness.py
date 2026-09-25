@@ -1,4 +1,6 @@
-"""Tests for E8: GPU awareness (device probe + runtime log facts)."""
+"""Tests for E8: GPU awareness (device probe + runtime log facts). The
+detected-devices line lives on the 参数配置 tab's mode bar (moved there
+from the parameter panels in 2026-10)."""
 import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -7,9 +9,11 @@ import pytest
 
 from PyQt6.QtWidgets import QApplication
 
-from core.defaults import parse_device_list
+import core.config as CC
+from core.defaults import parse_device_list, _FALLBACK_DEFAULTS
 from ui.log_parser import parse_log_line
 from ui.runtime_info import build_info_html
+import ui.main_window as MW
 
 DUAL_OUTPUT = """Available devices:
   CUDA0: NVIDIA GeForce RTX 5090 (32579 MiB, 30819 MiB free)
@@ -89,32 +93,43 @@ def _qapp():
     return _app
 
 
-def test_basic_panel_gpu_info_dual():
-    from ui.basic_panel import BasicPanel
+@pytest.fixture
+def window(tmp_path, monkeypatch):
+    d = tmp_path / "presets"
+    d.mkdir(parents=True)
+    monkeypatch.setattr(CC, "PRESETS_DIR", d)
+    monkeypatch.setattr(CC, "SETTINGS_FILE", tmp_path / "settings.json")
     app = _qapp()  # keep a live reference
-    panel = BasicPanel()
-    panel.set_gpu_info(parse_device_list(DUAL_OUTPUT))
-    assert "RTX 5090" in panel.gpu_info_label.text()
-    assert "RTX 2080" in panel.gpu_info_label.text()
-    assert "32GB" in panel.gpu_info_label.text()
-    assert panel.gpu_info_label.isHidden() is False
-    assert "CUDA1: NVIDIA GeForce RTX 2080" in panel.gpu_info_label.toolTip()
-    panel.close()
+    w = MW.MainWindow(work_dir=None, defaults=dict(_FALLBACK_DEFAULTS))
+    yield w
+    w.close()
 
 
-def test_basic_panel_gpu_info_cpu_only():
-    from ui.basic_panel import BasicPanel
-    app = _qapp()
-    panel = BasicPanel()
-    panel.set_gpu_info([])
-    assert "CPU" in panel.gpu_info_label.text()
-    panel.close()
+def test_window_gpu_info_dual(window):
+    """E8 (moved to the mode bar, 2026-10): dual-GPU line + tooltip."""
+    window._on_devices_ready(parse_device_list(DUAL_OUTPUT))
+    label = window.gpu_info_label
+    assert "RTX 5090" in label.text()
+    assert "RTX 2080" in label.text()
+    assert "32GB" in label.text()
+    assert label.isHidden() is False
+    assert "CUDA1: NVIDIA GeForce RTX 2080" in label.toolTip()
+
+
+def test_window_gpu_info_cpu_only(window):
+    window._on_devices_ready([])
+    assert "CPU" in window.gpu_info_label.text()
+    assert window.gpu_info_label.isHidden() is False
+
+
+def test_window_gpu_info_hidden_until_probe(window):
+    # _on_devices_ready not yet called -> the row stays hidden
+    assert window.gpu_info_label.isHidden() is True
 
 
 def test_worker_devices_probe(tmp_path, monkeypatch):
     """_emit_defaults runs --list-devices only when the flag is in the help text."""
     import core.defaults as CD
-    import ui.main_window as MW
     app = _qapp()
 
     captured = {"devices": None}

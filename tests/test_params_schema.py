@@ -78,16 +78,11 @@ def test_emit_and_widget_fields():
 
 
 def test_rows_unique_and_contiguous_per_tab():
-    # Rows reserved for non-parameter rows (E8 GPU-info label on the gpu tab,
-    # anchored after tensor_split).
-    reserved = {"gpu": {5}}
     seen_tabs = set()
     for tab in TAB_ORDER:
         rows = [p.row for p in tab_params(tab)]
         assert len(rows) == len(set(rows)), tab
-        expected = [r for r in range(max(rows) + 1)
-                    if r not in reserved.get(tab, ())]
-        assert rows == expected, tab
+        assert rows == list(range(max(rows) + 1)), tab
         seen_tabs.add(tab)
     for p in PARAMS:
         if p.wattr is not None:

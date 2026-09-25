@@ -458,6 +458,32 @@ def test_restore_window_quick_params(app, lang, temp_settings):
         win.close()
 
 
+def test_restore_quick_chips_keep_unified_field_height(app, lang, temp_settings):
+    """Restored quick chips are rebuilt by _restore_ui_state (AFTER
+    init_ui's _apply_field_heights pass) — the rebuild must re-pin the
+    field dimensions, or the restored spin renders ~6px shorter than its
+    quick combo (user screenshot 2026-10: 草稿Token数 spin next to the
+    KV Cache K类型 combo)."""
+    from core.defaults import _FALLBACK_DEFAULTS
+    from PyQt6.QtWidgets import QSpinBox, QDoubleSpinBox, QComboBox
+    from ui.main_window import MainWindow
+    # a custom set with both a spin and a combo key (not in the default
+    # set, so the startup restore actually rebuilds the chips)
+    CC.save_ui_prefs({"quick_params": ["draft_max", "cache_type_k"]})
+    win = MainWindow(work_dir=None, defaults=dict(_FALLBACK_DEFAULTS))
+    try:
+        assert win.basic_panel.get_quick_params() == ["draft_max", "cache_type_k"]
+        ref_h = max(win.basic_panel.ngl_spin.sizeHint().height(),
+                    win.basic_panel.ngl_combo.sizeHint().height())
+        # setFixedHeight pins minimum==maximum; check that invariant on every
+        # restored quick chip (no show() needed, unlike height()).
+        for box in win.basic_panel._quick_boxes:
+            for c in box.findChildren((QSpinBox, QDoubleSpinBox, QComboBox)):
+                assert c.minimumHeight() == c.maximumHeight() == ref_h
+    finally:
+        win.close()
+
+
 def test_save_window_ui_state_includes_quick_params(app, lang, temp_settings):
     from core.defaults import _FALLBACK_DEFAULTS
     from ui.main_window import MainWindow
