@@ -249,7 +249,7 @@ HELP_TEXTS = {
 
     # ---------- agent ----------
     "agent": "是否启用 CORS 代理和全部内置工具（AI agent 能力）。出于安全考虑，默认会把 --cors-origins 限制为 localhost。不可信环境请勿启用。",
-    "tools": "为 AI agent 启用内置工具（实验性）：read_file、file_glob_search、grep_search、exec_shell_command、write_file、edit_file、get_info。填 all 启用全部。出于安全考虑，默认会把 --cors-origins 限制为 localhost。不可信环境请勿启用。",
+    "tools": "为 AI agent 启用内置工具（实验性）：勾选需要的工具（read_file、file_glob_search、grep_search、exec_shell_command、write_file、edit_file、get_datetime、get_info）。出于安全考虑，默认会把 --cors-origins 限制为 localhost。不可信环境请勿启用。",
     "tools_runtime": "在隔离的运行时环境中执行工具（实验性）：docker:<镜像>/podman:<镜像> = 新建容器并复用、服务退出时清理；docker-container:<id>/podman-container:<id> = 复用已有容器（退出不停止）；ssh:<目标> = 通过 SSH 在远程 POSIX 主机执行（需密钥认证+受信主机密钥）。默认使用宿主环境。",
     "mcp_servers_config": "MCP 服务器定义 JSON 文件的路径（Cursor 兼容格式）。不可信环境请勿启用；出于安全考虑，默认会把 --cors-origins 限制为 localhost。",
     "mcp_servers_json": "MCP 服务器定义的 JSON 文本（Cursor 兼容格式，直接粘贴）。不可信环境请勿启用；出于安全考虑，默认会把 --cors-origins 限制为 localhost。",

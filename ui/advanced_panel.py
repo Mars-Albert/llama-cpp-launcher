@@ -2,11 +2,11 @@ import logging
 import re
 
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QFormLayout,
+    QWidget, QVBoxLayout, QHBoxLayout, QFormLayout, QGridLayout,
     QTabWidget, QGroupBox, QComboBox, QSpinBox, QDoubleSpinBox,
     QLineEdit, QCheckBox, QTextEdit, QPushButton, QListWidget,
-    QListWidgetItem, QFileDialog, QLabel, QAbstractItemView,
-    QScrollArea, QToolButton
+    QFileDialog, QLabel, QAbstractItemView,
+    QScrollArea, QToolButton, QSizePolicy
 )
 from PyQt6.QtCore import Qt, pyqtSignal
 from core.i18n import t
@@ -23,6 +23,41 @@ CACHE_TYPE_ITEMS = ["f16", "bf16", "f32", "q8_0", "q4_0", "q4_1", "iq4_nl", "q5_
 SPEC_TYPE_ITEMS = ["none", "draft-simple", "draft-eagle3", "draft-mtp", "draft-dflash", "draft-dspark", "ngram-simple", "ngram-map-k", "ngram-map-k4v", "ngram-mod", "ngram-cache"]
 LOAD_MODE_ITEMS = ["auto", "none", "mmap", "mlock", "mmap+mlock", "dio"]
 DRAFT_PRIO_ITEMS = ["normal", "medium", "high", "realtime"]
+
+
+class _CheckGrid(QWidget):
+    """Checkbox grid for checklist params (schema widget='checklist').
+
+    The row used to be a scrollable QListWidget clamped to 80px, but a
+    QListWidget's sizeHint is a fixed 192px that setMaximumHeight does
+    not shrink, so QFormLayout sized the row for the full-height list
+    and centered the clamped box in a ~280px hole. A flat grid shows
+    every item at once (the tool list is short and static) and its
+    natural two-row height sits in line with the neighbouring rows."""
+
+    def __init__(self, names, cols, parent=None):
+        super().__init__(parent)
+        self._boxes = {}
+        lay = QGridLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setHorizontalSpacing(16)
+        lay.setVerticalSpacing(4)
+        for i, name in enumerate(names):
+            cb = QCheckBox(name)
+            lay.addWidget(cb, i // cols, i % cols)
+            self._boxes[name] = cb
+        # Extra width goes to a gap, not stretched checkbox labels.
+        lay.setColumnStretch(cols - 1, 1)
+
+    def checked_names(self):
+        """Checked names in schema item order (emission order)."""
+        return [n for n, cb in self._boxes.items() if cb.isChecked()]
+
+    def set_checked(self, names):
+        """Check exactly these names (unknown ones are ignored)."""
+        names = set(names)
+        for n, cb in self._boxes.items():
+            cb.setChecked(n in names)
 
 
 class AdvancedPanel(QWidget):
@@ -272,6 +307,12 @@ class AdvancedPanel(QWidget):
         elif kind == "mtext":
             w = QTextEdit()
             w.setMaximumHeight(80)
+            # A capped QTextEdit still makes its wrapper row absorb every
+            # free pixel of tab height (the row balloons and the 80px edit
+            # floats in the middle); Maximum keeps the row at natural size
+            # so extra vertical space lands below the last row instead.
+            w.setSizePolicy(QSizePolicy.Policy.Preferred,
+                            QSizePolicy.Policy.Maximum)
             if p.placeholder:
                 w.setPlaceholderText(self._T(p.placeholder))
             row_w = QWidget()
@@ -283,13 +324,8 @@ class AdvancedPanel(QWidget):
             row_w, w = self._make_list_row(self._T(p.list_title), p.list_filter)
             self._add_widget_row(form, p, row_w, widget=w)
         elif kind == "checklist":
-            w = QListWidget()
-            w.setMaximumHeight(80)
-            for name in p.items:
-                item = QListWidgetItem(name)
-                item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
-                item.setCheckState(Qt.CheckState.Unchecked)
-                w.addItem(item)
+            n = len(p.items)
+            w = _CheckGrid(self._t_items(p.items), 4 if n >= 8 else 2 if n >= 4 else 1)
             self._add_widget_row(form, p, w)
         else:  # text / file / password / dir / dir_text
             w = QLineEdit()
@@ -352,6 +388,11 @@ class AdvancedPanel(QWidget):
         lst = QListWidget()
         lst.setMaximumHeight(60)
         lst.setMinimumHeight(40)
+        # Same row-height absorption as the mtext rows: cap the list's
+        # vertical growth so a tall window leaves blank space below the
+        # last row, not inside this one.
+        lst.setSizePolicy(QSizePolicy.Policy.Expanding,
+                          QSizePolicy.Policy.Maximum)
         lst.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         btn_row = QHBoxLayout()
         add_btn = QPushButton(t("➕ 添加"))
@@ -384,8 +425,7 @@ class AdvancedPanel(QWidget):
         if kind == "list":
             return [w.item(i).text() for i in range(w.count())]
         if kind == "checklist":
-            return [w.item(i).text() for i in range(w.count())
-                    if w.item(i).checkState() == Qt.CheckState.Checked]
+            return w.checked_names()
         if kind == "combo_index":
             return w.currentIndex()
         if kind == "mtext":
@@ -407,10 +447,7 @@ class AdvancedPanel(QWidget):
             for item in val:
                 w.addItem(item)
         elif kind == "checklist":
-            for i in range(w.count()):
-                item = w.item(i)
-                item.setCheckState(
-                    Qt.CheckState.Checked if item.text() in val else Qt.CheckState.Unchecked)
+            w.set_checked(val)
         elif kind == "combo_index":
             w.setCurrentIndex(val)
         elif kind == "mtext":
