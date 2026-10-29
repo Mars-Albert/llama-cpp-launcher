@@ -38,9 +38,9 @@ USER_INPUT_PARAMS = frozenset({
     "models_dir", "models_preset",
     "lookup_cache_static", "lookup_cache_dynamic",
     "mcp_servers_config", "mcp_servers_json", "tools_runtime",
-    "log_prompts_dir",
+    "log_prompts_dir", "video_ffmpeg_dir",
     # machine-specific hardware settings
-    "device", "device_draft", "tensor_split",
+    "device", "device_draft", "mmproj_device", "tensor_split",
     "cpu_mask", "cpu_range", "cpu_mask_batch", "cpu_range_batch",
     "spec_draft_cpu_mask", "spec_draft_cpu_range", "spec_draft_cpu_mask_batch",
     # launcher-hardcoded known defaults (the parsed value is a launcher
@@ -94,6 +94,8 @@ _KNOWN_STRING_DEFAULTS = {
     "--cpu-mask-batch": "",
     "--spec-draft-cpu-mask": "",
     "--spec-draft-cpu-mask-batch": "",
+    "--mmproj-device": "",
+    "--video-ffmpeg-dir": "",
 }
 
 

@@ -37,7 +37,7 @@ options:
   -ngl N, --gpu-layers N    How many layers to push to the GPU (default: 0)
   -t N, --threads N         Number of threads (default: 8)
   --prio N                  Thread priority class (default: 0)
-  --mmap, --no-mmap         Memory-map the model (default: enabled)
+  --repack, -nr, --no-repack  Repack weights (default: enabled)
   --flash-attn [on|off]     Flash attention (default: auto)
   --api-key STR             API key (default: none)
   --samplers STR            List of samplers (default: 'top_k;top_p')
@@ -61,7 +61,7 @@ class TestParseHelpNewFormat:
 
     def test_bool_defaults(self):
         d = _parse_help_to_defaults(HELP_NEW)
-        assert d["mmap"] is True
+        assert d["kv_offload"] is True
         assert d["escape"] is True
 
     def test_string_defaults(self):
@@ -89,11 +89,13 @@ class TestParseHelpNewFormat:
         assert d["api_key"] == ""
 
     def test_multiline_description_joined(self):
-        # In the real capture the --mmap default sits on a continuation line:
-        #   --mmap, --no-mmap  DEPRECATED in favor of `--load-mode`: whether
-        #                      to memory-map model. (if ...)
+        # In the real capture the --kv-offload default sits on a
+        # continuation line:
+        #   -kvo,  --kv-offload, -nkvo, --no-kv-offload
+        #                            whether to enable KV cache offloading
+        #                            (default: enabled)
         d = _parse_help_to_defaults(HELP_NEW)
-        assert d["mmap"] is True
+        assert d["kv_offload"] is True
 
     def test_log_verbosity_default_after_dash_list(self):
         # The -lv description is a multi-line list whose items start with
@@ -131,7 +133,7 @@ class TestParseHelpOldFormat:
 
     def test_bool_and_prio(self):
         d = _parse_help_to_defaults(HELP_OLD)
-        assert d["mmap"] is True
+        assert d["repack"] is True
         assert d["prio"] == "normal"
 
     def test_placeholder_normalization(self):
@@ -313,8 +315,9 @@ class TestUserInputParams:
     def test_size(self):
         # 67 original inline keys, minus the 4 genuine server defaults
         # (tools, sampler_seq, cors_origins, cors_headers) exposed to the check,
-        # plus log_verbosity (launcher runs llama-server at trace by default)
-        assert len(D.USER_INPUT_PARAMS) == 64
+        # plus log_verbosity (launcher runs llama-server at trace by default),
+        # plus mmproj_device + video_ffmpeg_dir (machine-local paths/devices)
+        assert len(D.USER_INPUT_PARAMS) == 66
 
     def test_exposed_keys_exist(self):
         for key in ("tools", "sampler_seq", "cors_origins", "cors_headers"):

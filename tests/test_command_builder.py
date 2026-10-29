@@ -21,7 +21,6 @@ NEG_FLAG_PARAMS = [
     ("kv_unified", "--no-kv-unified", "--kv-unified"),
     ("escape", "--no-escape", "--escape"),
     ("cache_idle_slots", "--no-cache-idle-slots", "--cache-idle-slots"),
-    ("mmap", "--no-mmap", "--mmap"),
     ("repack", "--no-repack", "--repack"),
     ("warmup", "--no-warmup", "--warmup"),
     ("op_offload", "--no-op-offload", "--op-offload"),
@@ -77,8 +76,8 @@ class TestDefaultsNotEmitted:
 
     def test_default_bool_not_emitted(self):
         b = make_builder()
-        args = emit(b, mmap=True, webui=True, jinja=True)
-        assert not [a for a in args if a in ("--mmap", "--webui", "--jinja", "--no-mmap", "--no-webui", "--no-jinja")]
+        args = emit(b, cache_prompt=True, webui=True, jinja=True)
+        assert not [a for a in args if a in ("--cache-prompt", "--webui", "--jinja", "--no-cache-prompt", "--no-webui", "--no-jinja")]
 
     def test_default_int_not_emitted(self):
         b = make_builder()

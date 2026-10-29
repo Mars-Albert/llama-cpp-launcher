@@ -38,6 +38,10 @@ HELP_TEXTS = {
     "image_min_tokens": "单张图片最少占用的 token 数。仅对动态分辨率的视觉模型有效，默认从模型文件读取。",
     "image_max_tokens": "单张图片最多占用的 token 数。仅对动态分辨率的视觉模型有效，默认从模型文件读取。",
     "mtmd_batch_max_tokens": "批量编码图片时每批允许的最大图片 token 总数，用于限制峰值显存占用。",
+    "mmproj_device": "多模态投影器（mmproj）使用的设备（如 CUDA0）；none = 不卸载到 GPU。留空 = 跟随 --device。",
+    "video_fps": "视频的目标帧率（fps）。仅视觉模型的视频输入使用。",
+    "video_timestamp_interval": "视频转写中两次文本时间戳的间隔（毫秒）。",
+    "video_ffmpeg_dir": "包含 ffmpeg 与 ffprobe 可执行文件的目录；留空 = 从 PATH 中查找。",
 
     # ---------- context ----------
     "ctx_size": "提示词上下文长度（token 数，n_ctx），决定模型能“记住”多长的历史。0 = 使用模型默认值。调大更耗内存，超出模型训练长度时需配合 RoPE/YaRN 设置扩展。",
@@ -114,22 +118,23 @@ HELP_TEXTS = {
     "webui": "是否启用内置 Web UI（启动后访问 http://地址:端口 的内置网页）。",
     "verbose": "是否输出最详细的调试日志（记录所有级别的信息），用于排查问题。",
     "reasoning": "聊天中是否启用思考/推理（on / off / auto）。auto = 由聊天模板自动检测（如 DeepSeek-R1 系列）；off = 不输出思考过程。",
+    "reasoning_effort": "传给聊天模板的推理强度级别：default = 保持模板默认，或指定 minimal / low / medium / high / xhigh / max 等级别。仅对支持 reasoning effort 的模板生效。",
     "spec_type": "投机解码类型（逗号分隔可叠加）：draft-simple / draft-eagle3 / draft-mtp 等草稿模型类，ngram-simple / ngram-map-k / ngram-cache 等 n-gram 匹配类。用小模型或历史 n-gram 预测后续 token，主模型批量验证，可显著加速生成。none = 关闭。",
     "draft_max": "投机解码每步最多起草的 token 数。越多潜在加速越大，但被主模型拒绝的概率也越高。",
 
     # ---------- gpu ----------
     "device": "用于卸载（offload）的设备列表，逗号分隔（如 CUDA0,CUDA1）；none = 不卸载到 GPU。可用 --list-devices 查看可用设备（主窗口 GPU层数 旁会显示检测结果）。",
     "load_mode": "模型加载模式：auto = mmap（设备不支持时除外）；none = 无特殊模式；mmap = 内存映射加载（加载稍慢但可能减少换页）；mlock = 把模型固定在内存中，防止系统交换/压缩；mmap+mlock = 两者都用；dio = 可用时走 DirectIO。",
+    "lazy_mode": "对特定大张量（如逐层嵌入）按需读取：on = 按需从磁盘读取（需要 mmap）；auto = 仅对大于 4 GiB 的张量按需读取；off = 始终常驻内存。默认 auto。",
     "tensor_split": "模型卸载到各 GPU 的比例，逗号分隔的权重。如 3,1 表示第一块 GPU 承担 3/4、第二块 1/4，适合显存不等的 GPU 组合。",
     "main_gpu": "主 GPU 的索引。split-mode=none 时整个模型放在它上面；split-mode=row 时存放中间结果与 KV。默认 0。",
     "op_offload": "是否把宿主机上的张量运算卸载到设备（GPU）上执行，可减少 CPU-GPU 之间的数据搬运。",
     "cpu_moe": "把所有 MoE（混合专家）层的权重保留在 CPU 内存中（其余层仍可卸载到 GPU），可显著节省显存，MoE 模型常用。",
     "n_cpu_moe": "把前 N 层的 MoE 权重保留在 CPU 内存中。",
-    "mmap": "（已弃用，由 --load-mode 取代）是否内存映射模型文件。关闭 mmap 加载更慢，但不使用 mlock 时可能减少换页。",
-    "mlock": "（已弃用，由 --load-mode 取代）强制系统把模型固定在物理内存中，而不是交换或压缩。",
+    "moe_cache_mib": "驻留 CPU 的 MoE 专家权重所用的 GPU 缓存大小（MiB），多 GPU 时按 --tensor-split 分摊。0 = 禁用。",
+    "n_cpu_ffn": "把前 N 层的稠密 FFN 权重保留在 CPU 内存中（稠密模型；MoE 专家权重用 --n-cpu-moe）。",
     "no_host": "绕过 host buffer，允许使用额外的缓冲区。",
     "repack": "是否启用权重重打包（把权重重排成更适合计算的布局）。",
-    "direct_io": "（已弃用，由 --load-mode 取代）可用时使用 DirectIO。",
     "fit": "是否自动调整未设置的参数以适配设备内存（on/off）。显存不足时自动降低各项占显存的参数。",
     "fit_target": "--fit 每块设备保留的目标余量，逗号分隔的数值列表。",
     "fit_ctx": "--fit 允许设置的最小上下文大小。",
@@ -185,6 +190,7 @@ HELP_TEXTS = {
     "models_dir": "路由器（多模型路由）服务使用的模型文件目录。",
     "models_preset": "路由器服务的模型预设 INI 文件路径。",
     "models_max": "路由器服务同时加载的最大模型数，0 = 不限制。",
+    "models_memory_margin": "路由器服务：每块设备保留的空闲显存（MiB），新模型放不下时按 LRU 卸载已加载的模型。0 = 禁用。",
     "models_autoload": "路由器服务是否自动加载模型（按需加载请求到的模型）。",
 
     # ---------- spec ----------
@@ -212,6 +218,8 @@ HELP_TEXTS = {
     "draft_p_min": "投机解码的最小起草概率（贪心）。概率低于该值的候选 token 不会被起草。",
     "spec_draft_p_split": "投机解码分支拆分概率：并行起草多个候选分支时，次优候选概率超过该阈值才拆出分支（默认 0.10）。",
     "spec_draft_backend_sampling": "是否把草稿模型的采样放在后端（GPU）上执行。草稿模型默认已用后端采样，此选项可关闭。",
+    "spec_draft_n_ubatch": "草稿上下文的物理最大批处理大小（ubatch），调小可节省显存。0 = 与 --n-ubatch 相同。",
+    "spec_draft_sampling": "草稿模型产生草稿的方式：greedy = 取 argmax，probabilistic = 采样并由主模型以拒绝采样验证。默认 greedy。",
     "spec_ngram_size_n": "ngram-simple：查找用的 n-gram 长度 N（向前回看多少个 token 匹配模式）。",
     "spec_ngram_size_m": "ngram-simple：起草的 m-gram 长度 M（匹配后起草多少 token）。越大潜在加速越高，但接受率可能降低。",
     "spec_ngram_min_hits": "ngram-simple：n-gram 在历史中出现的最少次数，达到才可用作草稿候选。",
@@ -260,6 +268,7 @@ HELP_TEXTS = {
     "log_prompts_dir": "把提示词保存到指定目录（目录不存在会自动创建；仅供调试）。",
     "log_prefix": "日志消息带前缀。",
     "log_timestamps": "日志消息带时间戳。",
+    "log_jsonl": "日志以 JSONL 格式输出（每行一个 JSON 对象），同时禁用彩色日志。适合机器解析日志。",
     "extra_args": "额外参数，原样附加到 llama-server 命令末尾，每行一个。用于界面未暴露的参数（如 --flash-attn 的某个新别名）。",
 }
 

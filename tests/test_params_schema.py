@@ -39,14 +39,14 @@ _VALUE_EMIT = {"diff", "diff_pos", "diff_ge0", "diff_join", "index",
 
 
 def test_param_count_and_keys():
-    assert len(PARAMS) == 226
+    assert len(PARAMS) == 235
     assert set(PARAMS_BY_KEY) == set(p.key for p in PARAMS)
     # Single source of truth: schema keys == fallback default keys.
     assert set(PARAMS_BY_KEY) == set(defaults._FALLBACK_DEFAULTS)
 
 
 def test_ui_params():
-    assert len(UI_PARAMS) == 225
+    assert len(UI_PARAMS) == 234
     assert [p.key for p in UI_PARAMS] == [p.key for p in PARAMS
                                           if p.wattr is not None]
     # wattr names are unique.
