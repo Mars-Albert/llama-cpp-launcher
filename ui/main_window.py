@@ -36,6 +36,7 @@ from core.config import (
     CONFIG_DIR, LOGS_DIR, LAST_RUN_LOG,
 )
 from core.constants import (
+    DEFAULT_PORT,
     WINDOW_WIDTH, WINDOW_HEIGHT, MIN_WINDOW_WIDTH, MIN_WINDOW_HEIGHT,
     SHADOW_MARGIN, CARD_RADIUS, CARD_CONTENT_INSET, TITLE_BAR_HEIGHT,
     TITLE_GRAB_MIN,
@@ -45,7 +46,7 @@ from core.constants import (
     VERSION_CHECK_TIMEOUT_S,
 )
 from ui.log_parser import colorize_log_line, parse_log_line, line_level
-from ui.command_builder import CommandBuilder, quote_arg
+from ui.command_builder import CommandBuilder, quote_arg, EXPLICIT_ELIGIBLE_KEYS
 from ui.runtime_info import build_info_html, empty_info_html
 from core.runner import ServerRunner
 from core.params_schema import PARAMS_BY_KEY
@@ -834,6 +835,22 @@ class MainWindow(QMainWindow):
         self._gpu_devices = None  # None = probe 尚未完成
         mode_bar.addStretch()
         mode_bar.addWidget(self.gpu_info_label)
+        # 显式输出模式 (2026-10): global switch. While off, no parameter
+        # is explicitly emitted and the per-row toggles stay hidden; while on,
+        # every explicit-eligible advanced row shows a toggle and the checked
+        # params are written to the launch command even when they equal
+        # the default. State (below) lives on the window, so it survives
+        # basic/advanced mode switches.
+        self._explicit_mode = False
+        self._explicit_params = set()
+        self.btn_explicit_mode = QPushButton(t("⚡ 显式输出"))
+        self.btn_explicit_mode.setObjectName("explicitModeBtn")
+        self.btn_explicit_mode.setCheckable(True)
+        self.btn_explicit_mode.setFixedHeight(28)
+        self.btn_explicit_mode.setToolTip(
+            t("开启后每个参数行显示显式输出开关，勾选的参数无论是否等于默认值都写入启动命令"))
+        self.btn_explicit_mode.toggled.connect(self._on_explicit_mode_changed)
+        mode_bar.addWidget(self.btn_explicit_mode)
         self.btn_undo = QPushButton(t("↩ 撤销"))
         self.btn_undo.setFixedHeight(28)
         self.btn_undo.clicked.connect(self._undo)
@@ -1326,6 +1343,7 @@ class MainWindow(QMainWindow):
         self.advanced_panel.adv_webui.stateChanged.connect(self._update_webui_button)
         self.basic_panel.ctx_spin.valueChanged.connect(self._update_model_info)
         self.advanced_panel.adv_ctx_size.valueChanged.connect(self._update_model_info)
+        self.advanced_panel.explicit_toggled.connect(self._on_explicit_toggled)
         self._update_cmd_preview()
         self.btn_webui.setEnabled(False)
 
@@ -1426,7 +1444,29 @@ class MainWindow(QMainWindow):
         self._apply_params_to_current()
 
     def _build_args_from_params(self):
-        return self.cmd_builder.build(self.params)
+        # Explicit emission is gated by the global mode switch: off → no key
+        # is explicitly written even if a per-row toggle was left checked.
+        explicit = self._explicit_params if self._explicit_mode else frozenset()
+        return self.cmd_builder.build(self.params, explicit=explicit)
+
+    def _on_explicit_mode_changed(self, checked):
+        self._explicit_mode = checked
+        self.advanced_panel.set_explicit_mode(checked)
+        save_ui_pref("explicit_mode", checked)
+        # Toggling the per-row buttons changes the panel's width
+        # minimums — re-sync the window floors (settled-layout retry,
+        # same pattern as the quick-toggles customize dialog).
+        self._sync_panel_min()
+        QTimer.singleShot(0, self._sync_panel_min)
+        self._update_cmd_preview()
+
+    def _on_explicit_toggled(self, key, checked):
+        if checked:
+            self._explicit_params.add(key)
+        else:
+            self._explicit_params.discard(key)
+        save_ui_pref("explicit_params", sorted(self._explicit_params))
+        self._update_cmd_preview()
 
     def _update_cmd_preview(self):
         if self._mode_switching:
@@ -1441,7 +1481,7 @@ class MainWindow(QMainWindow):
         cmd_path = quote_arg(get_server_path())
         new_text = cmd_path + (" " + " ".join(quote_arg(a) for a in args) if args else "")
         # B1: only touch the widget when the text actually changed — rebuilding
-        # the document on every 300ms tick forced pointless relayout/repaints
+        # the document on every 300ms tick explicit pointless relayout/repaints
         if new_text != self.cmd_preview.toPlainText():
             self.cmd_preview.setPlainText(new_text)
 
@@ -1580,7 +1620,7 @@ class MainWindow(QMainWindow):
             return False
 
         host = v.get('host', '127.0.0.1')
-        port = v.get("port", 8080)
+        port = v.get("port", DEFAULT_PORT)
         # A7: probe the host that will actually be bound. 0.0.0.0/:: accept
         # loopback connections, so 127.0.0.1 is the right probe target then.
         check_host = "127.0.0.1" if host in ("0.0.0.0", "::") else host
@@ -1718,7 +1758,7 @@ class MainWindow(QMainWindow):
     def _get_web_address(self):
         v = self._get_current_values()
         host = v.get("host", "127.0.0.1")
-        port = v.get("port", 8080)
+        port = v.get("port", DEFAULT_PORT)
         display_host = "127.0.0.1" if host == "0.0.0.0" else host
         return f"http://{display_host}:{port}"
 
@@ -2540,6 +2580,25 @@ class MainWindow(QMainWindow):
             # height (user report 2026-10: restored quick spin rendered ~6px
             # shorter than its quick combo).
             self._apply_field_heights()
+        # 显式输出 (2026-10): global mode + per-row checked keys. Keys are
+        # sanitized against the explicit-eligible set — a param removed or
+        # re-emitted in a newer schema must not keep explicitly emitting from a
+        # stale settings file.
+        self._explicit_mode = (isinstance(prefs.get("explicit_mode"), bool)
+                            and prefs["explicit_mode"])
+        fp = prefs.get("explicit_params")
+        if isinstance(fp, (list, tuple)):
+            self._explicit_params = {k for k in fp
+                                  if isinstance(k, str)
+                                  and k in EXPLICIT_ELIGIBLE_KEYS}
+        if self._explicit_mode or self._explicit_params:
+            # blockSignals: the restore must not re-save prefs or churn the
+            # preview; the first preview tick picks the state up.
+            self.btn_explicit_mode.blockSignals(True)
+            self.btn_explicit_mode.setChecked(self._explicit_mode)
+            self.btn_explicit_mode.blockSignals(False)
+            self.advanced_panel.set_explicit_mode(self._explicit_mode)
+            self.advanced_panel.set_explicit_state(self._explicit_params)
 
     def _customize_quick_toggles(self):
         # E10: 设置-menu entry for the quick-toggles group — the panel-level
@@ -2581,6 +2640,8 @@ class MainWindow(QMainWindow):
             "adv_tab_key": self.advanced_panel.current_tab_key(),
             "right_tab": self.tab_widget.currentIndex(),
             "quick_params": self.basic_panel.get_quick_params(),
+            "explicit_mode": self._explicit_mode,
+            "explicit_params": sorted(self._explicit_params),
         })
 
     def closeEvent(self, event):
@@ -3282,6 +3343,9 @@ class MainWindow(QMainWindow):
         self.mode_combo.setItemText(1, t("高级模式"))
         self.btn_undo.setText(t("↩ 撤销"))
         self.btn_reset.setText(t("🔄 恢复默认"))
+        self.btn_explicit_mode.setText(t("⚡ 显式输出"))
+        self.btn_explicit_mode.setToolTip(
+            t("开启后每个参数行显示显式输出开关，勾选的参数无论是否等于默认值都写入启动命令"))
         self.btn_start.setText(t("▶ 启动服务"))
         self.btn_stop.setText(t("■ 停止服务"))
         self.btn_copy_cmd.setText(t("📋 复制命令"))
@@ -3637,6 +3701,23 @@ class MainWindow(QMainWindow):
                 background: @@field_bg@@;
                 color: @@muted@@;
                 border-color: @@border@@;
+            }
+            /* 显式输出 (2026-10): the mode-bar global switch and the
+               per-row toggles light up in the theme accent when on. */
+            QPushButton#explicitModeBtn:checked {
+                background: #2563eb;
+                color: #ffffff;
+                border-color: #2563eb;
+            }
+            QToolButton#explicitBtn {
+                padding: 4px 8px;
+                font-size: 12px;
+                color: @@muted@@;
+            }
+            QToolButton#explicitBtn:checked {
+                background: #2563eb;
+                color: #ffffff;
+                border-color: #2563eb;
             }
             QCheckBox {
                 color: @@text@@;

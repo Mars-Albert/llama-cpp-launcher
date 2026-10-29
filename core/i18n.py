@@ -63,6 +63,10 @@ _EN = {
     "高级模式": "Advanced Mode",
     "↩ 撤销": "↩ Undo",
     "🔄 恢复默认": "🔄 Reset Default",
+    "⚡ 显式输出": "⚡ Explicit Output",
+    "显式": "Explicit",
+    "显式输出该参数（即使与默认值相同）": "Explicitly write this parameter to the launch command (even when it equals the default)",
+    "开启后每个参数行显示显式输出开关，勾选的参数无论是否等于默认值都写入启动命令": "When on, every parameter row shows an explicit-output toggle; checked parameters are written to the launch command even when they equal the default",
 
     # Command preview & controls
     "📝 启动命令预览": "📝 Launch Command Preview",

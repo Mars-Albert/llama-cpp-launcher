@@ -2,7 +2,7 @@
 
 # Default server connection
 DEFAULT_HOST = "127.0.0.1"
-DEFAULT_PORT = 8080
+DEFAULT_PORT = 9931
 
 # UI defaults — E14: first-launch window size. Clamped to the primary
 # screen's available area in MainWindow._default_window_size() so small

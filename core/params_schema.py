@@ -286,7 +286,7 @@ PARAMS = (
     P(key='lookup_cache_dynamic', tab='spec', row=39, label='动态查找缓存 (--lookup-cache-dynamic):', wattr='adv_lookup_dynamic', widget='file', default='', emit='diff_nonempty', fmt='str', flag='--lookup-cache-dynamic', flags=('-lcd', '--lookup-cache-dynamic'), parser='str', browse='file', filter_str="All Files (*)"),
     # ---------- server (tab=server) ----------
     P(key='host', tab='server', row=0, label='主机 (--host):', wattr='adv_host', widget='text', default='127.0.0.1', emit='diff', fmt='str', flag='--host', flags=('--host',), parser='str'),
-    P(key='port', tab='server', row=1, label='端口 (--port):', wattr='adv_port', widget='spin', default=8080, emit='diff', fmt='int', flag='--port', flags=('--port',), parser='int', min=1, max=65535),
+    P(key='port', tab='server', row=1, label='端口 (--port):', wattr='adv_port', widget='spin', default=9931, emit='diff', fmt='int', flag='--port', flags=('--port',), parser='int', min=1, max=65535),
     P(key='reuse_port', tab='server', row=2, label='复用端口 (--reuse-port):', wattr='adv_reuse_port', widget='check', default=False, emit='bool_pos', flag='--reuse-port', flags=('--reuse-port',), parser='bool'),
     P(key='api_prefix', tab='server', row=3, label='API前缀 (--api-prefix):', wattr='adv_api_prefix', widget='text', default='', emit='diff_nonempty', fmt='str', flag='--api-prefix', flags=('--api-prefix',), parser='str'),
     P(key='path', tab='server', row=4, label='API路径 (--path):', wattr='adv_path', widget='text', default='', emit='diff_nonempty', fmt='str', flag='--path', flags=('--path',), parser='str'),

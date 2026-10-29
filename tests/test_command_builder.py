@@ -55,10 +55,10 @@ def make_builder(key=None, value=None, **overrides):
     return CommandBuilder(defaults)
 
 
-def emit(builder, **values):
+def emit(builder, explicit=(), **values):
     v = dict(_FALLBACK_DEFAULTS)
     v.update(values)
-    return builder.build(v)
+    return builder.build(v, explicit=set(explicit))
 
 
 # ---------------------------------------------------------------------------
@@ -170,6 +170,123 @@ class TestNegFlags:
         b = make_builder()  # fallback default: False for these
         assert emit(b, **{key: True}) == [flag]
         assert emit(b, **{key: False}) == []
+
+
+# ---------------------------------------------------------------------------
+# Explicit emission (2026-10 per-row toggle): the value is written verbatim,
+# bypassing the default check and every inactive-value guard
+# ---------------------------------------------------------------------------
+
+class TestExplicitEmit:
+    def test_default_int_written_verbatim(self):
+        b = make_builder()
+        assert emit(b, explicit=("port",), port=9931) == ["--port", "9931"]
+
+    def test_zero_default_diff_pos_written(self):
+        b = make_builder()  # ctx_size fallback default: 0
+        assert emit(b, explicit=("ctx_size",), ctx_size=0) == ["-c", "0"]
+
+    def test_default_float_two_decimals(self):
+        b = make_builder()  # temp fallback default: 0.8
+        assert emit(b, explicit=("temp",), temp=0.8) == ["--temp", "0.80"]
+
+    def test_negative_default_diff_ge0_written(self):
+        b = make_builder()  # adaptive_target fallback default: -1.0
+        assert emit(b, explicit=("adaptive_target",), adaptive_target=-1.0) == [
+            "--adaptive-target", "-1.00"
+        ]
+
+    def test_empty_string_written(self):
+        b = make_builder()  # api_prefix fallback default: ''
+        assert emit(b, explicit=("api_prefix",), api_prefix="") == [
+            "--api-prefix", ""
+        ]
+
+    def test_skip_value_written(self):
+        b = make_builder()  # spec_type fallback default: 'none'
+        assert emit(b, explicit=("spec_type",), spec_type="none") == [
+            "--spec-type", "none"
+        ]
+
+    def test_empty_join_list_written(self):
+        b = make_builder()  # tools fallback default: []
+        assert emit(b, explicit=("tools",), tools=[]) == ["--tools", ""]
+
+    @pytest.mark.parametrize("key, neg, pos", NEG_FLAG_PARAMS)
+    def test_negatable_explicit_on_writes_positive(self, key, neg, pos):
+        b = make_builder()  # fallback default: True for all these keys
+        assert emit(b, explicit=(key,), **{key: True}) == [pos]
+
+    @pytest.mark.parametrize("key, neg, pos", NEG_FLAG_PARAMS)
+    def test_negatable_explicit_off_writes_negative(self, key, neg, pos):
+        b = make_builder()  # fallback default: True for all these keys
+        assert emit(b, explicit=(key,), **{key: False}) == [neg]
+
+    def test_negatable_default_off_explicit_on(self):
+        b = make_builder("escape", False)
+        assert emit(b, explicit=("escape",), escape=True) == ["--escape"]
+
+    def test_positive_only_flag_explicit_on_with_default_on(self):
+        b = make_builder("context_shift", True)
+        assert emit(b, explicit=("context_shift",), context_shift=True) == [
+            "--context-shift"
+        ]
+
+    def test_positive_only_flag_explicit_off_has_no_token(self):
+        b = make_builder("context_shift", True)
+        assert emit(b, explicit=("context_shift",), context_shift=False) == []
+
+    def test_prio_explicit_default_written(self):
+        b = make_builder()  # prio fallback default: 'normal'
+        assert emit(b, explicit=("prio",), prio="normal") == ["--prio", "0"]
+
+    def test_index_explicit_default_written(self):
+        b = make_builder()  # mirostat fallback default: 0
+        assert emit(b, explicit=("mirostat",), mirostat=0) == ["--mirostat", "0"]
+
+    def test_ngl_explicit_auto_written_as_literal(self):
+        b = make_builder()  # n_gpu_layers fallback default: 'auto'
+        assert emit(b, explicit=("n_gpu_layers",), n_gpu_layers="auto") == [
+            "-ngl", "auto"
+        ]
+
+    def test_ngl_explicit_all_still_999(self):
+        b = make_builder()
+        assert emit(b, explicit=("n_gpu_layers",), n_gpu_layers="all") == [
+            "-ngl", "999"
+        ]
+
+    def test_ngl_explicit_numeric(self):
+        b = make_builder()
+        assert emit(b, explicit=("n_gpu_layers",), n_gpu_layers=3) == ["-ngl", "3"]
+
+    def test_ngl_draft_explicit_auto_written_as_literal(self):
+        b = make_builder()  # n_gpu_layers_draft fallback default: 'auto'
+        assert emit(
+            b, explicit=("n_gpu_layers_draft",), n_gpu_layers_draft="auto"
+        ) == ["--n-gpu-layers-draft", "auto"]
+
+    def test_log_verbosity_still_suppressed_when_verbose_on(self):
+        b = make_builder()
+        args = emit(b, explicit=("log_verbosity",),
+                    verbose=True, log_verbosity=4)
+        assert "--log-verbosity" not in args
+
+    def test_log_verbosity_explicit_when_verbose_off(self):
+        b = make_builder()  # log_verbosity fallback default: 4
+        assert emit(b, explicit=("log_verbosity",), log_verbosity=4) == [
+            "--log-verbosity", "4"
+        ]
+
+    def test_does_not_affect_truthy_or_extra(self):
+        b = make_builder()
+        assert emit(b, explicit=("model",), model="") == []
+        assert emit(b, explicit=("extra_args",), extra_args="") == []
+
+    def test_non_explicit_params_untouched(self):
+        b = make_builder()  # host (server row 0) precedes port (row 1)
+        args = emit(b, explicit=("port",), host="0.0.0.0", port=9931)
+        assert args == ["--host", "0.0.0.0", "--port", "9931"]
 
 
 # ---------------------------------------------------------------------------

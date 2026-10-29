@@ -8,12 +8,13 @@ from PyQt6.QtWidgets import (
     QListWidgetItem, QFileDialog, QLabel, QAbstractItemView,
     QScrollArea, QToolButton
 )
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, pyqtSignal
 from core.i18n import t
 from core.constants import DEFAULT_HOST, DEFAULT_PORT, MAIN_GPU_MAX
 from core.params_schema import PARAMS_BY_KEY, TAB_TITLES, UI_PARAMS, tab_params
 from core.params_help import has_help
 from ui.param_help import make_help_button
+from ui.command_builder import explicit_eligible
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +26,11 @@ DRAFT_PRIO_ITEMS = ["normal", "medium", "high", "realtime"]
 
 
 class AdvancedPanel(QWidget):
+    # Per-row explicit-output toggle changed: (param key, checked). The
+    # owning MainWindow owns the state (it must survive mode switches);
+    # this panel only hosts the buttons.
+    explicit_toggled = pyqtSignal(str, bool)
+
     def __init__(self, parent=None, chat_templates=None, defaults=None):
         super().__init__(parent)
         self._chat_templates = chat_templates or []
@@ -55,6 +61,24 @@ class AdvancedPanel(QWidget):
         keys = self.tab_keys()
         return keys[idx] if 0 <= idx < len(keys) else ""
 
+    def set_explicit_mode(self, enabled):
+        """Show/hide every per-row explicit-output toggle (global mode switch).
+
+        Hidden buttons keep their checked state — re-enabling the mode
+        restores the user's previous selection."""
+        for btn in self._explicit_btns.values():
+            btn.setVisible(enabled)
+
+    def set_explicit_state(self, keys):
+        """Restore the checked state from persisted keys (no signals)."""
+        keys = set(keys)
+        for key, btn in self._explicit_btns.items():
+            btn.blockSignals(True)
+            try:
+                btn.setChecked(key in keys)
+            finally:
+                btn.blockSignals(False)
+
     def set_chat_templates(self, templates):
         """Replace the chat-template list, preserving the current selection (plan A10)."""
         self._chat_templates = list(templates)
@@ -77,6 +101,7 @@ class AdvancedPanel(QWidget):
         self._add_rm_btns = []
         self._section_labels = []
         self._help_btns = []
+        self._explicit_btns = {}  # param key -> per-row explicit-output toggle
         self.tabs = QTabWidget()
         for tab_key, tab_name in self._TAB_TITLES:
             self.tabs.addTab(self._create_tab(tab_key), t(tab_name))
@@ -165,12 +190,47 @@ class AdvancedPanel(QWidget):
         tab_layout.addWidget(scroll)
         return tab
 
+    def _make_explicit_button(self, key):
+        # Per-row explicit-output toggle (2026-10): while the global
+        # explicit-output mode is on, a checked row is written to the launch
+        # command even when it equals the default. Hidden while the mode
+        # is off (set_explicit_mode); state is owned by MainWindow.
+        btn = QToolButton()
+        btn.setObjectName("explicitBtn")
+        btn.setText(t("显式"))
+        btn.setToolTip(t("显式输出该参数（即使与默认值相同）"))
+        btn.setCheckable(True)
+        btn.toggled.connect(lambda checked, k=key:
+                            self.explicit_toggled.emit(k, checked))
+        # Hidden until the global explicit-output mode is on (default off)
+        # or a saved explicit-output state is restored.
+        btn.setVisible(False)
+        return btn
+
+    def _wrap_with_explicit(self, p, row_widget):
+        """Wrap a row field in a holder carrying the explicit-output toggle.
+
+        Only explicit-eligible params get one (explicit_eligible) — rows
+        whose emission could never change would carry a dead control."""
+        if not explicit_eligible(p):
+            return row_widget
+        holder = QWidget()
+        hl = QHBoxLayout(holder)
+        hl.setContentsMargins(0, 0, 0, 0)
+        hl.setSpacing(6)
+        hl.addWidget(row_widget, 1)
+        btn = self._make_explicit_button(p.key)
+        self._explicit_btns[p.key] = btn
+        hl.addWidget(btn)
+        return holder
+
     def _add_widget_row(self, form, p, row_widget, widget=None):
         # Explicit None check: empty Qt models (e.g. a fresh QListWidget)
         # are falsy in PyQt, so `widget or row_widget` would misfire.
         if widget is None:
             widget = row_widget
         setattr(self, p.wattr, widget)
+        row_widget = self._wrap_with_explicit(p, row_widget)
         self._add_form_row(form, p.label, row_widget, param_key=p.key,
                            right_label=(p.tab == "model"))
 
@@ -267,8 +327,11 @@ class AdvancedPanel(QWidget):
         if p.curtext:
             w.setCurrentText(p.curtext)
         setattr(self, p.wattr, w)
-        self._add_form_row(form, p.label, w, param_key=p.key,
-                           right_label=(p.tab == "model"))
+        # ngl / chat_template rows bypass _add_widget_row, so the
+        # explicit-output wrap happens here (the ngl helper-spin row below
+        # mirrors the combo and carries no toggle of its own).
+        self._add_form_row(form, p.label, self._wrap_with_explicit(p, w),
+                           param_key=p.key, right_label=(p.tab == "model"))
         if p.value != "ngl":
             return
         # ngl composite: the editable combo plus a helper spinbox; the
@@ -450,6 +513,11 @@ class AdvancedPanel(QWidget):
         # Help buttons (? tooltips)
         for btn in self._help_btns:
             btn.setToolTip(t("查看参数说明"))
+
+        # Explicit-output toggles
+        for btn in self._explicit_btns.values():
+            btn.setText(t("显式"))
+            btn.setToolTip(t("显式输出该参数（即使与默认值相同）"))
 
         # Buttons
         for btn in self._browse_btns:
