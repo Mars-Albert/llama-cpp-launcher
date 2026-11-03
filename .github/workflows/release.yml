@@ -14,6 +14,12 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          # Full history + tags: the release notes come from the annotated tag's
+          # own message, and the fallback (commit list since the previous tag)
+          # needs the previous tag to exist locally.
+          fetch-depth: 0
+          fetch-tags: true
 
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
@@ -60,11 +66,43 @@ jobs:
             exit 1
           }
 
+      - name: Write release notes from the tag message
+        shell: bash
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          # Annotated tag (`git tag -a`) carries the release notes; write them out
+          # verbatim. generate_release_notes is not usable here: it only lists
+          # merged pull requests, and this repo pushes straight to main, so every
+          # release body came out empty except for the compare link.
+          if [ "$(git cat-file -t "refs/tags/$TAG" 2>/dev/null)" = "tag" ]; then
+            git tag -l --format='%(contents)' "$TAG" > RELEASE_NOTES.md
+          fi
+
+          if [ ! -s RELEASE_NOTES.md ]; then
+            # Fallback for a lightweight tag: subject lines since the previous tag.
+            PREV="$(git describe --tags --abbrev=0 "$TAG^" 2>/dev/null || echo '')"
+            {
+              echo "### Changes in $TAG"
+              echo
+              if [ -n "$PREV" ]; then
+                git log --no-merges --pretty='- %s' "$PREV..$TAG"
+                echo
+                echo "**Full Changelog**: https://github.com/$GITHUB_REPOSITORY/compare/$PREV...$TAG"
+              else
+                git log --no-merges -n 40 --pretty='- %s' "$TAG"
+              fi
+            } > RELEASE_NOTES.md
+          fi
+
+          echo "----- release notes -----"
+          cat RELEASE_NOTES.md
+          echo "---------------------------"
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           name: "Llama CPP Launcher v${{ steps.version.outputs.VERSION }}"
           files: dist/LlamaCppLauncher.exe
-          generate_release_notes: true
+          body_path: RELEASE_NOTES.md
           draft: false
           prerelease: false
