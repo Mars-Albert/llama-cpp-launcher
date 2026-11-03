@@ -490,10 +490,10 @@ ol.steps li:last-child { padding-bottom: 0; }
         <p class="chapter-lead">A full-featured <code class="inl">llama-server</code> (llama.cpp) GUI launcher. It drives the <code class="inl">llama-server</code> binary *you* installed — everything it does is visible, everything is under your control.</p>
 
         <div class="spec-strip" data-od-id="spec-strip">
-          <div class="spec-cell"><div class="spec-num">235</div><div class="spec-label">llama-server CLI parameters in one panel</div></div>
+          <div class="spec-cell"><div class="spec-num">All</div><div class="spec-label">CLI parameters configurable in the UI</div></div>
           <div class="spec-cell"><div class="spec-num">74</div><div class="spec-label">log-parsing rules, old &amp; v9174+ formats</div></div>
           <div class="spec-cell"><div class="spec-num">9</div><div class="spec-label">advanced-mode tabs, grouped by concern</div></div>
-          <div class="spec-cell"><div class="spec-num">~13k</div><div class="spec-label">lines of Python; one dependency — PyQt6</div></div>
+          <div class="spec-cell"><div class="spec-num">1</div><div class="spec-label">runtime dependency (PyQt6); no network, no telemetry</div></div>
         </div>
 
         <h3 id="ov-philosophy">A different route: bring your own llama-server</h3>
@@ -583,7 +583,7 @@ python main.py             # or double-click run.bat on Windows</pre>
         <div class="shots">
           <figure class="shot" data-od-id="shot-advanced">
             <img class="content-img" src="en_light.png" width="2000" height="1175" alt="Advanced mode, light theme: the 9-tab parameter panel, the permanent control row and the live metrics row" />
-            <figcaption>Advanced mode · light theme — 9 tabs cover all 235 parameters, with the control row and live metrics below</figcaption>
+            <figcaption>Advanced mode · light theme: 9 tabs cover every parameter, with the control row and live metrics below</figcaption>
           </figure>
           <figure class="shot" data-od-id="shot-basic">
             <img class="content-img" src="en.png" width="2000" height="1175" alt="Basic mode, dark theme, model running: runtime info parsed live" />
@@ -656,7 +656,7 @@ python main.py             # or double-click run.bat on Windows</pre>
           <table class="ds-table">
             <thead><tr><th class="hl">Basic Mode</th><th>Advanced Mode</th></tr></thead>
             <tbody>
-              <tr><td class="hl">Model &amp; mmproj pickers (backed by the model browser)</td><td>235 parameters in 9 tabs</td></tr>
+              <tr><td class="hl">Model &amp; mmproj pickers (backed by the model browser)</td><td>All CLI parameters configurable in the UI, grouped into 9 tabs</td></tr>
               <tr><td class="hl">Sliders for temp / top-p / min-p / repeat penalty, top-k spin</td><td>LoRA adapters &amp; scales, control vectors, image token limits</td></tr>
               <tr><td class="hl">Context quick-picks: Default → 4K → 262K</td><td>Model sources: local file, HF repo, URL, Docker repo</td></tr>
               <tr><td class="hl">GPU layers auto / all / manual, host / port / parallel</td><td>Speculative decoding (draft-mtp, ngram, lookup cache)</td></tr>
@@ -696,7 +696,7 @@ python main.py             # or double-click run.bat on Windows</pre>
       <section class="chapter" id="ch-advanced" data-od-id="ch-advanced">
         <p class="chapter-eyebrow num">06 · Interface &amp; modes</p>
         <h2>Advanced Mode · 9 Tabs</h2>
-        <p class="chapter-lead">All 235 <code class="inl">llama-server</code> CLI parameters in one view, grouped into 9 tabs by concern. Every parameter row has a “?” help button.</p>
+        <p class="chapter-lead">All CLI parameters are configurable in the UI (the parameter list moves with llama.cpp itself), grouped into 9 tabs by concern. Every parameter row has a “?” help button.</p>
 
         <h3 id="adv-tabs">The 9 tabs</h3>
         <div class="table-wrap">
@@ -950,7 +950,7 @@ python main.py             # or double-click run.bat on Windows</pre>
               <tr><td>Bring your own llama.cpp binary</td><td class="hl"><span class="yes">✓</span></td><td><span class="no">✗</span></td><td><span class="no">✗</span></td></tr>
               <tr><td>Run the latest llama.cpp the day it ships</td><td class="hl"><span class="yes">✓</span></td><td><span class="no">✗</span></td><td><span class="no">✗</span></td></tr>
               <tr><td>Any custom backend (CUDA / ROCm / Vulkan / Metal / SYCL)</td><td class="hl"><span class="yes">✓</span></td><td><span class="no">✗</span></td><td><span class="no">✗</span></td></tr>
-              <tr><td>Full CLI parameter access (235)</td><td class="hl"><span class="yes">✓</span></td><td><span class="no">✗</span></td><td><span class="part">Partial</span></td></tr>
+              <tr><td>All CLI parameters configurable in the UI</td><td class="hl"><span class="yes">✓</span></td><td><span class="no">✗</span></td><td><span class="part">Partial</span></td></tr>
               <tr><td>The exact command is visible &amp; copyable</td><td class="hl"><span class="yes">✓</span></td><td><span class="no">✗</span></td><td><span class="no">✗</span></td></tr>
               <tr><td>Presets with version-aware migration</td><td class="hl"><span class="yes">✓</span></td><td><span class="no">✗</span></td><td><span class="no">✗</span></td></tr>
               <tr><td>Built-in GGUF inspector</td><td class="hl"><span class="yes">✓</span></td><td><span class="no">✗</span></td><td><span class="no">✗</span></td></tr>
@@ -995,8 +995,8 @@ python main.py             # or double-click run.bat on Windows</pre>
 ├── llama_cpp_launcher.spec  # PyInstaller spec (icon embedded)
 ├── requirements.txt
 ├── core/
-│   ├── params_schema.py     # ★ 235-param schema (Qt-free, single source of truth)
-│   ├── params_help.py       # Per-parameter help texts (235 entries)
+│   ├── params_schema.py     # ★ parameter schema (Qt-free, single source of truth)
+│   ├── params_help.py       # Per-parameter help texts (one entry per parameter)
 │   ├── defaults.py          # `--help` parsing, fallback defaults, GPU probe
 │   ├── config.py            # Preset &amp; settings IO (~/.llama-cpp-launcher)
 │   ├── runner.py            # QProcess wrapper (start/stop/readiness)

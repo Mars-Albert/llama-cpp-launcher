@@ -4,9 +4,9 @@
 
 # 🦙 Llama CPP Launcher
 
-**A full-featured GUI launcher for `llama-server` (llama.cpp) — bring your own binary.**
+**A full-featured GUI for `llama-server` (llama.cpp) — bring your own binary.**
 
-All **235** `llama-server` CLI parameters in one panel · live default detection · presets · real-time log parsing · live metrics row · built-in GGUF inspector
+All CLI parameters configurable in the UI · live default detection · presets · real-time log parsing · live metrics · built-in GGUF inspector
 
 [![Version](https://img.shields.io/github/v/release/Mars-Albert/llama-cpp-launcher?label=version)](https://github.com/Mars-Albert/llama-cpp-launcher/releases/latest)
 [![Python](https://img.shields.io/badge/python-3.11%2B-3776ab)](https://www.python.org/)
@@ -14,7 +14,7 @@ All **235** `llama-server` CLI parameters in one panel · live default detection
 [![License: MIT](https://img.shields.io/badge/License-MIT-2ea44f)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows%20exe%20%7C%20any%20OS%20(source)-8a2be2)]()
 
-**[Download Latest Release](https://github.com/Mars-Albert/llama-cpp-launcher/releases/latest)** · **[📖 中文文档](README_zh.md)** · [⭐ Star this repo](https://github.com/Mars-Albert/llama-cpp-launcher)
+**[⬇ Download Latest Release](https://github.com/Mars-Albert/llama-cpp-launcher/releases/latest)** · **[📖 中文文档](README_zh.md)**
 
 </div>
 
@@ -23,8 +23,8 @@ All **235** `llama-server` CLI parameters in one panel · live default detection
 <details>
 <summary><b>📑 Table of Contents</b></summary>
 
-- [Why Llama CPP Launcher?](#why)
-- [Screenshot](#screenshot)
+- [Why this instead of a bundled-backend tool?](#why)
+- [Screenshots](#screenshots)
 - [Quick Start](#quick-start)
 - [Features](#features)
   - [Two Modes](#two-modes)
@@ -37,10 +37,8 @@ All **235** `llama-server` CLI parameters in one panel · live default detection
   - [Per-Parameter Help](#param-help)
   - [GGUF Inspector](#gguf-inspector)
   - [Server Lifecycle](#server-lifecycle)
-  - [Layout & Status Bar](#layout)
-  - [Window & UI](#window-ui)
-  - [i18n & Themes](#i18n-themes)
-- [Comparison](#comparison)
+  - [Window, Layout & Status Bar](#window-ui)
+  - [Language & Theme](#i18n-themes)
 - [Development](#development)
 - [License](#license)
 
@@ -50,54 +48,56 @@ All **235** `llama-server` CLI parameters in one panel · live default detection
 
 <a id="why"></a>
 
-## 💡 Why Llama CPP Launcher?
+## 💡 Why this instead of a bundled-backend tool?
 
-Most GUI tools (Ollama, LM Studio, …) **bundle a fixed llama.cpp version** and hide the command line. Llama CPP Launcher is the opposite: it drives the `llama-server` binary *you* installed, and everything it does is visible.
+GUI tools that ship their own llama.cpp build are convenient — but the runtime is theirs, not yours. Llama CPP Launcher drives the `llama-server` binary **you** installed, and every flag it passes stays visible.
 
-| | Llama CPP Launcher | Bundled-backend tools |
+| | Llama CPP Launcher | Bundled-runtime tools |
 |---|---|---|
-| Upgrade llama.cpp | ✅ Swap the binary, done | ❌ Wait for an app update |
-| Custom builds (CUDA / ROCm / Vulkan / Metal / SYCL) | ✅ Use any build | ❌ Stuck with the bundled one |
-| Bleeding-edge commits | ✅ Build today, run today | ❌ Weeks or months of waiting |
-| Rollback | ✅ Put the old binary back | ❌ Hope they ship it |
-| The exact command the app runs | ✅ Always visible, one-click copy | ❌ Opaque |
+| Upgrade llama.cpp | Swap the binary | Wait for an app update |
+| Custom builds (CUDA / ROCm / Vulkan / Metal / SYCL) | Use any build you like | Whatever they bundled |
+| A fix merged upstream today | Run it today | Wait for their release |
+| Roll back a regression | Put the old binary back | Wait for them to fix it |
+| The exact command being run | Always visible, one click to copy | Abstracted away |
 
-And it stays in sync automatically:
+It also stays in sync with whatever binary you point it at:
 
-- **🔍 Live default detection** — runs `llama-server --help` on startup and parses the *real* defaults of your binary version. No stale hardcoded values, no drift (drift is surfaced via a ⚠️ indicator).
-- **🗂️ Chat template auto-discovery** — templates shipped by your binary appear in the UI automatically.
-- **🖥️ GPU detection** — probes `--list-devices` and shows e.g. `Detected 2× GPU: RTX 5090 (32GB) + RTX 2080 (8GB)` in the **status bar**, left of the version (never auto-fills, always your call).
+- **🔍 Live defaults** — runs `llama-server --help` on startup and uses your binary's *real* defaults, so nothing is hardcoded and stale. When a flag's default has drifted from the built-in table, a ⚠ appears in the status bar with the full list.
+- **🗂️ Chat templates** — the ones your binary ships with show up automatically.
+- **🖥️ Device probe** — `--list-devices` results land in the status bar (e.g. `Detected 2× GPU: RTX 5090 (32GB) + RTX 2080 (8GB)`). It only reports; it never auto-fills `--n-gpu-layers` for you.
 
-**🪶 Lightweight & private** — ~16,000 lines of Python, one dependency (PyQt6). No bundled backend, no accounts, no telemetry, no phone home. 100% local.
+No account, no telemetry, no bundled backend, nothing leaving your machine. One dependency: PyQt6.
 
-<a id="screenshot"></a>
+<a id="screenshots"></a>
 
 ## 📸 Screenshots
-
-*Advanced mode (light theme, left) · Basic mode with a model running (dark theme, right) — runtime info parsed live from server logs.*
 
 <table>
   <tr>
     <td width="50%"><img src="en_light.png" width="560" alt="Advanced mode, light theme" /></td>
     <td width="50%"><img src="en.png" width="560" alt="Basic mode with a model running, dark theme" /></td>
   </tr>
+  <tr>
+    <td align="left"><sub>Advanced mode, light theme — 9 tabs, and the control row with live metrics below.</sub></td>
+    <td align="left"><sub>Basic mode, dark theme, running — runtime info parsed live from the server log.</sub></td>
+  </tr>
 </table>
 
-> 🎭 Screens are **rendered, not photographed**: `python tools/render_screenshots.py` paints the real UI with synthetic data (GPUs, models, version, log and counters are invented), so a re-shoot after a UI change never publishes anyone's machine. Use it instead of taking new screenshots.
-> The images are 2000×1175 (the 1600×941 window at 125 % scaling), card shadow and rounded corners included.
+<sub>Images are rendered from the real UI with synthetic data: `python tools/render_screenshots.py`.</sub>
 
 <a id="quick-start"></a>
 
 ## 🚀 Quick Start
 
-### Option 1: Windows exe (recommended)
+**You need `llama-server`** — grab a build for your hardware from [ggml-org/llama.cpp releases](https://github.com/ggml-org/llama.cpp/releases) (or build your own). The launcher does not ship one.
 
-1. Download `LlamaCppLauncher.exe` from [Releases](https://github.com/Mars-Albert/llama-cpp-launcher/releases/latest) and double-click to run — no Python needed.
-2. Install `llama-server` (e.g. from [ggml-org/llama.cpp releases](https://github.com/ggml-org/llama.cpp/releases)).
-3. In the app: **File → Set llama-server path...** and point it at the binary (or just add it to `PATH` — the launcher finds it automatically).
-4. Pick a model, hit **Start**, open the WebUI. Done.
+### Option 1: Windows exe
 
-> ⚠️ Windows SmartScreen may warn about the unsigned executable — click **More info → Run anyway**.
+1. Download `LlamaCppLauncher.exe` from [Releases](https://github.com/Mars-Albert/llama-cpp-launcher/releases/latest) — no Python required.
+2. Point the app at your binary: **File → Set llama-server path…** (or leave it on `PATH` and it will be found automatically).
+3. Pick a model, press **Start**, open the WebUI.
+
+<sub>⚠️ Windows SmartScreen may warn about the unsigned exe — **More info → Run anyway**.</sub>
 
 ### Option 2: From source (any OS)
 
@@ -106,7 +106,7 @@ git clone https://github.com/Mars-Albert/llama-cpp-launcher.git
 cd llama-cpp-launcher
 
 python -m venv venv
-venv\Scripts\activate   # Windows   ·  source venv/bin/activate  # Linux/macOS
+venv\Scripts\activate   # Windows   ·   source venv/bin/activate  # Linux/macOS
 pip install -r requirements.txt
 
 python main.py          # or double-click run.bat on Windows
@@ -120,14 +120,14 @@ python main.py          # or double-click run.bat on Windows
 
 ### 🎭 Two Modes
 
-| Basic Mode | Advanced Mode |
+| Basic mode | Advanced mode |
 |---|---|
-| Model & mmproj pickers backed by the model browser | **235 parameters** in 9 tabs |
-| Sliders for temp / top-p / min-p / repeat penalty, top-k spin | LoRA adapters & scales, control vectors, image token limits |
-| Context quick-picks: Default → 4K → 262K | Model sources: local file, **HF repo**, **URL**, **Docker repo** |
-| GPU layers auto / all / manual, host/port/parallel | Speculative decoding (draft-mtp, ngram, lookup cache) |
-| ⚡ Quick toggles — **user-configurable** (Settings → Customize): FlashAttn, reasoning, split mode, spec type, draft max… | Full server config: SSL, CORS, slots, embedding/rerank, MCP |
-| *Get a model running in seconds* | *Fine-tune every detail* |
+| Model & mmproj pickers, backed by the model browser | **All CLI parameters configurable in the UI**, grouped into 9 tabs |
+| Sliders for temp / top-p / min-p / repeat penalty, top-k | LoRA adapters & scales, control vectors, image token limits |
+| Context quick-picks 4K → 262K, GPU layers auto / all | Model sources: local file, HF repo, URL, Docker repo |
+| ⚡ Quick toggles — **your choice** (Settings → Customize) | Speculative decoding, SSL/CORS, slots, embedding/rerank, MCP |
+
+Switching modes never loses a value — both panels read and write the same parameter set, presets, undo history and command preview.
 
 <a id="advanced-tabs"></a>
 
@@ -135,12 +135,12 @@ python main.py          # or double-click run.bat on Windows
 
 | Tab | What's inside |
 |---|---|
-| 🧠 Model | Model file, alias, tags, HF/URL/Docker sources, LoRA, control vectors, mmproj (vision) |
+| 🧠 Model | Model file, alias, tags, HF/URL/Docker sources, LoRA, control vectors, mmproj |
 | 📏 Context | Context size, prompt & KV cache, RoPE / YaRN scaling |
-| 🎲 Sampling | Temperature, top-k/p, min-p, penalties, grammar & repetition |
+| 🎲 Sampling | Temperature, top-k/p, min-p, penalties, grammar, repetition |
 | 🎮 GPU/Performance | Offload, memory, CPU threads, affinity, priority |
-| ⚡ Speculative | Draft models (draft-mtp), ngram, lookup cache, draft tokens |
-| 🌐 Server | Host/port, slots, parallel, endpoints, SSL, CORS, embedding/rerank, router, Prometheus metrics |
+| ⚡ Speculative | Draft models (incl. draft-mtp), ngram, lookup cache |
+| 🌐 Server | Host/port, slots, endpoints, SSL, CORS, embedding/rerank, router, Prometheus metrics |
 | 🤖 Agent/Tools | Tool calling, MCP server, agent settings |
 | 💬 Chat/Reasoning | Chat templates, reasoning mode, thinking budget |
 | 🔧 Advanced | Text I/O, logging, `extra_args` escape hatch |
@@ -149,193 +149,114 @@ python main.py          # or double-click run.bat on Windows
 
 ### 📂 Model Browser
 
-- 🔎 Background-thread scan of your model directory — the UI never freezes
-- 🏷️ Auto-categorizes `.gguf` files into **Models** / **Multimodal (mmproj)** with sizes
-- 📏 Instant model info: size, estimated parameters, quantization type
-- 🧾 **GGUF quick-metadata row**: architecture + max context of the selected model, parsed from the file *header only* (a few MB, cached, off the GUI thread); the row turns **amber** when your context setting exceeds the model's limit (the server would clamp it at load)
-- 🔗 Auto-matches the mmproj to your model by name
-- 📁 Scan directory remembered across sessions; F5 to re-scan
+- 🔎 Background scan of your model directory — the UI never freezes (F5 to rescan, directory remembered)
+- 🏷️ `.gguf` files sorted into **Models** / **Multimodal (mmproj)** with sizes; mmproj auto-matched by name
+- 📏 Model info from the file header only (a few MB, cached, off the GUI thread): architecture, max context, size, estimated parameters, quant type — the row turns **amber** when your context exceeds the model's limit, because the server would clamp it at load
 
 <a id="log-parsing"></a>
 
 ### 📊 Real-time Log Parsing
 
-Every line of `llama-server` output is parsed as it arrives (74 patterns, both old and v9174+ `srv`-prefixed formats) and distilled into the **Runtime Info** panel — 40+ data points across 8 categories:
+Every line of `llama-server` output is parsed as it arrives — 74 patterns covering both the classic and the current `srv`-prefixed formats — and distilled into the **Runtime Info** panel: 50+ read-outs across 8 groups (hardware, model, architecture, runtime params, VRAM, performance, system, vision).
 
-| Category | What you see |
-|---|---|
-| 🖥️ Hardware | GPU name / compute capability / total & free VRAM per GPU, CPU |
-| 📦 Model | File, model name, quant type, GGUF version |
-| 🏗️ Architecture | Params, layers, embed/FFN dims, vocab, tensor precision split |
-| ⚙️ Runtime | Train vs runtime ctx, batch/ubatch, slots, RoPE freq, thinking mode |
-| 💾 VRAM | Offload layers, model/KV-cache/compute buffers, projected usage |
-| ⚡ Performance | Flash attention, KV unified, graph nodes & splits |
-| 🔧 System | Threads, OpenMP, repack |
-| 👁️ Vision | Encoder status, mmproj, image resolution, min image tokens |
+It fills in **live**, not after the fact: offload layers while the model loads, buffer sizes during init, KV cache and graph splits as the context is built, and the state flips to ready the moment the server starts listening. Multi-GPU runs report per-device VRAM and buffer splits.
 
-The panel fills in *live* — offload layers appear during loading, buffer sizes during init, and the status flips to **ready** the moment the server starts listening.
+> 🔊 The launcher defaults `--log-verbosity` to **4 (trace)**: recent llama.cpp routes its own INFO lines to TRACE, so at the binary's default level there would be nothing to parse. If you lower it, the panel tells you why it looks empty.
 
 <a id="metrics-row"></a>
 
 ### 📟 Live Metrics Row
 
-The row under the tabs is visible on **every** tab and carries the numbers you actually watch while a model runs:
+The row below the tabs sits **outside** them, so it is visible on every tab:
 
 | Group | Read-outs | Source |
 |---|---|---|
-| ⚡ Live (1 s) | **Prefill** t/s · **Decode** t/s · **Context** gauge + % | `GET /slots` |
-| 📈 Session (5 s) | **In** tokens · **Cached** · **Out** tokens · cache **Hit** % | `GET /metrics` |
+| ⚡ Live (1 s) | Prefill t/s · Decode t/s · context gauge with the percentage inside it | `GET /slots` |
+| 📈 Session (5 s) | Input tokens · cached · output tokens · cache hit rate | `GET /metrics` |
 
-- The context read-out is a thin gauge with the percentage painted *inside* it — green → amber at 70% → red at 90%
-- Speeds are differenced locally and re-baselined at every task boundary, so starting a new request can never yield a negative t/s
-- Session totals need the metrics endpoint: **Advanced Mode → Server → “Prometheus Metrics (--metrics)”**, then restart the server. Before the first sample they read `0`; a value that is genuinely unknown reads `—`, and each read-out's tooltip says which of the two you are looking at
-- Nothing collapses while idle — the seven read-outs stay in place, so pressing Start never reflows the window
+- Speeds are differenced locally and re-baselined at each task boundary, so a new request can never produce a negative t/s
+- Session totals need the endpoint: **Advanced Mode → Server → “Prometheus Metrics (--metrics)”**, then restart the server. Before the first sample they read `0`; a value that genuinely cannot be read shows `—`. Each read-out's tooltip says which case you are in
+- The layout never reflows — read-outs keep a fixed width and stay put while idle
 
 <a id="log-panel"></a>
 
 ### 📄 Log Panel
 
-- 🔍 **Ctrl+F search** with match count and wrap-around
-- **Level filter** — Debug / Info / Warn / Error (follows Error by default)
-- 📤 Export the visible area or the **full run** (every run is also mirrored to `~/.llama-cpp-launcher/logs/last_run.log`)
-- 🪟 **Per-level history windows** — each level (D/I/W/E) keeps its own 5,000-line window, so a burst of hidden lines (e.g. a debug prompt dump) can never evict the lines you're filtering for
-- 🔊 Ships with `--log-verbosity 4 (trace)` on purpose: recent llama.cpp routes its own INFO lines to TRACE, so at the binary's default level the Runtime Info panel would stay empty
-- Auto-scroll toggle, clear button, colorized by level
+- 🔍 **Ctrl+F** search with match count, wrap-around and level filter (D / I / W / E)
+- 🪟 **A window per level** — each level keeps its own 5 000-line window, so a flood of hidden lines (a debug prompt dump, say) cannot evict the level you are filtering for
+- 📤 Export the visible view or the **full run**; every run is also mirrored to `~/.llama-cpp-launcher/logs/last_run.log`
+- Colorized by level, monospace, auto-scroll toggle, column alignment preserved
 
 <a id="presets"></a>
 
 ### 💾 Presets
 
-- Save / load / delete named presets — only the diff vs. defaults is stored
-- Import / export as JSON for sharing; created-time shown in the list
-- Choose to **include or exclude machine-local paths** (model/mmproj) when saving
-- The preset you last loaded is **restored automatically on next start**
-- Param keys renamed/removed across llama.cpp versions are migrated on load
+- Named presets store **only the diff against defaults**, so they stay small and portable; import/export as JSON
+- Optionally exclude machine-local paths (model / mmproj) when saving — share a preset without your disk layout
+- The preset you last loaded is restored on next start; parameter keys renamed or removed across llama.cpp versions are migrated on load
 
 <a id="param-help"></a>
 
 ### ❓ Per-Parameter Help
 
-Every parameter row has a **?** button that opens a floating card: the CLI flag, your binary's *live default* (from `--help`), the valid range, and a plain-language explanation. No more memorizing what `--no-kv-offload` does.
+Every row has a **?** button: the CLI flag, your binary's live default, the accepted range and a plain-language explanation — including what the negated form does (`--no-kv-offload` vs `--kv-offload`).
 
 <a id="gguf-inspector"></a>
 
 ### 🔬 GGUF Inspector
 
-A built-in binary inspector (no weights loaded, pure-stdlib parser):
+A standalone inspector that reads the file header and metadata only — weights are never loaded, and the parser is pure stdlib:
 
 - **7 tabs**: Overview · Statistics · Metadata · Tensors · Tokenizer · Filename · Diagnostics
-- 📊 Visual breakdowns: quantization distribution, layer/module structure, parameter concentration
-- 🩺 **Launcher-aware diagnostics**: context exceeds model limit, mmproj name mismatch, draft-mtp without sidecar, chat-template / RoPE / MoE / shard info
-- 📤 Export to JSON / CSV / Markdown · background parsing with an in-memory cache
+- 📊 Quantization distribution, layer/module structure, parameter concentration
+- 🩺 Launcher-aware diagnostics: context over the model's limit, mmproj mismatch, draft-mtp without its sidecar, chat-template / RoPE / MoE / shard notes
+- 📤 Export to JSON / CSV / Markdown
 
 <a id="server-lifecycle"></a>
 
 ### 🚀 Server Lifecycle
 
-- ▶️ One-click start/stop with color-coded status + runtime counter (MM:SS)
-- ⚠️ Port-conflict check before launch
-- 🌐 One-click open of the llama-server WebUI
-- Graceful stop (non-blocking, force-kill fallback); auto-stops when you close the app
-- ↩️ **Undo** — 800ms-debounced snapshots, up to 20 steps back
-- 📝 **Command preview** — the exact `llama-server` command, updated on every change, one-click copy (paths with spaces are quoted correctly)
-
-<a id="layout"></a>
-
-### 🧭 Layout & Status Bar
-
-- 🗂 **Right column = 3 tabs** — Parameter config · Log output · Runtime info, each owning the full column height (on a 1080p window the log gets ~800px instead of a 200px sliver); the parameter / command-preview split is **draggable**
-- 🎛 **One control row, outside the tabs** — ▶ Start · ■ Stop · 📋 Copy · 🌐 WebUI plus the live metrics row: usable whichever tab is open
-- 📌 **Status bar** — detected GPU(s) · `llama-server` version · ⚠ parameter-drift notice (click for the full list) · run-state dot (gray idle / amber starting or silent / green running / red error) · state text · runtime
+- ▶️ Start with a port-conflict check; graceful stop with a force-kill fallback, and the server is stopped when you close the app
+- 🌐 One click to the llama-server WebUI, using your actual host/port
+- 📝 **Command preview** — the exact command, rebuilt on every change, one click to copy (paths with spaces quoted correctly)
+- ↩️ **Undo** — 800 ms-debounced snapshots, up to 20 steps
 
 <a id="window-ui"></a>
 
-### 🪟 Window & UI
+### 🪟 Window, Layout & Status Bar
 
-- 🖼️ **Frameless rounded-card window** — the app paints its own card with a soft drop shadow: one integrated title row (icon · title · menu · Win11-style minimize/maximize/close), drag to move, double-click to maximize, edge-resize right at the visible card edge. Maximized, the card goes full-bleed with the system's own rounded corners.
-- 🎴 **Themed dialogs & message boxes** — every dialog, confirm and error box belongs to the same frameless card family (dark/light aware), so nothing pops out of the look.
-- 📐 **Comfortable by default** — first launch opens at 1600×940 (clamped to your screen) with a 400px model column; size, position, mode, tabs and splitter layout are restored on next start.
-- 🧘 **Small windows behave** — the parameter area never gets a vertical scrollbar and no control is squashed or overlapped: quick toggles re-wrap into more rows and the window's minimum size grows instead; very narrow windows scroll the wide rows sideways.
+- 🗂 **Three full-height tabs** — Parameter config · Log output · Runtime info. On a 1080p window the log gets ~800 px instead of a 200 px strip, and the parameter / command-preview split is draggable
+- 🎛 **One control row** — Start · Stop · Copy · WebUI plus the metrics row, outside the tabs so they work wherever you are
+- 📌 **Status bar** — detected GPUs · binary version · ⚠ drift · state dot (idle / starting / running / error) · state text · runtime
+- 🖼️ **Frameless rounded card** with a soft shadow, an integrated title row, and resize grips right at the visible card edge
+- 🧘 **Small windows behave** — the parameter area never gets a vertical scrollbar and nothing gets squashed or overlapped: quick toggles re-wrap and the window's minimum grows instead
+- 📐 First launch opens at 1600×940 with a 400 px model column; size, position, mode, tabs and splitters are restored next time
 
 <a id="i18n-themes"></a>
 
-### 🌐 i18n & Themes
+### 🌐 Language & Theme
 
-- 🈶/🈷 **Chinese ↔ English live switching** — no restart, preference persisted
-- 🌙 **Dark / light theme** — one click in the **Settings** menu (File · Settings · Help), persisted; the log panel and inspector stay theme-aware
-- Menu layout: **File** (scan path, llama-server path, refresh, exit) · **Settings** (customize quick toggles, language, theme) · **Help** (about)
-
-<a id="comparison"></a>
-
-## 🆚 Comparison
-
-| Feature | Llama CPP Launcher | Ollama | LM Studio |
-|---|:---:|:---:|:---:|
-| Bring your own llama.cpp binary | ✅ | ❌ | ❌ |
-| Run the latest llama.cpp the day it ships | ✅ | ❌ | ❌ |
-| Any custom backend (CUDA/ROCm/Vulkan/Metal/SYCL) | ✅ | ❌ | ❌ |
-| Full CLI parameter access (235) | ✅ | ❌ | Partial |
-| The exact command is visible & copyable | ✅ | ❌ | ❌ |
-| Presets with version-aware migration | ✅ | ❌ | ❌ |
-| Built-in GGUF inspector | ✅ | ❌ | ❌ |
-| No telemetry, 100% local | ✅ | ❌ | ✅ |
-| Single lightweight dependency (PyQt6) | ✅ | — | ❌ |
+Chinese ↔ English and dark ↔ light switch live, with no restart, and the choice is remembered. Chinese is the source language, so an English string is an explicit translation entry — never a missing one.
 
 <a id="development"></a>
 
 ## 🛠️ Development
 
-- Python 3.11+, PyQt6 (pinned), pytest for tests
-- ~16,000 lines of application code (+~8,000 lines of tests, 531 tests); the core schema (`core/params_schema.py`) is the single source of truth for the UI, CLI emission, get/set values, and i18n coverage — adding a parameter is one entry
-- `gguf/`, `ui/log_parser.py`, `ui/command_builder.py` are Qt-free and unit-testable headlessly
-
-<details>
-<summary><b>Project structure</b></summary>
-
-```
-llama-cpp-launcher/
-├── main.py                  # Entry point (async startup, logging setup)
-├── run.bat                  # Windows launcher (activates venv)
-├── build_config.py          # App name / version (CI rewrites on tag)
-├── llama_cpp_launcher.spec  # PyInstaller spec (icon embedded)
-├── requirements.txt
-├── core/
-│   ├── params_schema.py     # ★ 235-param schema (Qt-free, single source of truth)
-│   ├── params_help.py       # Per-parameter help texts (235 entries)
-│   ├── defaults.py          # `--help` parsing, fallback defaults, GPU probe
-│   ├── config.py            # Preset & settings IO (~/.llama-cpp-launcher)
-│   ├── runner.py            # QProcess wrapper (start/stop/readiness)
-│   ├── i18n.py              # zh/en translation (Chinese source language)
-│   └── constants.py
-├── gguf/                    # Pure-stdlib GGUF binary reader
-│   ├── parser.py  models.py  ggml_types.py  filename.py  diagnostics.py
-├── ui/
-│   ├── main_window.py       # Window orchestration, theme, log panel
-│   ├── frameless.py         # Frameless rounded-card window, title bar, edge-resize
-│   ├── message_box.py       # Themed frameless message boxes & dialog base
-│   ├── basic_panel.py       # Basic mode (incl. user-configurable quick toggles)
-│   ├── advanced_panel.py    # Advanced mode (schema-driven, 9 tabs)
-│   ├── quick_params.py      # Quick-toggles pool + widget factory
-│   ├── quick_params_dialog.py  # Customize-quick-toggles dialog
-│   ├── server_path_dialog.py   # llama-server path dialog
-│   ├── param_help.py        # "?" button + floating help card
-│   ├── model_browser.py     # GGUF scanner (background thread)
-│   ├── gguf_inspector.py    # 7-tab inspector dialog
-│   ├── log_parser.py        # Log line patterns → runtime info (Qt-free)
-│   ├── live_stats.py        # /slots + /metrics polling, speed deltas (Qt-free)
-│   ├── live_metrics.py      # Live metrics row (read-outs + context gauge)
-│   ├── command_builder.py   # Params → `llama-server` argv (Qt-free)
-│   └── runtime_info.py      # Runtime info HTML (Qt-free)
-├── tests/                   # 31 test modules (headless, in-memory fakes)
-└── assets/icon.ico|png
+```bash
+pip install -r requirements.txt
+pip install pytest
+python -m pytest tests -q          # headless; the suite renders offscreen
 ```
 
-</details>
+Two things worth knowing before you touch anything:
 
-**Releases**: pushing a tag `v*` runs CI on `windows-latest` — tests, then PyInstaller, then the exe is published as a GitHub Release automatically.
+- **`core/params_schema.py` is the single source of truth.** One entry per parameter drives the advanced UI, CLI emission, `get/set_values` and the i18n-coverage test — so adding a parameter is one entry, not five edits.
+- **Qt-free where possible.** `gguf/`, `ui/log_parser.py`, `ui/command_builder.py`, `ui/live_stats.py` and `core/params_schema.py` have no Qt dependency, which is what makes the test suite headless.
+
+**Releases**: pushing a `v*` tag runs CI — tests, then PyInstaller, then the exe is published as a GitHub Release. `build_config.py` and the tag are bumped together.
 
 <a id="license"></a>
 
 ## 📄 License
 
-[MIT](LICENSE) — do whatever you want with it.
+[MIT](LICENSE)

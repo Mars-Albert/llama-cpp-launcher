@@ -490,10 +490,10 @@ ol.steps li:last-child { padding-bottom: 0; }
         <p class="chapter-lead">功能完整的 <code class="inl">llama-server</code>（llama.cpp）GUI 启动器。它驱动的是你自己安装的 <code class="inl">llama-server</code> 二进制 —— 一切行为可见，一切行为可控。</p>
 
         <div class="spec-strip" data-od-id="spec-strip">
-          <div class="spec-cell"><div class="spec-num">235</div><div class="spec-label">个 llama-server CLI 参数，一屏全出</div></div>
+          <div class="spec-cell"><div class="spec-num">全部</div><div class="spec-label">CLI 参数可视化配置</div></div>
           <div class="spec-cell"><div class="spec-num">74</div><div class="spec-label">条日志解析规则，兼容新旧两种日志格式</div></div>
           <div class="spec-cell"><div class="spec-num">9</div><div class="spec-label">个高级模式标签页，按职责分组</div></div>
-          <div class="spec-cell"><div class="spec-num">~13k</div><div class="spec-label">行 Python，唯一运行时依赖 PyQt6</div></div>
+          <div class="spec-cell"><div class="spec-num">1</div><div class="spec-label">个运行时依赖（PyQt6），不联网、不上传</div></div>
         </div>
 
         <h3 id="ov-philosophy">不同的路线：驱动你自己的 llama-server</h3>
@@ -583,7 +583,7 @@ python main.py             # Windows 下也可双击 run.bat</pre>
         <div class="shots">
           <figure class="shot" data-od-id="shot-advanced">
             <img class="content-img" src="cn_light.png" width="2000" height="1175" alt="高级模式界面截图（浅色主题）：9 个标签页的参数面板、常驻控制行与实时指标带" />
-            <figcaption>高级模式 · 浅色主题 —— 9 个标签页覆盖 235 个参数，下方是常驻控制行与实时指标带</figcaption>
+            <figcaption>高级模式 · 浅色主题：9 个标签页覆盖全部参数，下方是常驻控制行与实时指标带</figcaption>
           </figure>
           <figure class="shot" data-od-id="shot-basic">
             <img class="content-img" src="cn.png" width="2000" height="1175" alt="基础模式运行中截图（深色主题）：模型运行，运行时信息实时解析" />
@@ -656,7 +656,7 @@ python main.py             # Windows 下也可双击 run.bat</pre>
           <table class="ds-table">
             <thead><tr><th class="hl">基础模式</th><th>高级模式</th></tr></thead>
             <tbody>
-              <tr><td class="hl">模型 &amp; mmproj 选择器（背后是模型浏览器）</td><td>235 个参数，9 个标签页</td></tr>
+              <tr><td class="hl">模型 &amp; mmproj 选择器（背后是模型浏览器）</td><td>全部 CLI 参数可视化配置，按职责分 9 个标签页</td></tr>
               <tr><td class="hl">温度 / Top-P / Min-P / 重复惩罚滑块 + Top-K 数值框</td><td>LoRA 适配器与缩放、控制向量、图像 Token 限制</td></tr>
               <tr><td class="hl">上下文快捷按钮：Default → 4K → 262K</td><td>模型来源：本地文件、HF 仓库、URL、Docker 仓库</td></tr>
               <tr><td class="hl">GPU 层数 auto / all / 手动，host / port / 并行数</td><td>投机解码（draft-mtp、ngram、lookup cache）</td></tr>
@@ -696,7 +696,7 @@ python main.py             # Windows 下也可双击 run.bat</pre>
       <section class="chapter" id="ch-advanced" data-od-id="ch-advanced">
         <p class="chapter-eyebrow num">06 · 界面与模式</p>
         <h2>高级模式 · 9 个标签页</h2>
-        <p class="chapter-lead">235 个 <code class="inl">llama-server</code> CLI 参数一屏全出。按职责分成 9 个标签页，每个参数行都有「?」帮助按钮。</p>
+        <p class="chapter-lead">全部 CLI 参数可视化配置（参数表随 llama.cpp 自身增减），按职责分成 9 个标签页，每个参数行都有「?」帮助按钮。</p>
 
         <h3 id="adv-tabs">9 个标签页</h3>
         <div class="table-wrap">
@@ -950,7 +950,7 @@ python main.py             # Windows 下也可双击 run.bat</pre>
               <tr><td>自带 llama.cpp 二进制</td><td class="hl"><span class="yes">✓</span></td><td><span class="no">✗</span></td><td><span class="no">✗</span></td></tr>
               <tr><td>当天使用最新 llama.cpp</td><td class="hl"><span class="yes">✓</span></td><td><span class="no">✗</span></td><td><span class="no">✗</span></td></tr>
               <tr><td>任意自定义后端（CUDA / ROCm / Vulkan / Metal / SYCL）</td><td class="hl"><span class="yes">✓</span></td><td><span class="no">✗</span></td><td><span class="no">✗</span></td></tr>
-              <tr><td>完整 CLI 参数访问（235 个）</td><td class="hl"><span class="yes">✓</span></td><td><span class="no">✗</span></td><td><span class="part">部分</span></td></tr>
+              <tr><td>全部 CLI 参数可视化配置</td><td class="hl"><span class="yes">✓</span></td><td><span class="no">✗</span></td><td><span class="part">部分</span></td></tr>
               <tr><td>实际命令可见且可复制</td><td class="hl"><span class="yes">✓</span></td><td><span class="no">✗</span></td><td><span class="no">✗</span></td></tr>
               <tr><td>版本感知的预设迁移</td><td class="hl"><span class="yes">✓</span></td><td><span class="no">✗</span></td><td><span class="no">✗</span></td></tr>
               <tr><td>内置 GGUF 检查器</td><td class="hl"><span class="yes">✓</span></td><td><span class="no">✗</span></td><td><span class="no">✗</span></td></tr>
@@ -995,8 +995,8 @@ python main.py             # Windows 下也可双击 run.bat</pre>
 ├── llama_cpp_launcher.spec  # PyInstaller 构建配置（内嵌图标）
 ├── requirements.txt
 ├── core/
-│   ├── params_schema.py     # ★ 235 参数 schema（Qt-free，唯一事实来源）
-│   ├── params_help.py       # 逐参数帮助文本（235 条）
+│   ├── params_schema.py     # ★ 参数 schema（Qt-free，唯一事实来源）
+│   ├── params_help.py       # 逐参数帮助文本（每个参数一条）
 │   ├── defaults.py          # --help 解析、回退默认值、GPU 探测
 │   ├── config.py            # 预设与设置 IO（~/.llama-cpp-launcher）
 │   ├── runner.py            # QProcess 封装（启动/停止/就绪检测）
