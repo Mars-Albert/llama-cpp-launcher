@@ -1,0 +1,1217 @@
+<!doctype html>
+<!--
+  Llama CPP Launcher 产品手册
+  布局：左侧章节导航 · 可滚动正文 · 右侧本章目录（文档页规范）
+  内容来源：G:/Programs/llama-cpp-launcher/README_zh.md（v1.8.2）
+  参数帮助样例：core/params_help.py（kv_offload）
+-->
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Llama CPP Launcher · 产品手册 v1.8.2</title>
+<link rel="icon" href="assets/icon.png" />
+<script>try{var t=localStorage.getItem('lcl-manual-theme')||(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light');document.documentElement.dataset.theme=t}catch(e){document.documentElement.dataset.theme='light'}</script>
+<style>/* ─── tokens ─────────────────────────────────────────────────────────
+   Palette bound from direction: tech-utility (Datadog / GitHub).
+   Light = printed values; dark = derived for the 深色主题 section. */
+:root {
+  --bg:      oklch(98% 0.005 250);
+  --surface: oklch(100% 0 0);
+  --fg:      oklch(22% 0.02 240);
+  --muted:   oklch(50% 0.018 240);
+  --border:  oklch(90% 0.008 240);
+  --accent:  oklch(58% 0.16 145);
+  --ok:      oklch(58% 0.16 145);
+  --warn:    oklch(72% 0.14 75);
+  --danger:  oklch(58% 0.19 27);
+  --accent-soft: color-mix(in oklch, var(--accent) 14%, transparent);
+  --warn-soft:   color-mix(in oklch, var(--warn) 10%, var(--surface));
+  --fg-soft:     color-mix(in oklch, var(--fg) 6%, transparent);
+  --code-bg: oklch(24% 0.025 240);
+  --code-fg: oklch(90% 0.02 240);
+  /* type — utility: sans display + sans body (one family is OK here) */
+  --font-display: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', system-ui, sans-serif;
+  --font-body:    -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', system-ui, sans-serif;
+  --font-mono:    'JetBrains Mono', 'IBM Plex Mono', ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace;
+  --fs-body: 15px;
+  --radius: 10px;
+  --radius-lg: 14px;
+  --topbar-h: 56px;
+}
+:root[data-theme="dark"] {
+  --bg:      oklch(18% 0.02 240);
+  --surface: oklch(22% 0.02 240);
+  --fg:      oklch(93% 0.01 240);
+  --muted:   oklch(66% 0.02 240);
+  --border:  oklch(30% 0.02 240);
+  --accent:  oklch(65% 0.15 145);
+  --ok:      oklch(65% 0.15 145);
+  --warn:    oklch(78% 0.13 85);
+  --danger:  oklch(65% 0.19 25);
+  --code-bg: oklch(14% 0.03 240);
+  --code-fg: oklch(88% 0.02 240);
+}
+/* ─── reset & base ──────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; }
+html { scroll-behavior: smooth; scroll-padding-top: calc(var(--topbar-h) + 20px); -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-body);
+  font-size: var(--fs-body);
+  line-height: 1.7;
+  -webkit-font-smoothing: antialiased;
+}
+img, svg { display: block; max-width: 100%; }
+a { color: inherit; text-decoration: none; }
+button { font: inherit; cursor: pointer; }
+p { text-wrap: pretty; margin: 0 0 14px; }
+h1, h2, h3, h4 { text-wrap: balance; margin: 0; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+.num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+code.inl {
+  font-family: var(--font-mono);
+  font-size: 0.86em;
+  background: color-mix(in oklch, var(--fg) 7%, transparent);
+  border: 1px solid color-mix(in oklch, var(--fg) 13%, transparent);
+  padding: 1.5px 6px;
+  border-radius: 6px;
+  word-break: break-word;
+}
+/* ─── topbar ────────────────────────────────────────────────────── */
+.topbar {
+  position: sticky; top: 0; z-index: 50;
+  background: color-mix(in oklch, var(--bg) 90%, transparent);
+  backdrop-filter: blur(12px);
+  border-bottom: 1px solid var(--border);
+}
+.topbar-inner { display: flex; align-items: center; gap: 14px; height: var(--topbar-h); padding-inline: 20px; }
+.menu-btn { display: none; }
+.brand { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.brand img { width: 26px; height: 26px; border-radius: 7px; }
+.brand-name { font-weight: 650; font-size: 14.5px; letter-spacing: -0.01em; white-space: nowrap; }
+.brand-sub { font-size: 12.5px; color: var(--muted); padding-left: 10px; border-left: 1px solid var(--border); white-space: nowrap; }
+.ver-pill {
+  font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.04em;
+  padding: 3px 9px; border: 1px solid var(--border); border-radius: 999px;
+  color: var(--muted); background: var(--surface);
+  font-variant-numeric: tabular-nums;
+}
+.topbar .spacer { flex: 1; }
+.icon-btn {
+  display: grid; place-items: center;
+  width: 34px; height: 34px;
+  border: 1px solid transparent; border-radius: 9px;
+  background: transparent; color: var(--muted);
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+.icon-btn:hover { background: var(--fg-soft); color: var(--fg); border-color: var(--border); }
+.icon-btn svg { width: 17px; height: 17px; }
+.gh-link { display: inline-flex; align-items: center; gap: 7px; font-size: 13px; color: var(--muted); padding: 7px 12px; border: 1px solid transparent; border-radius: 9px; transition: color .15s, border-color .15s, background .15s; }
+.gh-link:hover { color: var(--fg); border-color: var(--border); background: var(--fg-soft); }
+.gh-link svg { width: 15px; height: 15px; }
+.dl-btn { white-space: nowrap; }
+/* ─── buttons ───────────────────────────────────────────────────── */
+.btn {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 8px 16px;
+  border-radius: var(--radius);
+  border: 1px solid transparent;
+  font-size: 13.5px; font-weight: 550; letter-spacing: -0.005em;
+  transition: transform 0.05s ease, background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+.btn:active { transform: translateY(1px); }
+.btn-primary { background: var(--accent); color: var(--surface); border-color: var(--accent); }
+.btn-primary:hover { background: color-mix(in oklch, var(--accent) 85%, black); }
+.btn-ghost { background: transparent; color: var(--fg); border-color: var(--border); }
+.btn-ghost:hover { border-color: var(--fg); }
+/* ─── doc shell (sidebar · content · toc) ───────────────────────── */
+.doc-shell { display: grid; grid-template-columns: 264px minmax(0, 1fr) 236px; max-width: 1560px; margin-inline: auto; }
+.sidebar {
+  position: sticky; top: var(--topbar-h);
+  height: calc(100vh - var(--topbar-h));
+  overflow-y: auto;
+  border-right: 1px solid var(--border);
+  padding: 20px 14px 32px;
+}
+.sidebar-search { position: relative; margin-bottom: 18px; }
+.sidebar-search svg { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); width: 14px; height: 14px; color: var(--muted); pointer-events: none; }
+.sidebar-search input {
+  width: 100%; padding: 8px 10px 8px 32px;
+  border: 1px solid var(--border); border-radius: 9px;
+  background: var(--surface); color: var(--fg); font: inherit; font-size: 13px;
+}
+.sidebar-search input::placeholder { color: var(--muted); }
+.sidebar-search input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.nav-group + .nav-group { margin-top: 20px; }
+.nav-group-label {
+  font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.08em;
+  color: color-mix(in oklch, var(--muted) 80%, var(--bg));
+  padding: 0 10px; margin: 0 0 8px;
+}
+.nav-item {
+  display: flex; align-items: baseline; gap: 10px;
+  padding: 7px 10px; border-radius: 8px;
+  color: var(--muted); font-size: 13.5px; line-height: 1.45;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+.nav-item:hover { background: var(--fg-soft); color: var(--fg); }
+.nav-item.active { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+.nav-num { font-family: var(--font-mono); font-size: 11px; opacity: 0.65; font-variant-numeric: tabular-nums; flex: none; }
+.nav-empty { display: none; padding: 12px 10px; color: var(--muted); font-size: 13px; }
+.scrim { display: none; }
+/* ─── content / prose ───────────────────────────────────────────── */
+.content { min-width: 0; padding: 52px 56px 96px; }
+.prose { max-width: 860px; }
+.chapter { padding-block: 56px; border-top: 1px solid var(--border); }
+.chapter:first-of-type { border-top: 0; padding-top: 8px; }
+.chapter-eyebrow {
+  font-family: var(--font-mono); font-size: 12px; letter-spacing: 0.06em;
+  color: color-mix(in oklch, var(--accent) 55%, var(--muted));
+  margin-bottom: 10px; font-variant-numeric: tabular-nums;
+}
+.chapter h2 { font-family: var(--font-display); font-size: clamp(25px, 2.6vw, 32px); line-height: 1.2; letter-spacing: -0.02em; font-weight: 650; }
+.chapter-lead { margin-top: 12px; font-size: 15.5px; color: var(--muted); max-width: 62ch; }
+.chapter h3 {
+  font-size: 17.5px; font-weight: 600; letter-spacing: -0.005em;
+  margin: 40px 0 12px; scroll-margin-top: calc(var(--topbar-h) + 20px);
+}
+.chapter ul, .chapter ol { margin: 0 0 16px; padding-left: 22px; }
+.chapter li { margin-bottom: 8px; }
+.chapter li::marker { color: var(--muted); }
+.prose a.ref { text-decoration: underline; text-decoration-color: var(--border); text-underline-offset: 3px; transition: color .12s, text-decoration-color .12s; }
+.prose a.ref:hover { color: var(--accent); text-decoration-color: var(--accent); }
+.prose strong { font-weight: 600; }
+.lead-note { font-size: 14px; color: var(--muted); margin-top: -4px; }
+/* spec strip */
+.spec-strip {
+  display: grid; grid-template-columns: repeat(4, 1fr);
+  border: 1px solid var(--border); border-radius: var(--radius-lg);
+  background: var(--surface); overflow: hidden;
+  margin: 24px 0 8px;
+}
+.spec-cell { padding: 18px 20px; }
+.spec-cell + .spec-cell { border-left: 1px solid var(--border); }
+.spec-num { font-family: var(--font-mono); font-size: 25px; font-weight: 600; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; line-height: 1.1; }
+.spec-label { font-size: 12.5px; color: var(--muted); margin-top: 7px; line-height: 1.55; }
+/* feature list (dt/dd) */
+.feature-list { margin: 0 0 8px; }
+.feature-list dt { font-size: 14.5px; font-weight: 600; }
+.feature-list dt code.inl { font-weight: 400; }
+.feature-list dd { margin: 3px 0 16px; font-size: 14px; color: var(--muted); line-height: 1.7; max-width: 66ch; }
+/* steps */
+ol.steps { list-style: none; counter-reset: step; padding: 0; margin: 0 0 16px; }
+ol.steps li { counter-increment: step; position: relative; padding: 0 0 14px 46px; }
+ol.steps li::before {
+  content: counter(step, decimal-leading-zero);
+  position: absolute; left: 0; top: 0;
+  width: 30px; height: 30px;
+  display: grid; place-items: center;
+  font-family: var(--font-mono); font-size: 12px; color: var(--muted);
+  border: 1px solid var(--border); border-radius: 9px; background: var(--surface);
+  font-variant-numeric: tabular-nums;
+}
+ol.steps li:last-child { padding-bottom: 0; }
+/* callout — full border + mono label, no side-bar cliché */
+.callout {
+  border: 1px solid color-mix(in oklch, var(--warn) 40%, var(--border));
+  background: var(--warn-soft);
+  border-radius: var(--radius-lg);
+  padding: 14px 18px;
+  margin: 20px 0 4px;
+  font-size: 14px; line-height: 1.7;
+}
+.callout .callout-tag {
+  display: inline-block;
+  font-family: var(--font-mono); font-size: 10.5px; letter-spacing: 0.08em;
+  padding: 2.5px 8px; border-radius: 999px; margin-bottom: 8px;
+  color: color-mix(in oklch, var(--warn) 60%, var(--fg));
+  background: color-mix(in oklch, var(--warn) 16%, var(--surface));
+  border: 1px solid color-mix(in oklch, var(--warn) 40%, var(--border));
+}
+.note {
+  border: 1px solid var(--border);
+  background: var(--surface);
+  border-radius: var(--radius-lg);
+  padding: 14px 18px;
+  margin: 20px 0 4px;
+  font-size: 14px; line-height: 1.7; color: var(--muted);
+}
+.note .note-tag {
+  display: inline-block;
+  font-family: var(--font-mono); font-size: 10.5px; letter-spacing: 0.08em;
+  padding: 2.5px 8px; border-radius: 999px; margin-bottom: 8px;
+  color: var(--muted);
+  background: var(--fg-soft);
+  border: 1px solid var(--border);
+}
+/* tables */
+.table-wrap { overflow-x: auto; margin: 16px 0 20px; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--surface); }
+.ds-table { width: 100%; border-collapse: collapse; font-size: 13.5px; min-width: 520px; }
+.ds-table th, .ds-table td { padding: 11px 16px; text-align: left; border-bottom: 1px solid var(--border); vertical-align: top; line-height: 1.6; }
+.ds-table th {
+  color: var(--muted); font-weight: 500;
+  font-family: var(--font-mono); font-size: 11.5px; letter-spacing: 0.04em;
+  background: color-mix(in oklch, var(--fg) 3%, var(--surface));
+}
+.ds-table tbody tr:last-child td { border-bottom: 0; }
+.ds-table tbody tr:hover td { background: var(--fg-soft); }
+.ds-table td.hl, .ds-table th.hl { background: color-mix(in oklch, var(--fg) 3.5%, var(--surface)); }
+.ds-table th.hl { border-bottom: 2px solid var(--fg); color: var(--fg); font-weight: 600; }
+.ds-table tbody tr:hover td.hl { background: color-mix(in oklch, var(--fg) 6%, var(--surface)); }
+.yes { color: var(--ok); font-family: var(--font-mono); font-weight: 600; }
+.no  { color: var(--danger); font-family: var(--font-mono); }
+.part { color: var(--muted); font-family: var(--font-mono); font-size: 12px; }
+.dash { color: var(--muted); font-family: var(--font-mono); }
+.tbl-foot { font-size: 12.5px; color: var(--muted); font-family: var(--font-mono); padding: 10px 16px; border-top: 1px solid var(--border); }
+/* code blocks */
+.codeblock { margin: 18px 0 22px; }
+.codeblock-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 7px; }
+.codeblock-label { font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.06em; color: var(--muted); }
+.copy-btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-family: var(--font-mono); font-size: 11px;
+  padding: 4px 10px; border-radius: 7px;
+  border: 1px solid var(--border); background: var(--surface); color: var(--muted);
+  transition: color .12s, border-color .12s, background .12s;
+}
+.copy-btn:hover { color: var(--fg); border-color: var(--fg); }
+.copy-btn svg { width: 12px; height: 12px; }
+.codeblock pre {
+  margin: 0;
+  background: var(--code-bg); color: var(--code-fg);
+  border: 1px solid var(--border); border-radius: var(--radius-lg);
+  padding: 16px 18px;
+  font-family: var(--font-mono); font-size: 12.8px; line-height: 1.75;
+  overflow-x: auto;
+}
+/* screenshots */
+.shots { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin: 22px 0 6px; }
+.shot { margin: 0; border: 1px solid var(--border); border-radius: var(--radius-lg); overflow: hidden; background: var(--surface); }
+.shot img { display: block; width: 100%; height: auto; }
+.shot figcaption { padding: 10px 14px; font-family: var(--font-mono); font-size: 12px; color: var(--muted); border-top: 1px solid var(--border); line-height: 1.6; }
+/* status pills */
+.st-row { display: flex; gap: 10px; flex-wrap: wrap; margin: 14px 0 6px; }
+.st {
+  display: inline-flex; align-items: center; gap: 7px;
+  padding: 5px 12px; border-radius: 999px;
+  font-family: var(--font-mono); font-size: 12px;
+  border: 1px solid var(--border); color: var(--muted); background: var(--surface);
+}
+.st i { width: 6px; height: 6px; border-radius: 999px; background: currentColor; flex: none; }
+.st-loading { color: color-mix(in oklch, var(--warn) 65%, var(--fg)); border-color: color-mix(in oklch, var(--warn) 45%, var(--border)); background: color-mix(in oklch, var(--warn) 9%, var(--surface)); }
+.st-ready { color: color-mix(in oklch, var(--ok) 60%, var(--fg)); border-color: color-mix(in oklch, var(--ok) 45%, var(--border)); background: color-mix(in oklch, var(--ok) 9%, var(--surface)); }
+/* tab pills (GGUF 检查器) */
+.tab-pills { display: flex; flex-wrap: wrap; gap: 8px; margin: 14px 0 6px; }
+.tab-pill {
+  font-family: var(--font-mono); font-size: 12.5px;
+  padding: 5px 13px; border-radius: 999px;
+  border: 1px solid var(--border); background: var(--surface); color: var(--fg);
+}
+.tab-pill .tab-idx { color: var(--muted); margin-right: 6px; font-size: 11px; }
+/* help card sample */
+.helpcard {
+  border: 1px solid var(--border); border-radius: var(--radius-lg);
+  background: var(--surface); overflow: hidden;
+  box-shadow: 0 10px 28px color-mix(in oklch, var(--fg) 9%, transparent);
+  margin: 18px 0 6px; max-width: 640px;
+}
+.hc-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 18px; border-bottom: 1px solid var(--border); background: color-mix(in oklch, var(--fg) 3%, var(--surface)); }
+.hc-title { font-size: 14.5px; font-weight: 650; }
+.hc-flag { font-family: var(--font-mono); font-size: 12px; color: var(--muted); }
+.hc-row { display: grid; grid-template-columns: 128px 1fr; gap: 14px; padding: 11px 18px; border-bottom: 1px solid var(--border); font-size: 13.5px; line-height: 1.65; }
+.hc-row:last-child { border-bottom: 0; }
+.hc-key { font-family: var(--font-mono); font-size: 11.5px; color: var(--muted); padding-top: 2px; }
+.hc-caption { font-size: 12.5px; color: var(--muted); font-family: var(--font-mono); margin: 8px 0 0; }
+/* footer */
+.doc-foot {
+  border-top: 1px solid var(--border);
+  margin-top: 24px; padding-top: 24px;
+  display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap;
+  font-size: 12.5px; color: var(--muted);
+}
+.doc-foot .meta { font-family: var(--font-mono); font-size: 11.5px; }
+/* ─── toc (right) ───────────────────────────────────────────────── */
+.toc {
+  position: sticky; top: var(--topbar-h);
+  height: calc(100vh - var(--topbar-h));
+  overflow-y: auto;
+  border-left: 1px solid var(--border);
+  padding: 28px 18px;
+}
+.toc-label { font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.08em; color: color-mix(in oklch, var(--muted) 80%, var(--bg)); margin: 0 0 6px; }
+.toc-chapter { font-size: 14px; font-weight: 650; margin: 0 0 14px; letter-spacing: -0.005em; }
+.toc-list a {
+  display: block; padding: 6px 10px; margin-left: -10px;
+  font-size: 13px; line-height: 1.5; color: var(--muted);
+  border-left: 2px solid var(--border);
+  transition: color .12s, border-color .12s;
+}
+.toc-list a:hover { color: var(--fg); }
+.toc-list a.active { color: var(--fg); font-weight: 550; border-left-color: var(--accent); }
+.toc-empty { font-size: 13px; color: var(--muted); }
+/* back to top */
+.backtop {
+  position: fixed; right: 22px; bottom: 26px; z-index: 40;
+  width: 42px; height: 42px;
+  display: grid; place-items: center;
+  border: 1px solid var(--border); border-radius: 11px;
+  background: var(--surface); color: var(--muted);
+  box-shadow: 0 6px 20px color-mix(in oklch, var(--fg) 12%, transparent);
+  opacity: 0; pointer-events: none;
+  transition: opacity .2s ease, color .15s, border-color .15s;
+}
+.backtop svg { width: 17px; height: 17px; }
+.backtop.show { opacity: 1; pointer-events: auto; }
+.backtop:hover { color: var(--fg); border-color: var(--fg); }
+/* ─── responsive ────────────────────────────────────────────────── */
+@media (max-width: 1240px) {
+  .doc-shell { grid-template-columns: 252px minmax(0, 1fr); }
+  .toc { display: none; }
+  .content { padding: 48px 40px 88px; }
+}
+@media (max-width: 920px) {
+  .doc-shell { grid-template-columns: 1fr; }
+  .menu-btn { display: grid; }
+  .brand-sub { display: none; }
+  .ver-pill { display: none; }
+  .dl-btn .btn-text-full { display: none; }
+  .content { padding: 32px 18px 72px; }
+  .chapter { padding-block: 40px; }
+  .spec-strip { grid-template-columns: 1fr 1fr; }
+  .spec-cell { border-top: 1px solid var(--border); }
+  .spec-cell:nth-child(-n+2) { border-top: 0; }
+  .spec-cell:nth-child(even) { border-left: 1px solid var(--border); }
+  .spec-cell:nth-child(odd) { border-left: 0; }
+  .shots { grid-template-columns: 1fr; }
+  .hc-row { grid-template-columns: 1fr; gap: 4px; }
+  .sidebar {
+    position: fixed; z-index: 60;
+    top: var(--topbar-h); left: 0; bottom: 0;
+    width: 280px; height: auto;
+    background: var(--bg);
+    transform: translateX(-102%);
+    transition: transform .22s cubic-bezier(0.23, 1, 0.32, 1);
+    box-shadow: 0 12px 40px color-mix(in oklch, var(--fg) 20%, transparent);
+  }
+  body.sidebar-open .sidebar { transform: translateX(0); }
+  body.sidebar-open .scrim {
+    display: block; position: fixed; inset: var(--topbar-h) 0 0 0; z-index: 55;
+    background: color-mix(in oklch, var(--fg) 35%, transparent);
+  }
+  .gh-link { display: none; }
+}</style>
+</head>
+<body>
+
+<header class="topbar" data-od-id="topbar">
+  <div class="topbar-inner">
+    <button class="icon-btn menu-btn" id="menuBtn" aria-label="打开章节目录">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+    </button>
+    <a class="brand" href="#ch-overview">
+      <img src="assets/icon.png" alt="" width="26" height="26" />
+      <span class="brand-name">Llama CPP Launcher</span>
+      <span class="brand-sub">产品手册</span>
+    </a>
+    <span class="ver-pill num">v1.8.2</span>
+    <div class="spacer"></div>
+    <a class="gh-link" href="https://github.com/Mars-Albert/llama-cpp-launcher" target="_blank" rel="noopener">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="6" cy="5" r="2.2"/><circle cx="6" cy="19" r="2.2"/><circle cx="18" cy="7" r="2.2"/><path d="M6 7.2v9.6M18 9.2c0 5-9 3.6-9 7.4"/></svg>
+      GitHub
+    </a>
+    <button class="icon-btn" id="themeBtn" aria-label="切换深色 / 浅色主题" aria-pressed="false">
+      <svg id="iconSun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5 5l1.4 1.4M17.6 17.6 19 19M19 5l-1.4 1.4M6.4 17.6 5 19"/></svg>
+      <svg id="iconMoon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" hidden><path d="M20.5 13.2A8.5 8.5 0 1 1 10.8 3.5 7 7 0 0 0 20.5 13.2z"/></svg>
+    </button>
+    <a class="btn btn-primary dl-btn" href="https://github.com/Mars-Albert/llama-cpp-launcher/releases/latest" target="_blank" rel="noopener">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 4v11m0 0 4-4m-4 4-4-4M5 19h14"/></svg>
+      <span class="btn-text-full">下载最新版本</span>
+    </a>
+  </div>
+</header>
+
+<div class="doc-shell">
+
+  <!-- ══ 左侧：章节目录 ══ -->
+  <nav class="sidebar" id="sidebar" data-od-id="doc-sidebar" aria-label="章节目录">
+    <div class="sidebar-search">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="6.5"/><path d="m20 20-4.2-4.2"/></svg>
+      <input id="navFilter" type="text" placeholder="筛选章节…" aria-label="筛选章节" />
+    </div>
+    <div id="navGroups">
+      <div class="nav-group">
+        <p class="nav-group-label">入门</p>
+        <a class="nav-item" href="#ch-overview" data-target="ch-overview"><span class="nav-num">01</span>产品概览</a>
+        <a class="nav-item" href="#ch-quickstart" data-target="ch-quickstart"><span class="nav-num">02</span>快速开始</a>
+      </div>
+      <div class="nav-group">
+        <p class="nav-group-label">界面与模式</p>
+        <a class="nav-item" href="#ch-ui" data-target="ch-ui"><span class="nav-num">03</span>窗口与界面</a>
+        <a class="nav-item" href="#ch-modes" data-target="ch-modes"><span class="nav-num">04</span>双模式设计</a>
+        <a class="nav-item" href="#ch-basic" data-target="ch-basic"><span class="nav-num">05</span>基础模式</a>
+        <a class="nav-item" href="#ch-advanced" data-target="ch-advanced"><span class="nav-num">06</span>高级模式 · 9 个标签页</a>
+      </div>
+      <div class="nav-group">
+        <p class="nav-group-label">模型与服务</p>
+        <a class="nav-item" href="#ch-models" data-target="ch-models"><span class="nav-num">07</span>模型浏览器</a>
+        <a class="nav-item" href="#ch-lifecycle" data-target="ch-lifecycle"><span class="nav-num">08</span>服务生命周期</a>
+        <a class="nav-item" href="#ch-presets" data-target="ch-presets"><span class="nav-num">09</span>预设管理</a>
+      </div>
+      <div class="nav-group">
+        <p class="nav-group-label">日志与诊断</p>
+        <a class="nav-item" href="#ch-runtime" data-target="ch-runtime"><span class="nav-num">10</span>实时日志解析</a>
+        <a class="nav-item" href="#ch-logpanel" data-target="ch-logpanel"><span class="nav-num">11</span>日志面板</a>
+        <a class="nav-item" href="#ch-gguf" data-target="ch-gguf"><span class="nav-num">12</span>GGUF 检查器</a>
+      </div>
+      <div class="nav-group">
+        <p class="nav-group-label">参考</p>
+        <a class="nav-item" href="#ch-help" data-target="ch-help"><span class="nav-num">13</span>逐参数帮助</a>
+        <a class="nav-item" href="#ch-i18n" data-target="ch-i18n"><span class="nav-num">14</span>国际化与主题</a>
+        <a class="nav-item" href="#ch-compare" data-target="ch-compare"><span class="nav-num">15</span>与其他工具对比</a>
+        <a class="nav-item" href="#ch-dev" data-target="ch-dev"><span class="nav-num">16</span>附录 · 开发与许可</a>
+      </div>
+    </div>
+    <p class="nav-empty" id="navEmpty">没有匹配的章节</p>
+  </nav>
+
+  <div class="scrim" id="scrim"></div>
+
+  <!-- ══ 中间：可滚动正文 ══ -->
+  <main class="content" id="content">
+    <div class="prose">
+
+      <!-- 01 产品概览 -->
+      <section class="chapter" id="ch-overview" data-od-id="ch-overview">
+        <p class="chapter-eyebrow num">01 · 入门</p>
+        <h2>产品概览</h2>
+        <p class="chapter-lead">功能完整的 <code class="inl">llama-server</code>（llama.cpp）GUI 启动器。它驱动的是你自己安装的 <code class="inl">llama-server</code> 二进制 —— 一切行为可见，一切行为可控。</p>
+
+        <div class="spec-strip" data-od-id="spec-strip">
+          <div class="spec-cell"><div class="spec-num">235</div><div class="spec-label">个 llama-server CLI 参数，一屏全出</div></div>
+          <div class="spec-cell"><div class="spec-num">74</div><div class="spec-label">条日志解析规则，兼容新旧两种日志格式</div></div>
+          <div class="spec-cell"><div class="spec-num">9</div><div class="spec-label">个高级模式标签页，按职责分组</div></div>
+          <div class="spec-cell"><div class="spec-num">~13k</div><div class="spec-label">行 Python，唯一运行时依赖 PyQt6</div></div>
+        </div>
+
+        <h3 id="ov-philosophy">不同的路线：驱动你自己的 llama-server</h3>
+        <p>大多数 GUI 工具（Ollama、LM Studio 等）<strong>内置固定版本的 llama.cpp</strong>，且命令行对用户不可见。Llama CPP Launcher 走的是另一条路：它驱动的是*你自己*安装的 <code class="inl">llama-server</code>。</p>
+        <div class="table-wrap">
+          <table class="ds-table">
+            <thead><tr><th>能力</th><th class="hl">Llama CPP Launcher</th><th>内置后端的工具</th></tr></thead>
+            <tbody>
+              <tr><td>升级 llama.cpp</td><td class="hl">换个二进制文件，完事</td><td>等应用更新</td></tr>
+              <tr><td>自定义编译（CUDA / ROCm / Vulkan / Metal / SYCL）</td><td class="hl">任意构建都能用</td><td>只能用内置版本</td></tr>
+              <tr><td>体验最新提交</td><td class="hl">今天编译，今天跑</td><td>等几周甚至几个月</td></tr>
+              <tr><td>回退版本</td><td class="hl">换回旧二进制文件</td><td>祈祷官方提供</td></tr>
+              <tr><td>应用实际执行的命令</td><td class="hl">始终可见，一键复制</td><td>黑盒</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3 id="ov-sync">自动与你的二进制保持同步</h3>
+        <dl class="feature-list">
+          <dt>动态默认值检测</dt>
+          <dd>启动时运行 <code class="inl">llama-server --help</code>，解析*你的*二进制版本的真实默认值。不存在过时的硬编码，版本漂移还会通过 ⚠ 指示器提示。</dd>
+          <dt>聊天模板自动发现</dt>
+          <dd>你的二进制内置的聊天模板会自动出现在 UI 中。</dd>
+          <dt>GPU 检测</dt>
+          <dd>通过 <code class="inl">--list-devices</code> 探测，在<strong>状态栏</strong>（版本号左侧）显示，例如「检测到 2× GPU：RTX 5090 (32GB) + RTX 2080 (8GB)」。只展示，不自动填写 —— 永远由你决定。</dd>
+        </dl>
+
+        <h3 id="ov-local">轻量且私密</h3>
+        <p>整个应用约 16,000 行 Python，唯一运行时依赖是 PyQt6。无内置后端、无账号、无遥测、不联网上报，100% 本地运行。</p>
+
+        <h3 id="ov-get">获取方式</h3>
+        <ul>
+          <li><strong>Windows</strong>：从 <a class="ref" href="https://github.com/Mars-Albert/llama-cpp-launcher/releases/latest" target="_blank" rel="noopener">GitHub Releases</a> 下载 <code class="inl">LlamaCppLauncher.exe</code>，双击即运行，无需安装 Python。</li>
+          <li><strong>源码</strong>：任意系统（Python 3.11+），步骤见<a class="ref" href="#ch-quickstart">快速开始</a>。</li>
+          <li><strong>许可</strong>：MIT —— 想怎么用就怎么用。</li>
+        </ul>
+      </section>
+
+      <!-- 02 快速开始 -->
+      <section class="chapter" id="ch-quickstart" data-od-id="ch-quickstart">
+        <p class="chapter-eyebrow num">02 · 入门</p>
+        <h2>快速开始</h2>
+        <p class="chapter-lead">两条路线：Windows exe 完全不需要环境准备；源码方式适用于任意系统。</p>
+
+        <h3 id="qs-exe">方式一 · Windows exe（推荐）</h3>
+        <ol class="steps">
+          <li>从 <a class="ref" href="https://github.com/Mars-Albert/llama-cpp-launcher/releases/latest" target="_blank" rel="noopener">Releases</a> 下载 <code class="inl">LlamaCppLauncher.exe</code>，双击运行 —— 无需安装 Python。</li>
+          <li>安装 <code class="inl">llama-server</code>（如从 <a class="ref" href="https://github.com/ggml-org/llama.cpp/releases" target="_blank" rel="noopener">ggml-org/llama.cpp releases</a> 下载预编译版本）。</li>
+          <li>在应用中：**文件 → 设置 llama-server 路径…**，指向该二进制文件；或把它加入 <code class="inl">PATH</code> —— 启动器会自动找到。</li>
+          <li>选模型，点<strong>启动</strong>，打开 WebUI。搞定。</li>
+        </ol>
+        <div class="callout" data-od-id="callout-smartscreen">
+          <span class="callout-tag">提示</span>
+          <p style="margin:0">Windows SmartScreen 可能警告未签名的可执行文件 —— 点击<strong>更多信息 → 仍要运行</strong>即可。</p>
+        </div>
+
+        <h3 id="qs-source">方式二 · 从源码运行（任意系统）</h3>
+        <div class="codeblock" data-od-id="code-quickstart">
+          <div class="codeblock-head"><span class="codeblock-label">SHELL</span>
+            <button class="copy-btn" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>复制</button>
+          </div>
+<pre>git clone https://github.com/Mars-Albert/llama-cpp-launcher.git
+cd llama-cpp-launcher
+
+python -m venv venv
+venv\Scripts\activate      # Windows
+source venv/bin/activate   # Linux / macOS
+pip install -r requirements.txt
+
+python main.py             # Windows 下也可双击 run.bat</pre>
+        </div>
+        <div class="note" data-od-id="note-requirements">
+          <span class="note-tag">说明</span>
+          <p style="margin:0"><code class="inl">requirements.txt</code> 将 PyQt6 锁定为 6.11.0 —— 应用针对恰好这个运行时进行测试。</p>
+        </div>
+
+        <h3 id="qs-first">第一次运行之后</h3>
+        <p>选好模型点启动后：彩色状态指示与运行计时器（MM:SS）出现；<strong>运行时信息</strong>面板开始从服务端日志实时解析填充；命令预览显示交给 <code class="inl">llama-server</code> 的精确命令。详见<a class="ref" href="#ch-lifecycle">服务生命周期</a>。</p>
+      </section>
+
+      <!-- 03 窗口与界面 -->
+      <section class="chapter" id="ch-ui" data-od-id="ch-ui">
+        <p class="chapter-eyebrow num">03 · 界面与模式</p>
+        <h2>窗口与界面</h2>
+        <p class="chapter-lead">无边框圆角卡片窗口，一体式标题行，所有对话框同属一个视觉家族。</p>
+
+        <div class="shots">
+          <figure class="shot" data-od-id="shot-advanced">
+            <img class="content-img" src="cn_light.png" width="2000" height="1175" alt="高级模式界面截图（浅色主题）：9 个标签页的参数面板、常驻控制行与实时指标带" />
+            <figcaption>高级模式 · 浅色主题 —— 9 个标签页覆盖 235 个参数，下方是常驻控制行与实时指标带</figcaption>
+          </figure>
+          <figure class="shot" data-od-id="shot-basic">
+            <img class="content-img" src="cn.png" width="2000" height="1175" alt="基础模式运行中截图（深色主题）：模型运行，运行时信息实时解析" />
+            <figcaption>基础模式 · 深色主题，模型运行中 —— 运行时信息从服务端日志实时解析</figcaption>
+          </figure>
+        </div>
+
+        <h3 id="ui-frameless">无边框圆角卡片窗口</h3>
+        <p>应用自绘卡片与柔和投影：一体式标题行（图标 · 标题 · 菜单 · Win11 风格的最小化 / 最大化 / 关闭按钮）；拖动移动、双击最大化，贴住可见卡片边缘即可边缘缩放；最大化时卡片铺满全屏，并使用系统自身的圆角。</p>
+
+        <h3 id="ui-rightcol">右栏 · 3 个标签页 + 常驻控制行</h3>
+        <p>整个右栏是一个标签页控件 —— <strong>⚙ 参数配置 · 📄 日志输出 · 📊 运行信息</strong> —— 每个标签页都拿到整列高度（1080p 窗口下日志区约 <span class="num">800px</span>，而不是过去那条 200px 的窄缝）。标签页<strong>下方</strong>是控制行：左侧 <strong>▶ 启动 · ■ 停止 · 📋 复制 · 🌐 WebUI</strong>，右侧是实时指标带；它在标签页之外，因此开着哪个标签页都能用。参数配置页内部，参数区与命令预览之间还有一条<strong>可拖动分割线</strong>。</p>
+        <div class="table-wrap">
+          <table class="ds-table">
+            <thead><tr><th>标签页</th><th>内容</th><th>备注</th></tr></thead>
+            <tbody>
+              <tr><td class="hl">⚙ 参数配置</td><td>基础 / 高级模式切换条、参数分组、命令预览</td><td>上下两块可拖动分割</td></tr>
+              <tr><td class="hl">📄 日志输出</td><td>搜索、级别过滤、导出，独占整列高度</td><td><code class="inl">Ctrl+F</code> 会自动跳到本页</td></tr>
+              <tr><td class="hl">📊 运行信息</td><td>从日志解析出的运行时信息表（见「实时日志解析」）</td><td>—</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>当前标签页、模式、窗口尺寸与各分割栏宽度都会被记住，下次启动自动恢复。</p>
+
+        <h3 id="ui-statusbar">状态栏</h3>
+        <p>左侧是当前消息（预设已加载、错误提示等）；右侧依次是：</p>
+        <div class="table-wrap">
+          <table class="ds-table">
+            <thead><tr><th>项</th><th>内容</th></tr></thead>
+            <tbody>
+              <tr><td class="hl">检测到的 GPU</td><td>如「检测到 2× GPU：RTX 5090 (32GB) + RTX TITAN (24GB)」，来自 <code class="inl">--list-devices</code>；悬停看每张卡的显存与空闲量，探针结束前不显示</td></tr>
+              <tr><td class="hl">版本</td><td>你的二进制的 <code class="inl">--version</code>；二进制比内置参数表更新时变琥珀色</td></tr>
+              <tr><td class="hl">⚠ 参数漂移</td><td>只在确实有漂移时出现，点开是完整清单（不被截断）</td></tr>
+              <tr><td class="hl">状态点 + 状态文字</td><td>灰 = 未启动 · 琥珀 = 启动中，或运行中但 <code class="inl">/slots</code> 与 <code class="inl">/metrics</code> 都无应答 · 绿 = 运行中 · 红 = 异常</td></tr>
+              <tr><td class="hl">运行时长</td><td><span class="num">MM:SS</span>，逐秒刷新</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3 id="ui-dialogs">统一的对话框与消息框</h3>
+        <p>所有对话框、确认框、错误提示都属于同一无边框卡片家族，深色 / 浅色自适应 —— 风格统一，不突兀。</p>
+
+        <h3 id="ui-state">默认尺寸与状态记忆</h3>
+        <p>首次启动以 <span class="num">1600 × 940</span>（按屏幕可用区钳制）打开，左侧模型栏 <span class="num">400px</span>。窗口大小与位置、基础 / 高级模式、右栏当前标签页、高级模式子页、左右分割宽度、以及参数区 / 命令预览的分割位置，都会在下次启动时自动恢复。</p>
+
+        <h3 id="ui-small">小窗体不塌方</h3>
+        <p>参数区永不出垂直滚动条，控件不会被压缩或重叠：快捷开关自动换行成更多行，并随之增大窗口最小尺寸；极窄窗口下宽行横向滚动。</p>
+
+        <h3 id="ui-menu">菜单</h3>
+        <div class="table-wrap">
+          <table class="ds-table">
+            <thead><tr><th>菜单</th><th>内容</th></tr></thead>
+            <tbody>
+              <tr><td>文件</td><td>扫描路径、设置 llama-server 路径、刷新、退出</td></tr>
+              <tr><td>设置</td><td>自定义快捷开关、语言（中 / 英）、主题（深色 / 浅色）</td></tr>
+              <tr><td>帮助</td><td>关于</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- 04 双模式设计 -->
+      <section class="chapter" id="ch-modes" data-od-id="ch-modes">
+        <p class="chapter-eyebrow num">04 · 界面与模式</p>
+        <h2>双模式设计</h2>
+        <p class="chapter-lead">基础模式让模型几秒钟跑起来；高级模式精细调节每一个细节。</p>
+
+        <h3 id="modes-table">两种模式对照</h3>
+        <div class="table-wrap">
+          <table class="ds-table">
+            <thead><tr><th class="hl">基础模式</th><th>高级模式</th></tr></thead>
+            <tbody>
+              <tr><td class="hl">模型 &amp; mmproj 选择器（背后是模型浏览器）</td><td>235 个参数，9 个标签页</td></tr>
+              <tr><td class="hl">温度 / Top-P / Min-P / 重复惩罚滑块 + Top-K 数值框</td><td>LoRA 适配器与缩放、控制向量、图像 Token 限制</td></tr>
+              <tr><td class="hl">上下文快捷按钮：Default → 4K → 262K</td><td>模型来源：本地文件、HF 仓库、URL、Docker 仓库</td></tr>
+              <tr><td class="hl">GPU 层数 auto / all / 手动，host / port / 并行数</td><td>投机解码（draft-mtp、ngram、lookup cache）</td></tr>
+              <tr><td class="hl">快捷开关（可自定义，设置 → 自定义快捷开关…）：FlashAttn、推理、分割模式、投机类型、草稿 Token 上限…</td><td>完整服务端配置：SSL、CORS、slots、embedding / rerank、MCP</td></tr>
+            </tbody>
+            <tfoot><tr><td colspan="2" class="tbl-foot">基础：几秒钟让模型跑起来　·　高级：精细调节每一个细节</td></tr></tfoot>
+          </table>
+        </div>
+
+        <h3 id="modes-quick">自定义快捷开关</h3>
+        <p>基础模式的快捷开关不是固定的：在<strong>设置 → 自定义快捷开关…</strong>中，可以从候选池（FlashAttn、推理、分割模式、投机类型、草稿 Token 上限等）里挑选并组装属于你自己的那一组。</p>
+      </section>
+
+      <!-- 05 基础模式 -->
+      <section class="chapter" id="ch-basic" data-od-id="ch-basic">
+        <p class="chapter-eyebrow num">05 · 界面与模式</p>
+        <h2>基础模式</h2>
+        <p class="chapter-lead">五组控件，点几下就能把本地推理服务跑起来。</p>
+
+        <h3 id="basic-model">模型与多模态</h3>
+        <p>模型与 mmproj 选择器背后是模型浏览器：自动分类、即时模型信息、按名称自动匹配 mmproj —— 详见<a class="ref" href="#ch-models">模型浏览器</a>。</p>
+
+        <h3 id="basic-sampling">采样参数</h3>
+        <p>温度、Top-P、Min-P、重复惩罚以滑块给出，Top-K 为数值框 —— 不用记 CLI 参数名，就能调出想要的采样行为。</p>
+
+        <h3 id="basic-ctx">上下文快捷按钮</h3>
+        <p><span class="num">Default → 4K → 262K</span> 一键切换。当上下文设置超过模型上限时，模型信息行变<b>琥珀色</b>提示 —— 启动后会被截断。</p>
+
+        <h3 id="basic-gpu">GPU 与服务</h3>
+        <p>GPU 层数三态：<code class="inl">auto / all / 手动</code>；host、port、并行数就地设置。GPU 层数旁显示 <code class="inl">--list-devices</code> 的检测结果（只展示，不自动填写）。</p>
+
+        <h3 id="basic-quick">快捷开关</h3>
+        <p>常用开关一屏可见：FlashAttn、推理、分割模式、投机类型、草稿 Token 上限…… 这一组可以自定义，见<a class="ref" href="#modes-quick">双模式设计</a>。</p>
+      </section>
+
+      <!-- 06 高级模式 -->
+      <section class="chapter" id="ch-advanced" data-od-id="ch-advanced">
+        <p class="chapter-eyebrow num">06 · 界面与模式</p>
+        <h2>高级模式 · 9 个标签页</h2>
+        <p class="chapter-lead">235 个 <code class="inl">llama-server</code> CLI 参数一屏全出。按职责分成 9 个标签页，每个参数行都有「?」帮助按钮。</p>
+
+        <h3 id="adv-tabs">9 个标签页</h3>
+        <div class="table-wrap">
+          <table class="ds-table">
+            <thead><tr><th>标签页</th><th>内容</th></tr></thead>
+            <tbody>
+              <tr><td>模型</td><td>模型文件、别名、标签、HF / URL / Docker 来源、LoRA、控制向量、mmproj（视觉）</td></tr>
+              <tr><td>上下文</td><td>上下文大小、prompt 与 KV 缓存、RoPE / YaRN 缩放</td></tr>
+              <tr><td>采样</td><td>温度、top-k / p、min-p、惩罚项、语法与重复控制</td></tr>
+              <tr><td>GPU-性能</td><td>卸载、显存、CPU 线程、亲和性、优先级</td></tr>
+              <tr><td>投机解码</td><td>草稿模型（draft-mtp）、ngram、lookup cache、草稿 Token 数</td></tr>
+              <tr><td>服务</td><td>host / port、slots、并行、端点、SSL、CORS、embedding / rerank、router</td></tr>
+              <tr><td>Agent / 工具</td><td>工具调用、MCP 服务、agent 设置</td></tr>
+              <tr><td>聊天-推理</td><td>聊天模板、推理模式、thinking budget</td></tr>
+              <tr><td>高级</td><td>文本 I/O、日志、<code class="inl">extra_args</code> 万能出口</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3 id="adv-schema">Schema 是唯一事实来源</h3>
+        <p>UI、CLI 命令生成、get / set 值与国际化覆盖率共享同一份 schema（<code class="inl">core/params_schema.py</code>）—— 新增一个参数只需一条记录，不需要手工同步三处。</p>
+      </section>
+
+      <!-- 07 模型浏览器 -->
+      <section class="chapter" id="ch-models" data-od-id="ch-models">
+        <p class="chapter-eyebrow num">07 · 模型与服务</p>
+        <h2>模型浏览器</h2>
+        <p class="chapter-lead">后台线程扫描本地 GGUF 库 —— 界面永不卡顿。</p>
+
+        <h3 id="mb-scan">扫描与分类</h3>
+        <p>后台线程扫描模型目录。<code class="inl">.gguf</code> 文件自动分类为<strong>模型 / 多模态（mmproj）</strong>，并显示文件大小。</p>
+
+        <h3 id="mb-info">即时模型信息</h3>
+        <p>选中模型的即时信息：文件大小、估算参数量、量化类型。</p>
+
+        <h3 id="mb-meta">GGUF 快速元数据行</h3>
+        <p>当前选中模型的架构 + 最大上下文，只解析文件*头部*（几 MB，有缓存，后台线程执行）。当上下文设置超过模型上限时，该行变<b>琥珀色</b>提示 —— 启动后会被截断。</p>
+
+        <h3 id="mb-match">匹配与记忆</h3>
+        <ul>
+          <li>按名称自动匹配 mmproj 到对应模型；</li>
+          <li>扫描目录跨会话记忆；</li>
+          <li>按 <span class="num">F5</span> 重新扫描。</li>
+        </ul>
+      </section>
+
+      <!-- 08 服务生命周期 -->
+      <section class="chapter" id="ch-lifecycle" data-od-id="ch-lifecycle">
+        <p class="chapter-eyebrow num">08 · 模型与服务</p>
+        <h2>服务生命周期</h2>
+        <p class="chapter-lead">从启动到停止，状态始终可见。</p>
+
+        <h3 id="lc-run">启动与停止</h3>
+        <p>控制行的四个按钮是<strong>彩色底 + 白字</strong>（与应用其余按钮区分开，这是主操作区）：<strong>▶ 启动 · ■ 停止 · 📋 复制 · 🌐 WebUI</strong>；启动前端口冲突检测；一键在浏览器中打开 llama-server WebUI。运行状态与计时器在状态栏（灰 / 琥珀 / 绿 / 红 + <span class="num">MM:SS</span>）。</p>
+        <div class="st-row" data-od-id="status-states">
+          <span class="st"><i></i>已停止</span>
+          <span class="st st-loading"><i></i>加载中</span>
+          <span class="st st-ready"><i></i>就绪</span>
+        </div>
+
+        <h3 id="lc-metrics">实时指标带</h3>
+        <p>控制行右端是一条单行指标带，三个标签页上都常驻。它直接读服务端自己的端点，不额外起进程，也不从日志里猜：</p>
+        <div class="table-wrap">
+          <table class="ds-table">
+            <thead><tr><th>组</th><th>读数</th><th>来源 · 频率</th></tr></thead>
+            <tbody>
+              <tr><td class="hl">实时</td><td>Prefill t/s · Decode t/s · 上下文计量条 + 百分比</td><td><code class="inl">GET /slots</code> · 每秒</td></tr>
+              <tr><td class="hl">累计</td><td>输入 tokens · 缓存 tokens · 输出 tokens · 缓存命中率</td><td><code class="inl">GET /metrics</code> · 每 5 秒</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <dl class="feature-list">
+          <dt>上下文计量条</dt>
+          <dd>百分比直接写在条里：<span class="num">70%</span> 起转琥珀，<span class="num">90%</span> 起转红，一眼看出还剩多少窗口。</dd>
+          <dt>速度重新起算</dt>
+          <dd>计数器差值在本地计算，并在每次任务边界重新起算基线 —— 服务端按任务清零计数器，所以新发起一个请求绝不会算出负速度。</dd>
+          <dt>开启累计指标</dt>
+          <dd>累计四个数需要服务端 metrics 端点：<strong>高级模式 → 服务 → 「Prometheus指标 (--metrics)」</strong>，然后重启服务。第一次采样之前读作 <span class="num">0</span>（累计计数本就从零起算）；确实读不到的值读作 <code class="inl">—</code>。每一格的 tooltip 都会说明当前是哪一种情况。</dd>
+          <dt>排版不抖</dt>
+          <dd>未运行时七个读数不折叠，数值列按最宽取值定宽，1 秒刷新与点「启动」都不会让这一行重新排版。</dd>
+        </dl>
+
+        <h3 id="lc-stop">优雅停止</h3>
+        <p>停止是非阻塞的，超时强杀兜底；关闭应用时自动停止服务。</p>
+
+        <h3 id="lc-undo">撤销</h3>
+        <p><span class="num">800ms</span> 防抖快照，最多回退 <span class="num">20</span> 步 —— 参数改错了可以撤回来。</p>
+
+        <h3 id="lc-cmd">命令预览</h3>
+        <p>精确的 <code class="inl">llama-server</code> 命令，每次修改即时更新，一键复制；含空格的路径已正确加引号。</p>
+        <div class="codeblock" data-od-id="code-cmd-preview">
+          <div class="codeblock-head"><span class="codeblock-label">示例 · 命令预览</span>
+            <button class="copy-btn" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>复制</button>
+          </div>
+<pre>llama-server -m "D:/models/Qwen2.5-14B-Instruct-Q4_K_M.gguf" \
+    --ctx-size 32768 --n-gpu-layers 99 --flash-attn \
+    --host 127.0.0.1 --port 8080</pre>
+        </div>
+      </section>
+
+      <!-- 09 预设管理 -->
+      <section class="chapter" id="ch-presets" data-od-id="ch-presets">
+        <p class="chapter-eyebrow num">09 · 模型与服务</p>
+        <h2>预设管理</h2>
+        <p class="chapter-lead">保存一个名字，下次启动自动恢复你的整组调参。</p>
+
+        <h3 id="ps-save">保存与分享</h3>
+        <ul>
+          <li>保存 / 加载 / 删除命名预设 —— <strong>只存储与默认值的差异</strong>，文件小而可移植。</li>
+          <li>以 JSON 文件导入 / 导出，方便分享；列表中显示创建时间。</li>
+          <li>保存时可选择<strong>包含或排除本机路径</strong>（model / mmproj），跨机器分享不踩坑。</li>
+        </ul>
+
+        <h3 id="ps-restore">自动恢复与迁移</h3>
+        <ul>
+          <li>上次加载的预设会在<strong>下次启动时自动恢复</strong>。</li>
+          <li>跨 llama.cpp 版本被重命名 / 删除的参数键，会在加载时自动迁移。</li>
+        </ul>
+      </section>
+
+      <!-- 10 实时日志解析 -->
+      <section class="chapter" id="ch-runtime" data-od-id="ch-runtime">
+        <p class="chapter-eyebrow num">10 · 日志与诊断</p>
+        <h2>实时日志解析</h2>
+        <p class="chapter-lead"><code class="inl">llama-server</code> 的每一行输出都会在被打印的同时解析，提炼进<strong>运行时信息</strong>面板。</p>
+
+        <p>解析器共 <span class="num">74</span> 条规则，兼容新旧两种日志格式（含 v9174+ <code class="inl">srv</code> 前缀格式）；面板覆盖 <span class="num">8</span> 大类、<span class="num">40+</span> 数据点。</p>
+
+        <h3 id="rt-table">8 大类数据</h3>
+        <div class="table-wrap">
+          <table class="ds-table">
+            <thead><tr><th>类别</th><th>你看到的信息</th></tr></thead>
+            <tbody>
+              <tr><td>硬件</td><td>GPU 名称 / 计算能力 / 每卡总显存与空闲显存、CPU</td></tr>
+              <tr><td>模型</td><td>文件、模型名、量化类型、GGUF 版本</td></tr>
+              <tr><td>架构</td><td>参数量、层数、embed / FFN 维度、词表、张量精度分布</td></tr>
+              <tr><td>运行参数</td><td>训练 vs 运行上下文、batch / ubatch、slots、RoPE 频率、thinking 模式</td></tr>
+              <tr><td>显存</td><td>卸载层数、模型 / KV 缓存 / 计算缓冲、预计显存占用</td></tr>
+              <tr><td>性能</td><td>Flash attention、KV 统一、图节点数与分割数</td></tr>
+              <tr><td>系统</td><td>线程、OpenMP、repack</td></tr>
+              <tr><td>视觉</td><td>编码器状态、mmproj、图像分辨率、最小图像 Token</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3 id="rt-live">实时刷新</h3>
+        <p>面板实时刷新 —— 卸载层数在加载过程中逐步出现，缓冲大小在初始化时填充，服务端开始监听的那一刻，状态立即切换为<strong>就绪</strong>。</p>
+        <p>新版 llama.cpp 把自己那些 INFO 行改走 TRACE 回调，若沿用二进制默认的 <code class="inl">--log-verbosity 3</code>，本面板基本会是空的。因此启动器把 <code class="inl">log_verbosity</code> 默认设为 <span class="num">4</span>（trace），且不采用二进制的动态默认值；级别低于 4 时面板会给出提示。</p>
+      </section>
+
+      <!-- 11 日志面板 -->
+      <section class="chapter" id="ch-logpanel" data-od-id="ch-logpanel">
+        <p class="chapter-eyebrow num">11 · 日志与诊断</p>
+        <h2>日志面板</h2>
+        <p class="chapter-lead">一个完整的控制台：可搜索、可过滤、可导出。</p>
+
+        <h3 id="lp-search">搜索与过滤</h3>
+        <ul>
+          <li><strong>Ctrl+F 搜索</strong>，带匹配计数与循环查找；</li>
+          <li><strong>级别过滤</strong> —— 调试 / 信息 / 警告 / 错误（默认跟随「错误」级别）；</li>
+          <li>自动滚动开关、清空按钮、按级别着色。</li>
+        </ul>
+
+        <h3 id="lp-export">导出</h3>
+        <p>导出可见区域，或<strong>完整运行日志</strong> —— 每次运行都会完整镜像到 <code class="inl">~/.llama-cpp-launcher/logs/last_run.log</code>。</p>
+
+        <h3 id="lp-history">每级独立历史窗口</h3>
+        <p>调试 / 信息 / 警告 / 错误各保留自己 <span class="num">5,000</span> 行的窗口。隐藏级别的日志爆发（如 debug 提示词转储）不会把你正在过滤的级别挤掉。</p>
+      </section>
+
+      <!-- 12 GGUF 检查器 -->
+      <section class="chapter" id="ch-gguf" data-od-id="ch-gguf">
+        <p class="chapter-eyebrow num">12 · 日志与诊断</p>
+        <h2>GGUF 检查器</h2>
+        <p class="chapter-lead">内置二进制检查器 —— 不加载权重，纯标准库解析。</p>
+
+        <h3 id="gguf-tabs">7 个标签页</h3>
+        <div class="tab-pills" data-od-id="gguf-tab-pills">
+          <span class="tab-pill"><span class="tab-idx num">01</span>概览</span>
+          <span class="tab-pill"><span class="tab-idx num">02</span>统计</span>
+          <span class="tab-pill"><span class="tab-idx num">03</span>元数据</span>
+          <span class="tab-pill"><span class="tab-idx num">04</span>张量</span>
+          <span class="tab-pill"><span class="tab-idx num">05</span>分词器</span>
+          <span class="tab-pill"><span class="tab-idx num">06</span>文件名</span>
+          <span class="tab-pill"><span class="tab-idx num">07</span>诊断</span>
+        </div>
+
+        <h3 id="gguf-viz">可视化分析</h3>
+        <p>量化分布、层 / 模块结构、参数集中度 —— 一眼看懂模型文件的形态。</p>
+
+        <h3 id="gguf-diag">启动器感知诊断</h3>
+        <p>不只是通用报告：它会对照当前启动器配置交叉检查 —— 上下文超出模型上限、mmproj 名称不匹配、draft-mtp 缺少 sidecar，以及聊天模板 / RoPE / MoE / 分片信息。</p>
+
+        <h3 id="gguf-export">导出</h3>
+        <p>导出 JSON / CSV / Markdown。后台线程解析 + 内存缓存，大文件不卡界面。</p>
+      </section>
+
+      <!-- 13 逐参数帮助 -->
+      <section class="chapter" id="ch-help" data-od-id="ch-help">
+        <p class="chapter-eyebrow num">13 · 参考</p>
+        <h2>逐参数帮助</h2>
+        <p class="chapter-lead">每个参数行都有「?」按钮，点开后弹出浮动帮助卡片。</p>
+
+        <h3 id="ph-card">卡片上的四样东西</h3>
+        <ul>
+          <li><strong>CLI 参数名</strong>；</li>
+          <li>你二进制版本的<strong>实时默认值</strong>（来自 <code class="inl">--help</code>）；</li>
+          <li><strong>取值范围</strong>；</li>
+          <li>通俗的<strong>解释</strong>。</li>
+        </ul>
+        <p>再也不用记 <code class="inl">--no-kv-offload</code> 是干什么的了。</p>
+
+        <h3 id="ph-sample">一个真实样例</h3>
+        <div class="helpcard" data-od-id="help-card-demo">
+          <div class="hc-head">
+            <span class="hc-title">KV 卸载</span>
+            <span class="hc-flag num">--kv-offload</span>
+          </div>
+          <div class="hc-row"><span class="hc-key">CLI 参数</span><span class="hc-val"><code class="inl">--kv-offload</code> / <code class="inl">--no-kv-offload</code>（短参 <code class="inl">-nkvo</code>）</span></div>
+          <div class="hc-row"><span class="hc-key">你的二进制默认值</span><span class="hc-val">开（来自 <code class="inl">--help</code> 实时解析）</span></div>
+          <div class="hc-row"><span class="hc-key">取值范围</span><span class="hc-val">开 / 关</span></div>
+          <div class="hc-row"><span class="hc-key">解释</span><span class="hc-val">是否将 KV 缓存卸载到 GPU。显存紧张时可关闭，让 KV 留在内存中。</span></div>
+        </div>
+        <p class="hc-caption">示例 · 取自内置帮助文本「KV 卸载」参数（core/params_help.py）</p>
+      </section>
+
+      <!-- 14 国际化与主题 -->
+      <section class="chapter" id="ch-i18n" data-od-id="ch-i18n">
+        <p class="chapter-eyebrow num">14 · 参考</p>
+        <h2>国际化与主题</h2>
+        <p class="chapter-lead">界面语言与主题实时切换，无需重启。</p>
+
+        <h3 id="i18n-lang">中 ↔ 英</h3>
+        <p>界面语言中 ↔ 英实时切换，无需重启；偏好持久保存，下次启动记住你的选择。</p>
+
+        <h3 id="i18n-theme">深色 / 浅色</h3>
+        <p><strong>设置</strong>菜单（文件 · 设置 · 帮助）一键切换深色 / 浅色主题，自动记忆；日志面板与 GGUF 检查器均随主题适配。本手册页面同样提供深色 / 浅色切换 —— 见顶栏右上角。</p>
+      </section>
+
+      <!-- 15 与其他工具对比 -->
+      <section class="chapter" id="ch-compare" data-od-id="ch-compare">
+        <p class="chapter-eyebrow num">15 · 参考</p>
+        <h2>与其他工具对比</h2>
+        <p class="chapter-lead">差别不在「功能多」，而在它驱动的是你自己安装的 llama.cpp。</p>
+
+        <h3 id="cmp-table">能力对比</h3>
+        <div class="table-wrap">
+          <table class="ds-table">
+            <thead><tr><th>功能</th><th class="hl">Llama CPP Launcher</th><th>Ollama</th><th>LM Studio</th></tr></thead>
+            <tbody>
+              <tr><td>自带 llama.cpp 二进制</td><td class="hl"><span class="yes">✓</span></td><td><span class="no">✗</span></td><td><span class="no">✗</span></td></tr>
+              <tr><td>当天使用最新 llama.cpp</td><td class="hl"><span class="yes">✓</span></td><td><span class="no">✗</span></td><td><span class="no">✗</span></td></tr>
+              <tr><td>任意自定义后端（CUDA / ROCm / Vulkan / Metal / SYCL）</td><td class="hl"><span class="yes">✓</span></td><td><span class="no">✗</span></td><td><span class="no">✗</span></td></tr>
+              <tr><td>完整 CLI 参数访问（235 个）</td><td class="hl"><span class="yes">✓</span></td><td><span class="no">✗</span></td><td><span class="part">部分</span></td></tr>
+              <tr><td>实际命令可见且可复制</td><td class="hl"><span class="yes">✓</span></td><td><span class="no">✗</span></td><td><span class="no">✗</span></td></tr>
+              <tr><td>版本感知的预设迁移</td><td class="hl"><span class="yes">✓</span></td><td><span class="no">✗</span></td><td><span class="no">✗</span></td></tr>
+              <tr><td>内置 GGUF 检查器</td><td class="hl"><span class="yes">✓</span></td><td><span class="no">✗</span></td><td><span class="no">✗</span></td></tr>
+              <tr><td>无遥测，100% 本地</td><td class="hl"><span class="yes">✓</span></td><td><span class="no">✗</span></td><td><span class="yes">✓</span></td></tr>
+              <tr><td>单一轻量依赖（PyQt6）</td><td class="hl"><span class="yes">✓</span></td><td><span class="dash">—</span></td><td><span class="no">✗</span></td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3 id="cmp-points">最关键的三点差异</h3>
+        <ol>
+          <li><strong>升级 / 回退 = 换二进制</strong>：不依赖应用更新节奏，今天编译今天跑。</li>
+          <li><strong>命令始终可见可复制</strong>：没有黑盒，排错时你能看到真正执行的参数。</li>
+          <li><strong>预设随版本迁移</strong>：llama.cpp 参数改名或删除时，旧预设加载时自动迁移。</li>
+        </ol>
+      </section>
+
+      <!-- 16 附录 -->
+      <section class="chapter" id="ch-dev" data-od-id="ch-dev">
+        <p class="chapter-eyebrow num">16 · 参考</p>
+        <h2>附录 · 开发与许可</h2>
+        <p class="chapter-lead">面向参与开发的人：构建、结构、发布方式。</p>
+
+        <h3 id="dev-build">开发</h3>
+        <ul>
+          <li>Python 3.11+，PyQt6（版本锁定 6.11.0），pytest 测试；</li>
+          <li>约 16,000 行应用代码，另有约 8,000 行测试（<span class="num">531</span> 个用例，全部无界面运行）；</li>
+          <li>核心 schema（<code class="inl">core/params_schema.py</code>）是 UI、CLI 命令生成、get / set 值、i18n 覆盖率的唯一事实来源 —— 新增一个参数只需一条记录；</li>
+          <li><code class="inl">gguf/</code>、<code class="inl">ui/log_parser.py</code>、<code class="inl">ui/command_builder.py</code> 均不依赖 Qt，可无界面单元测试。</li>
+          <li>文档截图是<strong>渲染出来的，不是拍出来的</strong> —— <code class="inl">python tools/render_screenshots.py</code> 用真实控件 + 合成数据（显卡 / 模型 / 版本 / 日志全是编的），并且刻意把这台机器排除在外：不打桩就会带上 PATH 里解析出的二进制路径、真实的 <code class="inl">~/.llama-cpp-launcher</code> 与 <code class="inl">--list-devices</code> 结果。界面改版后请用它的重出图，不要改用真机截图。</li>
+        </ul>
+
+        <h3 id="dev-tree">项目结构</h3>
+        <div class="codeblock" data-od-id="code-tree">
+          <div class="codeblock-head"><span class="codeblock-label">项目结构</span>
+            <button class="copy-btn" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>复制</button>
+          </div>
+<pre>llama-cpp-launcher/
+├── main.py                  # 入口（异步启动、日志配置）
+├── run.bat                  # Windows 启动脚本（激活 venv）
+├── build_config.py          # 应用名 / 版本（CI 按 tag 改写）
+├── llama_cpp_launcher.spec  # PyInstaller 构建配置（内嵌图标）
+├── requirements.txt
+├── core/
+│   ├── params_schema.py     # ★ 235 参数 schema（Qt-free，唯一事实来源）
+│   ├── params_help.py       # 逐参数帮助文本（235 条）
+│   ├── defaults.py          # --help 解析、回退默认值、GPU 探测
+│   ├── config.py            # 预设与设置 IO（~/.llama-cpp-launcher）
+│   ├── runner.py            # QProcess 封装（启动/停止/就绪检测）
+│   ├── i18n.py              # 中/英翻译（中文为源语言）
+│   └── constants.py
+├── gguf/                    # 纯标准库 GGUF 二进制读取器
+│   ├── parser.py  models.py  ggml_types.py  filename.py  diagnostics.py
+├── ui/
+│   ├── main_window.py       # 窗口编排、主题、日志面板
+│   ├── frameless.py         # 无边框圆角卡片窗口、标题栏、边缘缩放
+│   ├── message_box.py       # 主题化无边框消息框与对话框基类
+│   ├── basic_panel.py       # 基础模式（含可自定义快捷开关）
+│   ├── advanced_panel.py    # 高级模式（schema 驱动，9 标签页）
+│   ├── quick_params.py      # 快捷开关候选池 + 控件工厂
+│   ├── quick_params_dialog.py  # 自定义快捷开关对话框
+│   ├── server_path_dialog.py   # llama-server 路径对话框
+│   ├── param_help.py        # "?" 按钮 + 浮动帮助卡片
+│   ├── model_browser.py     # GGUF 扫描器（后台线程）
+│   ├── gguf_inspector.py    # 7 标签页检查器对话框
+│   ├── log_parser.py        # 日志行模式 → 运行时信息（Qt-free）
+│   ├── live_stats.py        # /slots + /metrics 轮询、速度差值（Qt-free）
+│   ├── live_metrics.py      # 实时指标带（七个读数 + 上下文计量条）
+│   ├── command_builder.py   # 参数 → llama-server argv（Qt-free）
+│   └── runtime_info.py      # 运行时信息 HTML（Qt-free）
+├── tests/                   # 31 个测试模块（无界面，内存假数据）
+└── assets/icon.ico|png</pre>
+        </div>
+
+        <h3 id="dev-release">发布</h3>
+        <p>推送 <code class="inl">v*</code> tag 触发 CI（windows-latest）：跑测试 → PyInstaller 打包 → 自动发布 exe 到 GitHub Release。</p>
+
+        <h3 id="dev-license">许可</h3>
+        <p>MIT —— 想怎么用就怎么用。源码与最新版本见 <a class="ref" href="https://github.com/Mars-Albert/llama-cpp-launcher" target="_blank" rel="noopener">GitHub 仓库</a>。</p>
+
+        <footer class="doc-foot" data-od-id="doc-foot">
+          <span>Llama CPP Launcher 产品手册 · 基于官方 README 整理（v1.8.2）· MIT 许可</span>
+          <span class="meta">内容来源：README_zh.md · 参数样例：core/params_help.py</span>
+        </footer>
+      </section>
+
+    </div>
+  </main>
+
+  <!-- ══ 右侧：本章目录 ══ -->
+  <aside class="toc" data-od-id="doc-toc" aria-label="本章目录">
+    <p class="toc-label">本章内容</p>
+    <p class="toc-chapter" id="tocChapter">产品概览</p>
+    <nav class="toc-list" id="tocList"></nav>
+  </aside>
+
+</div>
+
+<button class="backtop" id="backTop" aria-label="回到顶部">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
+</button>
+
+<script>
+(function () {
+  'use strict';
+  var root = document.documentElement;
+
+  /* ── 主题切换（与软件自身的深色 / 浅色对应，持久保存） ── */
+  var themeBtn = document.getElementById('themeBtn');
+  var iconSun = document.getElementById('iconSun');
+  var iconMoon = document.getElementById('iconMoon');
+  function applyThemeIcon(t) {
+    iconSun.hidden = (t === 'dark');
+    iconMoon.hidden = (t !== 'dark');
+    themeBtn.setAttribute('aria-pressed', t === 'dark' ? 'true' : 'false');
+  }
+  applyThemeIcon(root.dataset.theme || 'light');
+  themeBtn.addEventListener('click', function () {
+    var next = (root.dataset.theme === 'dark') ? 'light' : 'dark';
+    root.dataset.theme = next;
+    try { localStorage.setItem('lcl-manual-theme', next); } catch (e) {}
+    applyThemeIcon(next);
+  });
+
+  /* ── scrollspy：左侧章节 + 右侧本章目录 ── */
+  var chapters = Array.prototype.slice.call(document.querySelectorAll('.chapter'));
+  var navItems = {};
+  Array.prototype.slice.call(document.querySelectorAll('.nav-item')).forEach(function (a) { navItems[a.dataset.target] = a; });
+  var tocList = document.getElementById('tocList');
+  var tocChapter = document.getElementById('tocChapter');
+  var backTop = document.getElementById('backTop');
+  var currentChapter = null;
+  var POS_KEY = 'lcl-manual-pos';
+
+  function docTop(el) { return el.getBoundingClientRect().top + window.scrollY; }
+
+  function buildToc(ch) {
+    tocChapter.textContent = ch.querySelector('h2').textContent;
+    var hs = ch.querySelectorAll('h3');
+    if (!hs.length) { tocList.innerHTML = '<span class="toc-empty">本章无小节</span>'; return; }
+    tocList.innerHTML = Array.prototype.map.call(hs, function (h) {
+      return '<a href="#' + h.id + '">' + h.textContent + '</a>';
+    }).join('');
+  }
+
+  function syncNav() {
+    Object.keys(navItems).forEach(function (id) {
+      navItems[id].classList.toggle('active', currentChapter && id === currentChapter.id);
+    });
+  }
+
+  function syncToc() {
+    if (!currentChapter) return;
+    var y = window.scrollY + 110;
+    var active = null;
+    currentChapter.querySelectorAll('h3').forEach(function (h) {
+      if (docTop(h) <= y) active = h;
+    });
+    Array.prototype.slice.call(tocList.querySelectorAll('a')).forEach(function (a) {
+      a.classList.toggle('active', active && a.getAttribute('href') === '#' + active.id);
+    });
+  }
+
+  function onScroll() {
+    var y = window.scrollY + 96;
+    var cur = chapters[0];
+    for (var i = 0; i < chapters.length; i++) { if (docTop(chapters[i]) <= y) cur = chapters[i]; }
+    if (cur !== currentChapter) {
+      currentChapter = cur;
+      syncNav();
+      buildToc(cur);
+      syncToc();
+      try { localStorage.setItem(POS_KEY, cur.id); } catch (e) {}
+    } else {
+      syncToc();
+    }
+    backTop.classList.toggle('show', window.scrollY > 600);
+  }
+
+  var ticking = false;
+  window.addEventListener('scroll', function () {
+    if (!ticking) {
+      ticking = true;
+      requestAnimationFrame(function () { ticking = false; onScroll(); });
+    }
+  }, { passive: true });
+
+  /* 恢复上次阅读位置 */
+  var saved = null;
+  try { saved = localStorage.getItem(POS_KEY); } catch (e) {}
+  if (saved && document.getElementById(saved)) {
+    var el = document.getElementById(saved);
+    window.scrollTo(0, Math.max(0, docTop(el) - 72));
+  }
+  onScroll();
+
+  /* ── 代码块复制 ── */
+  function fallbackCopy(text) {
+    try {
+      var ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      var ok = document.execCommand('copy');
+      ta.remove();
+      return ok;
+    } catch (e) { return false; }
+  }
+  document.addEventListener('click', function (e) {
+    var btn = e.target.closest('.copy-btn');
+    if (!btn) return;
+    var block = btn.closest('.codeblock');
+    var pre = block && block.querySelector('pre');
+    if (!pre) return;
+    var text = pre.innerText;
+    var done = function (ok) {
+      btn.innerHTML = ok ? '已复制 ✓' : '复制失败';
+      setTimeout(function () {
+        btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>复制';
+      }, 1600);
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(function () { done(true); }, function () { done(fallbackCopy(text)); });
+    } else {
+      done(fallbackCopy(text));
+    }
+  });
+
+  /* ── 侧栏章节过滤 ── */
+  var filter = document.getElementById('navFilter');
+  var navEmpty = document.getElementById('navEmpty');
+  filter.addEventListener('input', function () {
+    var q = filter.value.trim().toLowerCase();
+    var anyVisible = false;
+    Array.prototype.slice.call(document.querySelectorAll('.nav-group')).forEach(function (g) {
+      var groupVisible = false;
+      Array.prototype.slice.call(g.querySelectorAll('.nav-item')).forEach(function (a) {
+        var hit = !q || a.textContent.toLowerCase().indexOf(q) !== -1;
+        a.style.display = hit ? '' : 'none';
+        if (hit) groupVisible = true;
+      });
+      g.style.display = groupVisible ? '' : 'none';
+      if (groupVisible) anyVisible = true;
+    });
+    navEmpty.style.display = anyVisible ? 'none' : 'block';
+  });
+
+  /* ── 移动端抽屉 ── */
+  var menuBtn = document.getElementById('menuBtn');
+  var scrim = document.getElementById('scrim');
+  menuBtn.addEventListener('click', function () { document.body.classList.toggle('sidebar-open'); });
+  scrim.addEventListener('click', function () { document.body.classList.remove('sidebar-open'); });
+  Array.prototype.slice.call(document.querySelectorAll('.nav-item')).forEach(function (a) {
+    a.addEventListener('click', function () { document.body.classList.remove('sidebar-open'); });
+  });
+
+  /* ── 回到顶部 ── */
+  backTop.addEventListener('click', function () { window.scrollTo({ top: 0, behavior: 'smooth' }); });
+})();
+</script>
+</body>
+</html>

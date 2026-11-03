@@ -1,0 +1,1217 @@
+<!doctype html>
+<!--
+  Llama CPP Launcher Product Manual (English)
+  Layout: left chapter nav · scrollable content · right per-chapter TOC (docs-page spec)
+  Content source: G:/Programs/llama-cpp-launcher/README.md (v1.8.2)
+  Help-card sample: core/params_help.py (kv_offload)
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Llama CPP Launcher · Product Manual v1.8.2</title>
+<link rel="icon" href="assets/icon.png" />
+<script>try{var t=localStorage.getItem('lcl-manual-theme-en')||(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light');document.documentElement.dataset.theme=t}catch(e){document.documentElement.dataset.theme='light'}</script>
+<style>/* ─── tokens ─────────────────────────────────────────────────────────
+   Palette bound from direction: tech-utility (Datadog / GitHub).
+   Light = printed values; dark = derived for the dark-theme toggle. */
+:root {
+  --bg:      oklch(98% 0.005 250);
+  --surface: oklch(100% 0 0);
+  --fg:      oklch(22% 0.02 240);
+  --muted:   oklch(50% 0.018 240);
+  --border:  oklch(90% 0.008 240);
+  --accent:  oklch(58% 0.16 145);
+  --ok:      oklch(58% 0.16 145);
+  --warn:    oklch(72% 0.14 75);
+  --danger:  oklch(58% 0.19 27);
+  --accent-soft: color-mix(in oklch, var(--accent) 14%, transparent);
+  --warn-soft:   color-mix(in oklch, var(--warn) 10%, var(--surface));
+  --fg-soft:     color-mix(in oklch, var(--fg) 6%, transparent);
+  --code-bg: oklch(24% 0.025 240);
+  --code-fg: oklch(90% 0.02 240);
+  /* type — utility: sans display + sans body (one family is OK here) */
+  --font-display: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', system-ui, sans-serif;
+  --font-body:    -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', system-ui, sans-serif;
+  --font-mono:    'JetBrains Mono', 'IBM Plex Mono', ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace;
+  --fs-body: 15px;
+  --radius: 10px;
+  --radius-lg: 14px;
+  --topbar-h: 56px;
+}
+:root[data-theme="dark"] {
+  --bg:      oklch(18% 0.02 240);
+  --surface: oklch(22% 0.02 240);
+  --fg:      oklch(93% 0.01 240);
+  --muted:   oklch(66% 0.02 240);
+  --border:  oklch(30% 0.02 240);
+  --accent:  oklch(65% 0.15 145);
+  --ok:      oklch(65% 0.15 145);
+  --warn:    oklch(78% 0.13 85);
+  --danger:  oklch(65% 0.19 25);
+  --code-bg: oklch(14% 0.03 240);
+  --code-fg: oklch(88% 0.02 240);
+}
+/* ─── reset & base ──────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; }
+html { scroll-behavior: smooth; scroll-padding-top: calc(var(--topbar-h) + 20px); -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-body);
+  font-size: var(--fs-body);
+  line-height: 1.7;
+  -webkit-font-smoothing: antialiased;
+}
+img, svg { display: block; max-width: 100%; }
+a { color: inherit; text-decoration: none; }
+button { font: inherit; cursor: pointer; }
+p { text-wrap: pretty; margin: 0 0 14px; }
+h1, h2, h3, h4 { text-wrap: balance; margin: 0; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+.num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+code.inl {
+  font-family: var(--font-mono);
+  font-size: 0.86em;
+  background: color-mix(in oklch, var(--fg) 7%, transparent);
+  border: 1px solid color-mix(in oklch, var(--fg) 13%, transparent);
+  padding: 1.5px 6px;
+  border-radius: 6px;
+  word-break: break-word;
+}
+/* ─── topbar ────────────────────────────────────────────────────── */
+.topbar {
+  position: sticky; top: 0; z-index: 50;
+  background: color-mix(in oklch, var(--bg) 90%, transparent);
+  backdrop-filter: blur(12px);
+  border-bottom: 1px solid var(--border);
+}
+.topbar-inner { display: flex; align-items: center; gap: 14px; height: var(--topbar-h); padding-inline: 20px; }
+.menu-btn { display: none; }
+.brand { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.brand img { width: 26px; height: 26px; border-radius: 7px; }
+.brand-name { font-weight: 650; font-size: 14.5px; letter-spacing: -0.01em; white-space: nowrap; }
+.brand-sub { font-size: 12.5px; color: var(--muted); padding-left: 10px; border-left: 1px solid var(--border); white-space: nowrap; }
+.ver-pill {
+  font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.04em;
+  padding: 3px 9px; border: 1px solid var(--border); border-radius: 999px;
+  color: var(--muted); background: var(--surface);
+  font-variant-numeric: tabular-nums;
+}
+.topbar .spacer { flex: 1; }
+.icon-btn {
+  display: grid; place-items: center;
+  width: 34px; height: 34px;
+  border: 1px solid transparent; border-radius: 9px;
+  background: transparent; color: var(--muted);
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+.icon-btn:hover { background: var(--fg-soft); color: var(--fg); border-color: var(--border); }
+.icon-btn svg { width: 17px; height: 17px; }
+.gh-link { display: inline-flex; align-items: center; gap: 7px; font-size: 13px; color: var(--muted); padding: 7px 12px; border: 1px solid transparent; border-radius: 9px; transition: color .15s, border-color .15s, background .15s; }
+.gh-link:hover { color: var(--fg); border-color: var(--border); background: var(--fg-soft); }
+.gh-link svg { width: 15px; height: 15px; }
+.dl-btn { white-space: nowrap; }
+/* ─── buttons ───────────────────────────────────────────────────── */
+.btn {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 8px 16px;
+  border-radius: var(--radius);
+  border: 1px solid transparent;
+  font-size: 13.5px; font-weight: 550; letter-spacing: -0.005em;
+  transition: transform 0.05s ease, background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+.btn:active { transform: translateY(1px); }
+.btn-primary { background: var(--accent); color: var(--surface); border-color: var(--accent); }
+.btn-primary:hover { background: color-mix(in oklch, var(--accent) 85%, black); }
+.btn-ghost { background: transparent; color: var(--fg); border-color: var(--border); }
+.btn-ghost:hover { border-color: var(--fg); }
+/* ─── doc shell (sidebar · content · toc) ───────────────────────── */
+.doc-shell { display: grid; grid-template-columns: 264px minmax(0, 1fr) 236px; max-width: 1560px; margin-inline: auto; }
+.sidebar {
+  position: sticky; top: var(--topbar-h);
+  height: calc(100vh - var(--topbar-h));
+  overflow-y: auto;
+  border-right: 1px solid var(--border);
+  padding: 20px 14px 32px;
+}
+.sidebar-search { position: relative; margin-bottom: 18px; }
+.sidebar-search svg { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); width: 14px; height: 14px; color: var(--muted); pointer-events: none; }
+.sidebar-search input {
+  width: 100%; padding: 8px 10px 8px 32px;
+  border: 1px solid var(--border); border-radius: 9px;
+  background: var(--surface); color: var(--fg); font: inherit; font-size: 13px;
+}
+.sidebar-search input::placeholder { color: var(--muted); }
+.sidebar-search input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.nav-group + .nav-group { margin-top: 20px; }
+.nav-group-label {
+  font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.08em;
+  color: color-mix(in oklch, var(--muted) 80%, var(--bg));
+  padding: 0 10px; margin: 0 0 8px;
+}
+.nav-item {
+  display: flex; align-items: baseline; gap: 10px;
+  padding: 7px 10px; border-radius: 8px;
+  color: var(--muted); font-size: 13.5px; line-height: 1.45;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+.nav-item:hover { background: var(--fg-soft); color: var(--fg); }
+.nav-item.active { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+.nav-num { font-family: var(--font-mono); font-size: 11px; opacity: 0.65; font-variant-numeric: tabular-nums; flex: none; }
+.nav-empty { display: none; padding: 12px 10px; color: var(--muted); font-size: 13px; }
+.scrim { display: none; }
+/* ─── content / prose ───────────────────────────────────────────── */
+.content { min-width: 0; padding: 52px 56px 96px; }
+.prose { max-width: 860px; }
+.chapter { padding-block: 56px; border-top: 1px solid var(--border); }
+.chapter:first-of-type { border-top: 0; padding-top: 8px; }
+.chapter-eyebrow {
+  font-family: var(--font-mono); font-size: 12px; letter-spacing: 0.06em;
+  color: color-mix(in oklch, var(--accent) 55%, var(--muted));
+  margin-bottom: 10px; font-variant-numeric: tabular-nums;
+}
+.chapter h2 { font-family: var(--font-display); font-size: clamp(25px, 2.6vw, 32px); line-height: 1.2; letter-spacing: -0.02em; font-weight: 650; }
+.chapter-lead { margin-top: 12px; font-size: 15.5px; color: var(--muted); max-width: 62ch; }
+.chapter h3 {
+  font-size: 17.5px; font-weight: 600; letter-spacing: -0.005em;
+  margin: 40px 0 12px; scroll-margin-top: calc(var(--topbar-h) + 20px);
+}
+.chapter ul, .chapter ol { margin: 0 0 16px; padding-left: 22px; }
+.chapter li { margin-bottom: 8px; }
+.chapter li::marker { color: var(--muted); }
+.prose a.ref { text-decoration: underline; text-decoration-color: var(--border); text-underline-offset: 3px; transition: color .12s, text-decoration-color .12s; }
+.prose a.ref:hover { color: var(--accent); text-decoration-color: var(--accent); }
+.prose strong { font-weight: 600; }
+.lead-note { font-size: 14px; color: var(--muted); margin-top: -4px; }
+/* spec strip */
+.spec-strip {
+  display: grid; grid-template-columns: repeat(4, 1fr);
+  border: 1px solid var(--border); border-radius: var(--radius-lg);
+  background: var(--surface); overflow: hidden;
+  margin: 24px 0 8px;
+}
+.spec-cell { padding: 18px 20px; }
+.spec-cell + .spec-cell { border-left: 1px solid var(--border); }
+.spec-num { font-family: var(--font-mono); font-size: 25px; font-weight: 600; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; line-height: 1.1; }
+.spec-label { font-size: 12.5px; color: var(--muted); margin-top: 7px; line-height: 1.55; }
+/* feature list (dt/dd) */
+.feature-list { margin: 0 0 8px; }
+.feature-list dt { font-size: 14.5px; font-weight: 600; }
+.feature-list dt code.inl { font-weight: 400; }
+.feature-list dd { margin: 3px 0 16px; font-size: 14px; color: var(--muted); line-height: 1.7; max-width: 66ch; }
+/* steps */
+ol.steps { list-style: none; counter-reset: step; padding: 0; margin: 0 0 16px; }
+ol.steps li { counter-increment: step; position: relative; padding: 0 0 14px 46px; }
+ol.steps li::before {
+  content: counter(step, decimal-leading-zero);
+  position: absolute; left: 0; top: 0;
+  width: 30px; height: 30px;
+  display: grid; place-items: center;
+  font-family: var(--font-mono); font-size: 12px; color: var(--muted);
+  border: 1px solid var(--border); border-radius: 9px; background: var(--surface);
+  font-variant-numeric: tabular-nums;
+}
+ol.steps li:last-child { padding-bottom: 0; }
+/* callout — full border + mono label, no side-bar cliché */
+.callout {
+  border: 1px solid color-mix(in oklch, var(--warn) 40%, var(--border));
+  background: var(--warn-soft);
+  border-radius: var(--radius-lg);
+  padding: 14px 18px;
+  margin: 20px 0 4px;
+  font-size: 14px; line-height: 1.7;
+}
+.callout .callout-tag {
+  display: inline-block;
+  font-family: var(--font-mono); font-size: 10.5px; letter-spacing: 0.08em;
+  padding: 2.5px 8px; border-radius: 999px; margin-bottom: 8px;
+  color: color-mix(in oklch, var(--warn) 60%, var(--fg));
+  background: color-mix(in oklch, var(--warn) 16%, var(--surface));
+  border: 1px solid color-mix(in oklch, var(--warn) 40%, var(--border));
+}
+.note {
+  border: 1px solid var(--border);
+  background: var(--surface);
+  border-radius: var(--radius-lg);
+  padding: 14px 18px;
+  margin: 20px 0 4px;
+  font-size: 14px; line-height: 1.7; color: var(--muted);
+}
+.note .note-tag {
+  display: inline-block;
+  font-family: var(--font-mono); font-size: 10.5px; letter-spacing: 0.08em;
+  padding: 2.5px 8px; border-radius: 999px; margin-bottom: 8px;
+  color: var(--muted);
+  background: var(--fg-soft);
+  border: 1px solid var(--border);
+}
+/* tables */
+.table-wrap { overflow-x: auto; margin: 16px 0 20px; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--surface); }
+.ds-table { width: 100%; border-collapse: collapse; font-size: 13.5px; min-width: 520px; }
+.ds-table th, .ds-table td { padding: 11px 16px; text-align: left; border-bottom: 1px solid var(--border); vertical-align: top; line-height: 1.6; }
+.ds-table th {
+  color: var(--muted); font-weight: 500;
+  font-family: var(--font-mono); font-size: 11.5px; letter-spacing: 0.04em;
+  background: color-mix(in oklch, var(--fg) 3%, var(--surface));
+}
+.ds-table tbody tr:last-child td { border-bottom: 0; }
+.ds-table tbody tr:hover td { background: var(--fg-soft); }
+.ds-table td.hl, .ds-table th.hl { background: color-mix(in oklch, var(--fg) 3.5%, var(--surface)); }
+.ds-table th.hl { border-bottom: 2px solid var(--fg); color: var(--fg); font-weight: 600; }
+.ds-table tbody tr:hover td.hl { background: color-mix(in oklch, var(--fg) 6%, var(--surface)); }
+.yes { color: var(--ok); font-family: var(--font-mono); font-weight: 600; }
+.no  { color: var(--danger); font-family: var(--font-mono); }
+.part { color: var(--muted); font-family: var(--font-mono); font-size: 12px; }
+.dash { color: var(--muted); font-family: var(--font-mono); }
+.tbl-foot { font-size: 12.5px; color: var(--muted); font-family: var(--font-mono); padding: 10px 16px; border-top: 1px solid var(--border); }
+/* code blocks */
+.codeblock { margin: 18px 0 22px; }
+.codeblock-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 7px; }
+.codeblock-label { font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.06em; color: var(--muted); }
+.copy-btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-family: var(--font-mono); font-size: 11px;
+  padding: 4px 10px; border-radius: 7px;
+  border: 1px solid var(--border); background: var(--surface); color: var(--muted);
+  transition: color .12s, border-color .12s, background .12s;
+}
+.copy-btn:hover { color: var(--fg); border-color: var(--fg); }
+.copy-btn svg { width: 12px; height: 12px; }
+.codeblock pre {
+  margin: 0;
+  background: var(--code-bg); color: var(--code-fg);
+  border: 1px solid var(--border); border-radius: var(--radius-lg);
+  padding: 16px 18px;
+  font-family: var(--font-mono); font-size: 12.8px; line-height: 1.75;
+  overflow-x: auto;
+}
+/* screenshots */
+.shots { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin: 22px 0 6px; }
+.shot { margin: 0; border: 1px solid var(--border); border-radius: var(--radius-lg); overflow: hidden; background: var(--surface); }
+.shot img { display: block; width: 100%; height: auto; }
+.shot figcaption { padding: 10px 14px; font-family: var(--font-mono); font-size: 12px; color: var(--muted); border-top: 1px solid var(--border); line-height: 1.6; }
+/* status pills */
+.st-row { display: flex; gap: 10px; flex-wrap: wrap; margin: 14px 0 6px; }
+.st {
+  display: inline-flex; align-items: center; gap: 7px;
+  padding: 5px 12px; border-radius: 999px;
+  font-family: var(--font-mono); font-size: 12px;
+  border: 1px solid var(--border); color: var(--muted); background: var(--surface);
+}
+.st i { width: 6px; height: 6px; border-radius: 999px; background: currentColor; flex: none; }
+.st-loading { color: color-mix(in oklch, var(--warn) 65%, var(--fg)); border-color: color-mix(in oklch, var(--warn) 45%, var(--border)); background: color-mix(in oklch, var(--warn) 9%, var(--surface)); }
+.st-ready { color: color-mix(in oklch, var(--ok) 60%, var(--fg)); border-color: color-mix(in oklch, var(--ok) 45%, var(--border)); background: color-mix(in oklch, var(--ok) 9%, var(--surface)); }
+/* tab pills (GGUF inspector) */
+.tab-pills { display: flex; flex-wrap: wrap; gap: 8px; margin: 14px 0 6px; }
+.tab-pill {
+  font-family: var(--font-mono); font-size: 12.5px;
+  padding: 5px 13px; border-radius: 999px;
+  border: 1px solid var(--border); background: var(--surface); color: var(--fg);
+}
+.tab-pill .tab-idx { color: var(--muted); margin-right: 6px; font-size: 11px; }
+/* help card sample */
+.helpcard {
+  border: 1px solid var(--border); border-radius: var(--radius-lg);
+  background: var(--surface); overflow: hidden;
+  box-shadow: 0 10px 28px color-mix(in oklch, var(--fg) 9%, transparent);
+  margin: 18px 0 6px; max-width: 640px;
+}
+.hc-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 18px; border-bottom: 1px solid var(--border); background: color-mix(in oklch, var(--fg) 3%, var(--surface)); }
+.hc-title { font-size: 14.5px; font-weight: 650; }
+.hc-flag { font-family: var(--font-mono); font-size: 12px; color: var(--muted); }
+.hc-row { display: grid; grid-template-columns: 128px 1fr; gap: 14px; padding: 11px 18px; border-bottom: 1px solid var(--border); font-size: 13.5px; line-height: 1.65; }
+.hc-row:last-child { border-bottom: 0; }
+.hc-key { font-family: var(--font-mono); font-size: 11.5px; color: var(--muted); padding-top: 2px; }
+.hc-caption { font-size: 12.5px; color: var(--muted); font-family: var(--font-mono); margin: 8px 0 0; }
+/* footer */
+.doc-foot {
+  border-top: 1px solid var(--border);
+  margin-top: 24px; padding-top: 24px;
+  display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap;
+  font-size: 12.5px; color: var(--muted);
+}
+.doc-foot .meta { font-family: var(--font-mono); font-size: 11.5px; }
+/* ─── toc (right) ───────────────────────────────────────────────── */
+.toc {
+  position: sticky; top: var(--topbar-h);
+  height: calc(100vh - var(--topbar-h));
+  overflow-y: auto;
+  border-left: 1px solid var(--border);
+  padding: 28px 18px;
+}
+.toc-label { font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.08em; color: color-mix(in oklch, var(--muted) 80%, var(--bg)); margin: 0 0 6px; }
+.toc-chapter { font-size: 14px; font-weight: 650; margin: 0 0 14px; letter-spacing: -0.005em; }
+.toc-list a {
+  display: block; padding: 6px 10px; margin-left: -10px;
+  font-size: 13px; line-height: 1.5; color: var(--muted);
+  border-left: 2px solid var(--border);
+  transition: color .12s, border-color .12s;
+}
+.toc-list a:hover { color: var(--fg); }
+.toc-list a.active { color: var(--fg); font-weight: 550; border-left-color: var(--accent); }
+.toc-empty { font-size: 13px; color: var(--muted); }
+/* back to top */
+.backtop {
+  position: fixed; right: 22px; bottom: 26px; z-index: 40;
+  width: 42px; height: 42px;
+  display: grid; place-items: center;
+  border: 1px solid var(--border); border-radius: 11px;
+  background: var(--surface); color: var(--muted);
+  box-shadow: 0 6px 20px color-mix(in oklch, var(--fg) 12%, transparent);
+  opacity: 0; pointer-events: none;
+  transition: opacity .2s ease, color .15s, border-color .15s;
+}
+.backtop svg { width: 17px; height: 17px; }
+.backtop.show { opacity: 1; pointer-events: auto; }
+.backtop:hover { color: var(--fg); border-color: var(--fg); }
+/* ─── responsive ────────────────────────────────────────────────── */
+@media (max-width: 1240px) {
+  .doc-shell { grid-template-columns: 252px minmax(0, 1fr); }
+  .toc { display: none; }
+  .content { padding: 48px 40px 88px; }
+}
+@media (max-width: 920px) {
+  .doc-shell { grid-template-columns: 1fr; }
+  .menu-btn { display: grid; }
+  .brand-sub { display: none; }
+  .ver-pill { display: none; }
+  .dl-btn .btn-text-full { display: none; }
+  .content { padding: 32px 18px 72px; }
+  .chapter { padding-block: 40px; }
+  .spec-strip { grid-template-columns: 1fr 1fr; }
+  .spec-cell { border-top: 1px solid var(--border); }
+  .spec-cell:nth-child(-n+2) { border-top: 0; }
+  .spec-cell:nth-child(even) { border-left: 1px solid var(--border); }
+  .spec-cell:nth-child(odd) { border-left: 0; }
+  .shots { grid-template-columns: 1fr; }
+  .hc-row { grid-template-columns: 1fr; gap: 4px; }
+  .sidebar {
+    position: fixed; z-index: 60;
+    top: var(--topbar-h); left: 0; bottom: 0;
+    width: 280px; height: auto;
+    background: var(--bg);
+    transform: translateX(-102%);
+    transition: transform .22s cubic-bezier(0.23, 1, 0.32, 1);
+    box-shadow: 0 12px 40px color-mix(in oklch, var(--fg) 20%, transparent);
+  }
+  body.sidebar-open .sidebar { transform: translateX(0); }
+  body.sidebar-open .scrim {
+    display: block; position: fixed; inset: var(--topbar-h) 0 0 0; z-index: 55;
+    background: color-mix(in oklch, var(--fg) 35%, transparent);
+  }
+  .gh-link { display: none; }
+}</style>
+</head>
+<body>
+
+<header class="topbar" data-od-id="topbar">
+  <div class="topbar-inner">
+    <button class="icon-btn menu-btn" id="menuBtn" aria-label="Open chapter navigation">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+    </button>
+    <a class="brand" href="#ch-overview">
+      <img src="assets/icon.png" alt="" width="26" height="26" />
+      <span class="brand-name">Llama CPP Launcher</span>
+      <span class="brand-sub">Product Manual</span>
+    </a>
+    <span class="ver-pill num">v1.8.2</span>
+    <div class="spacer"></div>
+    <a class="gh-link" href="https://github.com/Mars-Albert/llama-cpp-launcher" target="_blank" rel="noopener">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="6" cy="5" r="2.2"/><circle cx="6" cy="19" r="2.2"/><circle cx="18" cy="7" r="2.2"/><path d="M6 7.2v9.6M18 9.2c0 5-9 3.6-9 7.4"/></svg>
+      GitHub
+    </a>
+    <button class="icon-btn" id="themeBtn" aria-label="Toggle dark / light theme" aria-pressed="false">
+      <svg id="iconSun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5 5l1.4 1.4M17.6 17.6 19 19M19 5l-1.4 1.4M6.4 17.6 5 19"/></svg>
+      <svg id="iconMoon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" hidden><path d="M20.5 13.2A8.5 8.5 0 1 1 10.8 3.5 7 7 0 0 0 20.5 13.2z"/></svg>
+    </button>
+    <a class="btn btn-primary dl-btn" href="https://github.com/Mars-Albert/llama-cpp-launcher/releases/latest" target="_blank" rel="noopener">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 4v11m0 0 4-4m-4 4-4-4M5 19h14"/></svg>
+      <span class="btn-text-full">Download Latest</span>
+    </a>
+  </div>
+</header>
+
+<div class="doc-shell">
+
+  <!-- ══ left: chapter navigation ══ -->
+  <nav class="sidebar" id="sidebar" data-od-id="doc-sidebar" aria-label="Chapter navigation">
+    <div class="sidebar-search">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="6.5"/><path d="m20 20-4.2-4.2"/></svg>
+      <input id="navFilter" type="text" placeholder="Filter chapters…" aria-label="Filter chapters" />
+    </div>
+    <div id="navGroups">
+      <div class="nav-group">
+        <p class="nav-group-label">Getting started</p>
+        <a class="nav-item" href="#ch-overview" data-target="ch-overview"><span class="nav-num">01</span>Overview</a>
+        <a class="nav-item" href="#ch-quickstart" data-target="ch-quickstart"><span class="nav-num">02</span>Quick Start</a>
+      </div>
+      <div class="nav-group">
+        <p class="nav-group-label">Interface &amp; modes</p>
+        <a class="nav-item" href="#ch-ui" data-target="ch-ui"><span class="nav-num">03</span>Window &amp; UI</a>
+        <a class="nav-item" href="#ch-modes" data-target="ch-modes"><span class="nav-num">04</span>Two Modes</a>
+        <a class="nav-item" href="#ch-basic" data-target="ch-basic"><span class="nav-num">05</span>Basic Mode</a>
+        <a class="nav-item" href="#ch-advanced" data-target="ch-advanced"><span class="nav-num">06</span>Advanced Mode · 9 Tabs</a>
+      </div>
+      <div class="nav-group">
+        <p class="nav-group-label">Models &amp; server</p>
+        <a class="nav-item" href="#ch-models" data-target="ch-models"><span class="nav-num">07</span>Model Browser</a>
+        <a class="nav-item" href="#ch-lifecycle" data-target="ch-lifecycle"><span class="nav-num">08</span>Server Lifecycle</a>
+        <a class="nav-item" href="#ch-presets" data-target="ch-presets"><span class="nav-num">09</span>Presets</a>
+      </div>
+      <div class="nav-group">
+        <p class="nav-group-label">Logs &amp; diagnostics</p>
+        <a class="nav-item" href="#ch-runtime" data-target="ch-runtime"><span class="nav-num">10</span>Live Log Parsing</a>
+        <a class="nav-item" href="#ch-logpanel" data-target="ch-logpanel"><span class="nav-num">11</span>Log Panel</a>
+        <a class="nav-item" href="#ch-gguf" data-target="ch-gguf"><span class="nav-num">12</span>GGUF Inspector</a>
+      </div>
+      <div class="nav-group">
+        <p class="nav-group-label">Reference</p>
+        <a class="nav-item" href="#ch-help" data-target="ch-help"><span class="nav-num">13</span>Per-Parameter Help</a>
+        <a class="nav-item" href="#ch-i18n" data-target="ch-i18n"><span class="nav-num">14</span>i18n &amp; Themes</a>
+        <a class="nav-item" href="#ch-compare" data-target="ch-compare"><span class="nav-num">15</span>Comparison</a>
+        <a class="nav-item" href="#ch-dev" data-target="ch-dev"><span class="nav-num">16</span>Appendix · Dev &amp; License</a>
+      </div>
+    </div>
+    <p class="nav-empty" id="navEmpty">No matching chapters</p>
+  </nav>
+
+  <div class="scrim" id="scrim"></div>
+
+  <!-- ══ center: scrollable content ══ -->
+  <main class="content" id="content">
+    <div class="prose">
+
+      <!-- 01 Overview -->
+      <section class="chapter" id="ch-overview" data-od-id="ch-overview">
+        <p class="chapter-eyebrow num">01 · Getting started</p>
+        <h2>Overview</h2>
+        <p class="chapter-lead">A full-featured <code class="inl">llama-server</code> (llama.cpp) GUI launcher. It drives the <code class="inl">llama-server</code> binary *you* installed — everything it does is visible, everything is under your control.</p>
+
+        <div class="spec-strip" data-od-id="spec-strip">
+          <div class="spec-cell"><div class="spec-num">235</div><div class="spec-label">llama-server CLI parameters in one panel</div></div>
+          <div class="spec-cell"><div class="spec-num">74</div><div class="spec-label">log-parsing rules, old &amp; v9174+ formats</div></div>
+          <div class="spec-cell"><div class="spec-num">9</div><div class="spec-label">advanced-mode tabs, grouped by concern</div></div>
+          <div class="spec-cell"><div class="spec-num">~13k</div><div class="spec-label">lines of Python; one dependency — PyQt6</div></div>
+        </div>
+
+        <h3 id="ov-philosophy">A different route: bring your own llama-server</h3>
+        <p>Most GUI tools (Ollama, LM Studio, …) <strong>bundle a fixed llama.cpp version</strong> and hide the command line. Llama CPP Launcher is the opposite: it drives the <code class="inl">llama-server</code> binary *you* installed.</p>
+        <div class="table-wrap">
+          <table class="ds-table">
+            <thead><tr><th>Capability</th><th class="hl">Llama CPP Launcher</th><th>Bundled-backend tools</th></tr></thead>
+            <tbody>
+              <tr><td>Upgrade llama.cpp</td><td class="hl">Swap the binary, done</td><td>Wait for an app update</td></tr>
+              <tr><td>Custom builds (CUDA / ROCm / Vulkan / Metal / SYCL)</td><td class="hl">Use any build</td><td>Stuck with the bundled one</td></tr>
+              <tr><td>Bleeding-edge commits</td><td class="hl">Build today, run today</td><td>Weeks or months of waiting</td></tr>
+              <tr><td>Rollback</td><td class="hl">Put the old binary back</td><td>Hope they ship it</td></tr>
+              <tr><td>The exact command the app runs</td><td class="hl">Always visible, one-click copy</td><td>Opaque</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3 id="ov-sync">Automatically in sync with your binary</h3>
+        <dl class="feature-list">
+          <dt>Live default detection</dt>
+          <dd>Runs <code class="inl">llama-server --help</code> on startup and parses the *real* defaults of your binary version. No stale hardcoded values; drift is surfaced via a ⚠ indicator.</dd>
+          <dt>Chat template auto-discovery</dt>
+          <dd>Templates shipped by your binary appear in the UI automatically.</dd>
+          <dt>GPU detection</dt>
+          <dd>Probes <code class="inl">--list-devices</code> and shows e.g. “Detected 2× GPU: RTX 5090 (32GB) + RTX 2080 (8GB)” in the <strong>status bar</strong>, left of the version. Display only, never auto-filled — always your call.</dd>
+        </dl>
+
+        <h3 id="ov-local">Lightweight &amp; private</h3>
+        <p>~16,000 lines of Python with a single runtime dependency, PyQt6. No bundled backend, no accounts, no telemetry, no phone home — 100% local.</p>
+
+        <h3 id="ov-get">Get it</h3>
+        <ul>
+          <li><strong>Windows</strong>: download <code class="inl">LlamaCppLauncher.exe</code> from <a class="ref" href="https://github.com/Mars-Albert/llama-cpp-launcher/releases/latest" target="_blank" rel="noopener">GitHub Releases</a> and double-click to run — no Python install needed.</li>
+          <li><strong>From source</strong>: any OS (Python 3.11+), steps in <a class="ref" href="#ch-quickstart">Quick Start</a>.</li>
+          <li><strong>License</strong>: MIT — do whatever you want with it.</li>
+        </ul>
+      </section>
+
+      <!-- 02 Quick Start -->
+      <section class="chapter" id="ch-quickstart" data-od-id="ch-quickstart">
+        <p class="chapter-eyebrow num">02 · Getting started</p>
+        <h2>Quick Start</h2>
+        <p class="chapter-lead">Two routes: the Windows exe needs zero environment setup; from source works on any OS.</p>
+
+        <h3 id="qs-exe">Option 1 · Windows exe (recommended)</h3>
+        <ol class="steps">
+          <li>Download <code class="inl">LlamaCppLauncher.exe</code> from <a class="ref" href="https://github.com/Mars-Albert/llama-cpp-launcher/releases/latest" target="_blank" rel="noopener">Releases</a> and double-click to run — no Python needed.</li>
+          <li>Install <code class="inl">llama-server</code> (e.g. the prebuilt release from <a class="ref" href="https://github.com/ggml-org/llama.cpp/releases" target="_blank" rel="noopener">ggml-org/llama.cpp releases</a>).</li>
+          <li>In the app: <strong>File → Set llama-server path…</strong> and point it at the binary; or just add it to <code class="inl">PATH</code> — the launcher finds it automatically.</li>
+          <li>Pick a model, hit <strong>Start</strong>, open the WebUI. Done.</li>
+        </ol>
+        <div class="callout" data-od-id="callout-smartscreen">
+          <span class="callout-tag">TIP</span>
+          <p style="margin:0">Windows SmartScreen may warn about the unsigned executable — click <strong>More info → Run anyway</strong>.</p>
+        </div>
+
+        <h3 id="qs-source">Option 2 · From source (any OS)</h3>
+        <div class="codeblock" data-od-id="code-quickstart">
+          <div class="codeblock-head"><span class="codeblock-label">SHELL</span>
+            <button class="copy-btn" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>Copy</button>
+          </div>
+<pre>git clone https://github.com/Mars-Albert/llama-cpp-launcher.git
+cd llama-cpp-launcher
+
+python -m venv venv
+venv\Scripts\activate      # Windows
+source venv/bin/activate   # Linux / macOS
+pip install -r requirements.txt
+
+python main.py             # or double-click run.bat on Windows</pre>
+        </div>
+        <div class="note" data-od-id="note-requirements">
+          <span class="note-tag">NOTE</span>
+          <p style="margin:0"><code class="inl">requirements.txt</code> pins PyQt6 to 6.11.0 — the app is tested against exactly this runtime.</p>
+        </div>
+
+        <h3 id="qs-first">After the first run</h3>
+        <p>Pick a model and hit Start: a color-coded status indicator and runtime counter (MM:SS) appear; the <strong>Runtime Info</strong> panel starts filling live from the server logs; the command preview shows the exact command passed to <code class="inl">llama-server</code>. See <a class="ref" href="#ch-lifecycle">Server Lifecycle</a>.</p>
+      </section>
+
+      <!-- 03 Window & UI -->
+      <section class="chapter" id="ch-ui" data-od-id="ch-ui">
+        <p class="chapter-eyebrow num">03 · Interface &amp; modes</p>
+        <h2>Window &amp; UI</h2>
+        <p class="chapter-lead">A frameless rounded-card window with one integrated title row — every dialog belongs to the same visual family.</p>
+
+        <div class="shots">
+          <figure class="shot" data-od-id="shot-advanced">
+            <img class="content-img" src="en_light.png" width="2000" height="1175" alt="Advanced mode, light theme: the 9-tab parameter panel, the permanent control row and the live metrics row" />
+            <figcaption>Advanced mode · light theme — 9 tabs cover all 235 parameters, with the control row and live metrics below</figcaption>
+          </figure>
+          <figure class="shot" data-od-id="shot-basic">
+            <img class="content-img" src="en.png" width="2000" height="1175" alt="Basic mode, dark theme, model running: runtime info parsed live" />
+            <figcaption>Basic mode · dark theme, model running — runtime info parsed live from server logs</figcaption>
+          </figure>
+        </div>
+
+        <h3 id="ui-frameless">Frameless rounded-card window</h3>
+        <p>The app paints its own card with a soft drop shadow: one integrated title row (icon · title · menu · Win11-style minimize / maximize / close); drag to move, double-click to maximize, edge-resize right at the visible card edge. Maximized, the card goes full-bleed with the system’s own rounded corners.</p>
+
+        <h3 id="ui-rightcol">Right column · 3 tabs + a permanent control row</h3>
+        <p>The whole right column is one tab widget — <strong>⚙ Parameter config · 📄 Log output · 📊 Runtime info</strong> — so each view owns the full column height (about <span class="num">800px</span> of log on a 1080p window instead of the old 200px sliver). <strong>Below</strong> the tabs sits the control row: <strong>▶ Start · ■ Stop · 📋 Copy · 🌐 WebUI</strong> on the left, the live metrics row on the right. It lives outside the tabs, so it works whichever tab is open. Inside the parameter tab there is also a <strong>draggable splitter</strong> between the parameter area and the command preview.</p>
+        <div class="table-wrap">
+          <table class="ds-table">
+            <thead><tr><th>Tab</th><th>Contents</th><th>Notes</th></tr></thead>
+            <tbody>
+              <tr><td class="hl">⚙ Parameter config</td><td>Basic / Advanced mode bar, parameter blocks, command preview</td><td>Top / bottom halves are draggable</td></tr>
+              <tr><td class="hl">📄 Log output</td><td>Search, level filter, export — the full column height</td><td><code class="inl">Ctrl+F</code> jumps to this tab</td></tr>
+              <tr><td class="hl">📊 Runtime info</td><td>The table parsed out of the server log (see Real-time log parsing)</td><td>—</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>The active tab, mode, window size and every splitter position are remembered and restored on the next start.</p>
+
+        <h3 id="ui-statusbar">Status bar</h3>
+        <p>Left: the current message (preset loaded, errors, …). Right, in order:</p>
+        <div class="table-wrap">
+          <table class="ds-table">
+            <thead><tr><th>Item</th><th>What it shows</th></tr></thead>
+            <tbody>
+              <tr><td class="hl">Detected GPU(s)</td><td>e.g. “Detected 2× GPU: RTX 5090 (32GB) + RTX TITAN (24GB)”, from <code class="inl">--list-devices</code>; hover for per-card total / free VRAM, hidden until the probe finishes</td></tr>
+              <tr><td class="hl">Version</td><td>Your binary’s <code class="inl">--version</code>; turns amber when it is newer than the built-in parameter table</td></tr>
+              <tr><td class="hl">⚠ Parameter drift</td><td>Only appears when the parsed defaults really differ from the schema; click for the full, untruncated list</td></tr>
+              <tr><td class="hl">State dot + text</td><td>Gray idle · amber starting, or running while both <code class="inl">/slots</code> and <code class="inl">/metrics</code> stay silent · green running · red error</td></tr>
+              <tr><td class="hl">Runtime</td><td><span class="num">MM:SS</span>, ticking every second</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3 id="ui-dialogs">Unified dialogs &amp; message boxes</h3>
+        <p>Every dialog, confirm and error box belongs to the same frameless card family, dark / light aware — consistent style, nothing pops out of the look.</p>
+
+        <h3 id="ui-state">Default size &amp; state memory</h3>
+        <p>First launch opens at <span class="num">1600 × 940</span> (clamped to the screen’s work area) with a <span class="num">400px</span> model column. Size and position, basic / advanced mode, the active right-column tab, the advanced sub-tab, the main splitter width and the parameter / preview split are all restored on next start.</p>
+
+        <h3 id="ui-small">Small windows behave</h3>
+        <p>The parameter area never gets a vertical scrollbar and no control is squashed or overlapped: quick toggles re-wrap into more rows and the window’s minimum size grows accordingly; very narrow windows scroll the wide rows sideways.</p>
+
+        <h3 id="ui-menu">Menu</h3>
+        <div class="table-wrap">
+          <table class="ds-table">
+            <thead><tr><th>Menu</th><th>Contents</th></tr></thead>
+            <tbody>
+              <tr><td>File</td><td>Scan path, set llama-server path, refresh, exit</td></tr>
+              <tr><td>Settings</td><td>Customize quick toggles, language (Chinese / English), theme (dark / light)</td></tr>
+              <tr><td>Help</td><td>About</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- 04 Two Modes -->
+      <section class="chapter" id="ch-modes" data-od-id="ch-modes">
+        <p class="chapter-eyebrow num">04 · Interface &amp; modes</p>
+        <h2>Two Modes</h2>
+        <p class="chapter-lead">Basic mode gets a model running in seconds; Advanced mode fine-tunes every detail.</p>
+
+        <h3 id="modes-table">Side by side</h3>
+        <div class="table-wrap">
+          <table class="ds-table">
+            <thead><tr><th class="hl">Basic Mode</th><th>Advanced Mode</th></tr></thead>
+            <tbody>
+              <tr><td class="hl">Model &amp; mmproj pickers (backed by the model browser)</td><td>235 parameters in 9 tabs</td></tr>
+              <tr><td class="hl">Sliders for temp / top-p / min-p / repeat penalty, top-k spin</td><td>LoRA adapters &amp; scales, control vectors, image token limits</td></tr>
+              <tr><td class="hl">Context quick-picks: Default → 4K → 262K</td><td>Model sources: local file, HF repo, URL, Docker repo</td></tr>
+              <tr><td class="hl">GPU layers auto / all / manual, host / port / parallel</td><td>Speculative decoding (draft-mtp, ngram, lookup cache)</td></tr>
+              <tr><td class="hl">Quick toggles (user-configurable, Settings → Customize): FlashAttn, reasoning, split mode, spec type, draft max…</td><td>Full server config: SSL, CORS, slots, embedding / rerank, MCP</td></tr>
+            </tbody>
+            <tfoot><tr><td colspan="2" class="tbl-foot">Basic: get a model running in seconds · Advanced: fine-tune every detail</td></tr></tfoot>
+          </table>
+        </div>
+
+        <h3 id="modes-quick">User-configurable quick toggles</h3>
+        <p>Basic mode’s quick toggles are not fixed: in <strong>Settings → Customize quick toggles…</strong> you pick from the pool (FlashAttn, reasoning, split mode, spec type, draft max tokens, …) and assemble your own set.</p>
+      </section>
+
+      <!-- 05 Basic Mode -->
+      <section class="chapter" id="ch-basic" data-od-id="ch-basic">
+        <p class="chapter-eyebrow num">05 · Interface &amp; modes</p>
+        <h2>Basic Mode</h2>
+        <p class="chapter-lead">Five control groups — a few clicks to a running local inference server.</p>
+
+        <h3 id="basic-model">Model &amp; multimodal</h3>
+        <p>The model &amp; mmproj pickers are backed by the model browser: auto-categorization, instant model info, name-based mmproj auto-matching — see <a class="ref" href="#ch-models">Model Browser</a>.</p>
+
+        <h3 id="basic-sampling">Sampling parameters</h3>
+        <p>Temperature, top-p, min-p and repeat penalty as sliders; top-k as a spinbox — tune the sampling behavior you want without memorizing CLI flags.</p>
+
+        <h3 id="basic-ctx">Context quick-picks</h3>
+        <p><span class="num">Default → 4K → 262K</span> in one click. When your context setting exceeds the model’s limit, the model-info row turns <b>amber</b> as a warning — the server would clamp it at load.</p>
+
+        <h3 id="basic-gpu">GPU &amp; server</h3>
+        <p>GPU layers tri-state: <code class="inl">auto / all / manual</code>; host, port and parallel set in place. The <code class="inl">--list-devices</code> detection is shown next to the layer control (display only, never auto-filled).</p>
+
+        <h3 id="basic-quick">Quick toggles</h3>
+        <p>The switches you reach for, one screen: FlashAttn, reasoning, split mode, spec type, draft max tokens… The set is user-configurable — see <a class="ref" href="#modes-quick">Two Modes</a>.</p>
+      </section>
+
+      <!-- 06 Advanced Mode -->
+      <section class="chapter" id="ch-advanced" data-od-id="ch-advanced">
+        <p class="chapter-eyebrow num">06 · Interface &amp; modes</p>
+        <h2>Advanced Mode · 9 Tabs</h2>
+        <p class="chapter-lead">All 235 <code class="inl">llama-server</code> CLI parameters in one view, grouped into 9 tabs by concern. Every parameter row has a “?” help button.</p>
+
+        <h3 id="adv-tabs">The 9 tabs</h3>
+        <div class="table-wrap">
+          <table class="ds-table">
+            <thead><tr><th>Tab</th><th>What’s inside</th></tr></thead>
+            <tbody>
+              <tr><td>Model</td><td>Model file, alias, tags, HF / URL / Docker sources, LoRA, control vectors, mmproj (vision)</td></tr>
+              <tr><td>Context</td><td>Context size, prompt &amp; KV cache, RoPE / YaRN scaling</td></tr>
+              <tr><td>Sampling</td><td>Temperature, top-k / p, min-p, penalties, grammar &amp; repetition</td></tr>
+              <tr><td>GPU / Performance</td><td>Offload, memory, CPU threads, affinity, priority</td></tr>
+              <tr><td>Speculative</td><td>Draft models (draft-mtp), ngram, lookup cache, draft tokens</td></tr>
+              <tr><td>Server</td><td>Host / port, slots, parallel, endpoints, SSL, CORS, embedding / rerank, router</td></tr>
+              <tr><td>Agent / Tools</td><td>Tool calling, MCP server, agent settings</td></tr>
+              <tr><td>Chat / Reasoning</td><td>Chat templates, reasoning mode, thinking budget</td></tr>
+              <tr><td>Advanced</td><td>Text I/O, logging, <code class="inl">extra_args</code> escape hatch</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3 id="adv-schema">The schema is the single source of truth</h3>
+        <p>UI, CLI command emission, get / set values and i18n coverage all share one schema (<code class="inl">core/params_schema.py</code>) — adding a parameter is a single entry, no manual sync across three places.</p>
+      </section>
+
+      <!-- 07 Model Browser -->
+      <section class="chapter" id="ch-models" data-od-id="ch-models">
+        <p class="chapter-eyebrow num">07 · Models &amp; server</p>
+        <h2>Model Browser</h2>
+        <p class="chapter-lead">A background thread scans your local GGUF library — the UI never freezes.</p>
+
+        <h3 id="mb-scan">Scanning &amp; categorization</h3>
+        <p>A background thread scans the model directory. <code class="inl">.gguf</code> files are auto-categorized as <strong>Models / Multimodal (mmproj)</strong> with file sizes.</p>
+
+        <h3 id="mb-info">Instant model info</h3>
+        <p>Instant info for the selected model: file size, estimated parameter count, quantization type.</p>
+
+        <h3 id="mb-meta">GGUF quick-metadata row</h3>
+        <p>Architecture + max context of the selected model, parsed from the file *header only* (a few MB, cached, off the GUI thread). When your context setting exceeds the model’s limit, the row turns <b>amber</b> — the server would clamp it at load.</p>
+
+        <h3 id="mb-match">Matching &amp; memory</h3>
+        <ul>
+          <li>Auto-matches the mmproj to your model by name;</li>
+          <li>the scan directory is remembered across sessions;</li>
+          <li><span class="num">F5</span> to re-scan.</li>
+        </ul>
+      </section>
+
+      <!-- 08 Server Lifecycle -->
+      <section class="chapter" id="ch-lifecycle" data-od-id="ch-lifecycle">
+        <p class="chapter-eyebrow num">08 · Models &amp; server</p>
+        <h2>Server Lifecycle</h2>
+        <p class="chapter-lead">From start to stop, the status is always visible.</p>
+
+        <h3 id="lc-run">Start &amp; stop</h3>
+        <p>The four buttons in the control row wear a <strong>colored fill with white text</strong> (deliberately unlike the app’s ordinary buttons — this is the primary action area): <strong>▶ Start · ■ Stop · 📋 Copy · 🌐 WebUI</strong>; a port-conflict check runs before launch; the llama-server WebUI opens in your browser with one click. Run state and the runtime counter live in the status bar (gray / amber / green / red + <span class="num">MM:SS</span>).</p>
+        <div class="st-row" data-od-id="status-states">
+          <span class="st"><i></i>Stopped</span>
+          <span class="st st-loading"><i></i>Loading</span>
+          <span class="st st-ready"><i></i>Ready</span>
+        </div>
+
+        <h3 id="lc-metrics">Live metrics row</h3>
+        <p>The right end of the control row carries a single-line metrics strip, visible on all three tabs. It reads the server’s own endpoints — no extra processes, and nothing guessed from the log:</p>
+        <div class="table-wrap">
+          <table class="ds-table">
+            <thead><tr><th>Group</th><th>Read-outs</th><th>Source · cadence</th></tr></thead>
+            <tbody>
+              <tr><td class="hl">Live</td><td>Prefill t/s · Decode t/s · context gauge + percentage</td><td><code class="inl">GET /slots</code> · 1 s</td></tr>
+              <tr><td class="hl">Session</td><td>Input tokens · cached · output tokens · cache hit rate</td><td><code class="inl">GET /metrics</code> · 5 s</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <dl class="feature-list">
+          <dt>Context gauge</dt>
+          <dd>The percentage is painted inside the gauge: amber from <span class="num">70%</span>, red from <span class="num">90%</span> — so how much window is left is obvious at a glance.</dd>
+          <dt>Re-baselined speeds</dt>
+          <dd>Counter deltas are computed locally and re-baselined at every task boundary — the server clears its counters per task, so starting a new request can never produce a negative t/s.</dd>
+          <dt>Enabling the session counters</dt>
+          <dd>They need the server’s metrics endpoint: <strong>Advanced Mode → Server → “Prometheus Metrics (--metrics)”</strong>, then restart the server. Before the first sample they read <span class="num">0</span> (session totals do start at zero); a value that genuinely cannot be read shows <code class="inl">—</code>. Each read-out’s tooltip says which case you are looking at.</dd>
+          <dt>Stable layout</dt>
+          <dd>The strip never collapses while idle and every read-out is as wide as its widest possible value, so neither the 1 s refresh nor pressing Start reflows the row.</dd>
+        </dl>
+
+        <h3 id="lc-stop">Graceful stop</h3>
+        <p>Stopping is non-blocking with a force-kill fallback; the service stops automatically when you close the app.</p>
+
+        <h3 id="lc-undo">Undo</h3>
+        <p><span class="num">800ms</span>-debounced snapshots, up to <span class="num">20</span> steps back — wrong parameter edit? Undo it.</p>
+
+        <h3 id="lc-cmd">Command preview</h3>
+        <p>The exact <code class="inl">llama-server</code> command, updated on every change, one-click copy; paths with spaces are quoted correctly.</p>
+        <div class="codeblock" data-od-id="code-cmd-preview">
+          <div class="codeblock-head"><span class="codeblock-label">EXAMPLE · COMMAND PREVIEW</span>
+            <button class="copy-btn" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>Copy</button>
+          </div>
+<pre>llama-server -m "D:/models/Qwen2.5-14B-Instruct-Q4_K_M.gguf" \
+    --ctx-size 32768 --n-gpu-layers 99 --flash-attn \
+    --host 127.0.0.1 --port 8080</pre>
+        </div>
+      </section>
+
+      <!-- 09 Presets -->
+      <section class="chapter" id="ch-presets" data-od-id="ch-presets">
+        <p class="chapter-eyebrow num">09 · Models &amp; server</p>
+        <h2>Presets</h2>
+        <p class="chapter-lead">Save one name, and your whole parameter set is restored automatically on next start.</p>
+
+        <h3 id="ps-save">Save &amp; share</h3>
+        <ul>
+          <li>Save / load / delete named presets — <strong>only the diff vs. defaults is stored</strong>, so files stay small and portable.</li>
+          <li>Import / export as JSON files for sharing; created time shown in the list.</li>
+          <li>When saving, choose to <strong>include or exclude machine-local paths</strong> (model / mmproj) — share across machines without surprises.</li>
+        </ul>
+
+        <h3 id="ps-restore">Auto-restore &amp; migration</h3>
+        <ul>
+          <li>The preset you last loaded is <strong>restored automatically on next start</strong>.</li>
+          <li>Parameter keys renamed or removed across llama.cpp versions are migrated automatically on load.</li>
+        </ul>
+      </section>
+
+      <!-- 10 Live Log Parsing -->
+      <section class="chapter" id="ch-runtime" data-od-id="ch-runtime">
+        <p class="chapter-eyebrow num">10 · Logs &amp; diagnostics</p>
+        <h2>Live Log Parsing</h2>
+        <p class="chapter-lead">Every line of <code class="inl">llama-server</code> output is parsed as it arrives and distilled into the <strong>Runtime Info</strong> panel.</p>
+
+        <p>The parser carries <span class="num">74</span> rules covering both the old and the v9174+ <code class="inl">srv</code>-prefixed log formats; the panel spans <span class="num">8</span> categories and <span class="num">40+</span> data points.</p>
+
+        <h3 id="rt-table">8 categories of data</h3>
+        <div class="table-wrap">
+          <table class="ds-table">
+            <thead><tr><th>Category</th><th>What you see</th></tr></thead>
+            <tbody>
+              <tr><td>Hardware</td><td>GPU name / compute capability / total &amp; free VRAM per GPU, CPU</td></tr>
+              <tr><td>Model</td><td>File, model name, quant type, GGUF version</td></tr>
+              <tr><td>Architecture</td><td>Params, layers, embed / FFN dims, vocab, tensor precision split</td></tr>
+              <tr><td>Runtime</td><td>Train vs runtime ctx, batch / ubatch, slots, RoPE freq, thinking mode</td></tr>
+              <tr><td>VRAM</td><td>Offload layers, model / KV-cache / compute buffers, projected usage</td></tr>
+              <tr><td>Performance</td><td>Flash attention, KV unified, graph nodes &amp; splits</td></tr>
+              <tr><td>System</td><td>Threads, OpenMP, repack</td></tr>
+              <tr><td>Vision</td><td>Encoder status, mmproj, image resolution, min image tokens</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3 id="rt-live">Live updates</h3>
+        <p>The panel fills in live — offload layers appear during loading, buffer sizes during init, and the status flips to <strong>Ready</strong> the moment the server starts listening.</p>
+        <p>Recent llama.cpp versions route their own INFO lines through a TRACE callback, so at the binary’s default <code class="inl">--log-verbosity 3</code> this panel would stay almost empty. The launcher therefore defaults <code class="inl">log_verbosity</code> to <span class="num">4</span> (trace) and never adopts the live-parsed default for that key; below level 4 the panel shows a hint.</p>
+      </section>
+
+      <!-- 11 Log Panel -->
+      <section class="chapter" id="ch-logpanel" data-od-id="ch-logpanel">
+        <p class="chapter-eyebrow num">11 · Logs &amp; diagnostics</p>
+        <h2>Log Panel</h2>
+        <p class="chapter-lead">A full console: searchable, filterable, exportable.</p>
+
+        <h3 id="lp-search">Search &amp; filtering</h3>
+        <ul>
+          <li><strong>Ctrl+F search</strong> with match count and wrap-around;</li>
+          <li><strong>Level filter</strong> — Debug / Info / Warn / Error (follows Error by default);</li>
+          <li>auto-scroll toggle, clear button, colorized by level.</li>
+        </ul>
+
+        <h3 id="lp-export">Export</h3>
+        <p>Export the visible area or the <strong>full run</strong> — every run is also mirrored to <code class="inl">~/.llama-cpp-launcher/logs/last_run.log</code>.</p>
+
+        <h3 id="lp-history">Per-level history windows</h3>
+        <p>Debug / Info / Warn / Error each keep their own <span class="num">5,000</span>-line window. A burst of hidden-level lines (e.g. a debug prompt dump) can never evict the lines you’re filtering for.</p>
+      </section>
+
+      <!-- 12 GGUF Inspector -->
+      <section class="chapter" id="ch-gguf" data-od-id="ch-gguf">
+        <p class="chapter-eyebrow num">12 · Logs &amp; diagnostics</p>
+        <h2>GGUF Inspector</h2>
+        <p class="chapter-lead">A built-in binary inspector — no weights loaded, pure-stdlib parser.</p>
+
+        <h3 id="gguf-tabs">7 tabs</h3>
+        <div class="tab-pills" data-od-id="gguf-tab-pills">
+          <span class="tab-pill"><span class="tab-idx num">01</span>Overview</span>
+          <span class="tab-pill"><span class="tab-idx num">02</span>Statistics</span>
+          <span class="tab-pill"><span class="tab-idx num">03</span>Metadata</span>
+          <span class="tab-pill"><span class="tab-idx num">04</span>Tensors</span>
+          <span class="tab-pill"><span class="tab-idx num">05</span>Tokenizer</span>
+          <span class="tab-pill"><span class="tab-idx num">06</span>Filename</span>
+          <span class="tab-pill"><span class="tab-idx num">07</span>Diagnostics</span>
+        </div>
+
+        <h3 id="gguf-viz">Visual breakdowns</h3>
+        <p>Quantization distribution, layer / module structure, parameter concentration — see the shape of a model file at a glance.</p>
+
+        <h3 id="gguf-diag">Launcher-aware diagnostics</h3>
+        <p>Not just a generic report: it cross-checks against your current launcher config — context exceeding the model limit, mmproj name mismatch, draft-mtp without a sidecar, plus chat-template / RoPE / MoE / shard info.</p>
+
+        <h3 id="gguf-export">Export</h3>
+        <p>Export to JSON / CSV / Markdown. Background parsing + in-memory cache — big files never freeze the UI.</p>
+      </section>
+
+      <!-- 13 Per-Parameter Help -->
+      <section class="chapter" id="ch-help" data-od-id="ch-help">
+        <p class="chapter-eyebrow num">13 · Reference</p>
+        <h2>Per-Parameter Help</h2>
+        <p class="chapter-lead">Every parameter row has a “?” button that opens a floating help card.</p>
+
+        <h3 id="ph-card">Four things on the card</h3>
+        <ul>
+          <li>The <strong>CLI flag name</strong>;</li>
+          <li>your binary’s <strong>live default</strong> (from <code class="inl">--help</code>);</li>
+          <li>the <strong>valid range</strong>;</li>
+          <li>a plain-language <strong>explanation</strong>.</li>
+        </ul>
+        <p>No more memorizing what <code class="inl">--no-kv-offload</code> does.</p>
+
+        <h3 id="ph-sample">A real sample</h3>
+        <div class="helpcard" data-od-id="help-card-demo">
+          <div class="hc-head">
+            <span class="hc-title">KV Offload</span>
+            <span class="hc-flag num">--kv-offload</span>
+          </div>
+          <div class="hc-row"><span class="hc-key">CLI flag</span><span class="hc-val"><code class="inl">--kv-offload</code> / <code class="inl">--no-kv-offload</code> (short <code class="inl">-nkvo</code>)</span></div>
+          <div class="hc-row"><span class="hc-key">Your binary’s default</span><span class="hc-val">on (parsed live from <code class="inl">--help</code>)</span></div>
+          <div class="hc-row"><span class="hc-key">Valid range</span><span class="hc-val">on / off</span></div>
+          <div class="hc-row"><span class="hc-key">Explanation</span><span class="hc-val">Whether to offload the KV cache to the GPU. Turn it off when VRAM is tight to keep the KV cache in RAM.</span></div>
+        </div>
+        <p class="hc-caption">Example · “KV Offload” parameter card (core/params_help.py; explanation is the English rendering of the built-in Chinese help text)</p>
+      </section>
+
+      <!-- 14 i18n & Themes -->
+      <section class="chapter" id="ch-i18n" data-od-id="ch-i18n">
+        <p class="chapter-eyebrow num">14 · Reference</p>
+        <h2>i18n &amp; Themes</h2>
+        <p class="chapter-lead">UI language and theme switch live, no restart.</p>
+
+        <h3 id="i18n-lang">Chinese ↔ English</h3>
+        <p>The UI language switches live between Chinese and English — no restart; your preference is persisted and remembered on next launch.</p>
+
+        <h3 id="i18n-theme">Dark / light</h3>
+        <p>One click in the <strong>Settings</strong> menu (File · Settings · Help) switches the dark / light theme, remembered automatically; the log panel and GGUF inspector stay theme-aware. This manual page offers the same dark / light toggle — see the top-right of the topbar.</p>
+      </section>
+
+      <!-- 15 Comparison -->
+      <section class="chapter" id="ch-compare" data-od-id="ch-compare">
+        <p class="chapter-eyebrow num">15 · Reference</p>
+        <h2>Comparison</h2>
+        <p class="chapter-lead">The difference is not “more features” — it’s that it drives the llama.cpp *you* installed.</p>
+
+        <h3 id="cmp-table">Capability comparison</h3>
+        <div class="table-wrap">
+          <table class="ds-table">
+            <thead><tr><th>Feature</th><th class="hl">Llama CPP Launcher</th><th>Ollama</th><th>LM Studio</th></tr></thead>
+            <tbody>
+              <tr><td>Bring your own llama.cpp binary</td><td class="hl"><span class="yes">✓</span></td><td><span class="no">✗</span></td><td><span class="no">✗</span></td></tr>
+              <tr><td>Run the latest llama.cpp the day it ships</td><td class="hl"><span class="yes">✓</span></td><td><span class="no">✗</span></td><td><span class="no">✗</span></td></tr>
+              <tr><td>Any custom backend (CUDA / ROCm / Vulkan / Metal / SYCL)</td><td class="hl"><span class="yes">✓</span></td><td><span class="no">✗</span></td><td><span class="no">✗</span></td></tr>
+              <tr><td>Full CLI parameter access (235)</td><td class="hl"><span class="yes">✓</span></td><td><span class="no">✗</span></td><td><span class="part">Partial</span></td></tr>
+              <tr><td>The exact command is visible &amp; copyable</td><td class="hl"><span class="yes">✓</span></td><td><span class="no">✗</span></td><td><span class="no">✗</span></td></tr>
+              <tr><td>Presets with version-aware migration</td><td class="hl"><span class="yes">✓</span></td><td><span class="no">✗</span></td><td><span class="no">✗</span></td></tr>
+              <tr><td>Built-in GGUF inspector</td><td class="hl"><span class="yes">✓</span></td><td><span class="no">✗</span></td><td><span class="no">✗</span></td></tr>
+              <tr><td>No telemetry, 100% local</td><td class="hl"><span class="yes">✓</span></td><td><span class="no">✗</span></td><td><span class="yes">✓</span></td></tr>
+              <tr><td>Single lightweight dependency (PyQt6)</td><td class="hl"><span class="yes">✓</span></td><td><span class="dash">—</span></td><td><span class="no">✗</span></td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3 id="cmp-points">The three key differences</h3>
+        <ol>
+          <li><strong>Upgrade / rollback = swap the binary</strong>: not bound to app-update cadence — build today, run today.</li>
+          <li><strong>The command is always visible &amp; copyable</strong>: no black box; when debugging you see the exact parameters that actually ran.</li>
+          <li><strong>Presets migrate across versions</strong>: when llama.cpp renames or removes a parameter, old presets migrate automatically on load.</li>
+        </ol>
+      </section>
+
+      <!-- 16 Appendix -->
+      <section class="chapter" id="ch-dev" data-od-id="ch-dev">
+        <p class="chapter-eyebrow num">16 · Reference</p>
+        <h2>Appendix · Development &amp; License</h2>
+        <p class="chapter-lead">For people who want to contribute: building, structure, releases.</p>
+
+        <h3 id="dev-build">Development</h3>
+        <ul>
+          <li>Python 3.11+, PyQt6 (pinned to 6.11.0), pytest for tests;</li>
+          <li>~16,000 lines of application code, plus ~8,000 lines of tests (<span class="num">531</span> cases, all headless);</li>
+          <li>the core schema (<code class="inl">core/params_schema.py</code>) is the single source of truth for the UI, CLI emission, get / set values and i18n coverage — adding a parameter is one entry;</li>
+          <li><code class="inl">gguf/</code>, <code class="inl">ui/log_parser.py</code>, <code class="inl">ui/command_builder.py</code> are Qt-free and unit-testable headlessly.</li>
+          <li>the documentation screenshots are <strong>rendered, not photographed</strong> — <code class="inl">python tools/render_screenshots.py</code> paints the real widgets with synthetic GPUs / models / version / log, and keeps the machine (PATH-resolved binary, <code class="inl">~/.llama-cpp-launcher</code>, <code class="inl">--list-devices</code>) out of the picture. Re-render with it rather than taking new screenshots.</li>
+        </ul>
+
+        <h3 id="dev-tree">Project structure</h3>
+        <div class="codeblock" data-od-id="code-tree">
+          <div class="codeblock-head"><span class="codeblock-label">PROJECT STRUCTURE</span>
+            <button class="copy-btn" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>Copy</button>
+          </div>
+<pre>llama-cpp-launcher/
+├── main.py                  # Entry point (async startup, logging setup)
+├── run.bat                  # Windows launcher (activates venv)
+├── build_config.py          # App name / version (CI rewrites on tag)
+├── llama_cpp_launcher.spec  # PyInstaller spec (icon embedded)
+├── requirements.txt
+├── core/
+│   ├── params_schema.py     # ★ 235-param schema (Qt-free, single source of truth)
+│   ├── params_help.py       # Per-parameter help texts (235 entries)
+│   ├── defaults.py          # `--help` parsing, fallback defaults, GPU probe
+│   ├── config.py            # Preset &amp; settings IO (~/.llama-cpp-launcher)
+│   ├── runner.py            # QProcess wrapper (start/stop/readiness)
+│   ├── i18n.py              # zh/en translation (Chinese source language)
+│   └── constants.py
+├── gguf/                    # Pure-stdlib GGUF binary reader
+│   ├── parser.py  models.py  ggml_types.py  filename.py  diagnostics.py
+├── ui/
+│   ├── main_window.py       # Window orchestration, theme, log panel
+│   ├── frameless.py         # Frameless rounded-card window, title bar, edge-resize
+│   ├── message_box.py       # Themed frameless message boxes &amp; dialog base
+│   ├── basic_panel.py       # Basic mode (incl. user-configurable quick toggles)
+│   ├── advanced_panel.py    # Advanced mode (schema-driven, 9 tabs)
+│   ├── quick_params.py      # Quick-toggles pool + widget factory
+│   ├── quick_params_dialog.py  # Customize-quick-toggles dialog
+│   ├── server_path_dialog.py   # llama-server path dialog
+│   ├── param_help.py        # "?" button + floating help card
+│   ├── model_browser.py     # GGUF scanner (background thread)
+│   ├── gguf_inspector.py    # 7-tab inspector dialog
+│   ├── log_parser.py        # Log line patterns → runtime info (Qt-free)
+│   ├── live_stats.py        # /slots + /metrics polling, speed deltas (Qt-free)
+│   ├── live_metrics.py      # Live metrics row (read-outs + context gauge)
+│   ├── command_builder.py   # Params → `llama-server` argv (Qt-free)
+│   └── runtime_info.py      # Runtime info HTML (Qt-free)
+├── tests/                   # 31 test modules (headless, in-memory fakes)
+└── assets/icon.ico|png</pre>
+        </div>
+
+        <h3 id="dev-release">Releases</h3>
+        <p>Pushing a <code class="inl">v*</code> tag triggers CI (windows-latest): tests → PyInstaller packaging → the exe is published as a GitHub Release automatically.</p>
+
+        <h3 id="dev-license">License</h3>
+        <p>MIT — do whatever you want with it. Source and latest releases at the <a class="ref" href="https://github.com/Mars-Albert/llama-cpp-launcher" target="_blank" rel="noopener">GitHub repository</a>.</p>
+
+        <footer class="doc-foot" data-od-id="doc-foot">
+          <span>Llama CPP Launcher Product Manual · compiled from the official README (v1.8.2) · MIT License</span>
+          <span class="meta">Source: README.md · Help sample: core/params_help.py</span>
+        </footer>
+      </section>
+
+    </div>
+  </main>
+
+  <!-- ══ right: contents of this chapter ══ -->
+  <aside class="toc" data-od-id="doc-toc" aria-label="Contents of this chapter">
+    <p class="toc-label">IN THIS CHAPTER</p>
+    <p class="toc-chapter" id="tocChapter">Overview</p>
+    <nav class="toc-list" id="tocList"></nav>
+  </aside>
+
+</div>
+
+<button class="backtop" id="backTop" aria-label="Back to top">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
+</button>
+
+<script>
+(function () {
+  'use strict';
+  var root = document.documentElement;
+
+  /* ── theme toggle (mirrors the app's own dark / light, persisted) ── */
+  var themeBtn = document.getElementById('themeBtn');
+  var iconSun = document.getElementById('iconSun');
+  var iconMoon = document.getElementById('iconMoon');
+  function applyThemeIcon(t) {
+    iconSun.hidden = (t === 'dark');
+    iconMoon.hidden = (t !== 'dark');
+    themeBtn.setAttribute('aria-pressed', t === 'dark' ? 'true' : 'false');
+  }
+  applyThemeIcon(root.dataset.theme || 'light');
+  themeBtn.addEventListener('click', function () {
+    var next = (root.dataset.theme === 'dark') ? 'light' : 'dark';
+    root.dataset.theme = next;
+    try { localStorage.setItem('lcl-manual-theme-en', next); } catch (e) {}
+    applyThemeIcon(next);
+  });
+
+  /* ── scrollspy: left chapters + right per-chapter TOC ── */
+  var chapters = Array.prototype.slice.call(document.querySelectorAll('.chapter'));
+  var navItems = {};
+  Array.prototype.slice.call(document.querySelectorAll('.nav-item')).forEach(function (a) { navItems[a.dataset.target] = a; });
+  var tocList = document.getElementById('tocList');
+  var tocChapter = document.getElementById('tocChapter');
+  var backTop = document.getElementById('backTop');
+  var currentChapter = null;
+  var POS_KEY = 'lcl-manual-pos-en';
+
+  function docTop(el) { return el.getBoundingClientRect().top + window.scrollY; }
+
+  function buildToc(ch) {
+    tocChapter.textContent = ch.querySelector('h2').textContent;
+    var hs = ch.querySelectorAll('h3');
+    if (!hs.length) { tocList.innerHTML = '<span class="toc-empty">No sub-sections in this chapter</span>'; return; }
+    tocList.innerHTML = Array.prototype.map.call(hs, function (h) {
+      return '<a href="#' + h.id + '">' + h.textContent + '</a>';
+    }).join('');
+  }
+
+  function syncNav() {
+    Object.keys(navItems).forEach(function (id) {
+      navItems[id].classList.toggle('active', currentChapter && id === currentChapter.id);
+    });
+  }
+
+  function syncToc() {
+    if (!currentChapter) return;
+    var y = window.scrollY + 110;
+    var active = null;
+    currentChapter.querySelectorAll('h3').forEach(function (h) {
+      if (docTop(h) <= y) active = h;
+    });
+    Array.prototype.slice.call(tocList.querySelectorAll('a')).forEach(function (a) {
+      a.classList.toggle('active', active && a.getAttribute('href') === '#' + active.id);
+    });
+  }
+
+  function onScroll() {
+    var y = window.scrollY + 96;
+    var cur = chapters[0];
+    for (var i = 0; i < chapters.length; i++) { if (docTop(chapters[i]) <= y) cur = chapters[i]; }
+    if (cur !== currentChapter) {
+      currentChapter = cur;
+      syncNav();
+      buildToc(cur);
+      syncToc();
+      try { localStorage.setItem(POS_KEY, cur.id); } catch (e) {}
+    } else {
+      syncToc();
+    }
+    backTop.classList.toggle('show', window.scrollY > 600);
+  }
+
+  var ticking = false;
+  window.addEventListener('scroll', function () {
+    if (!ticking) {
+      ticking = true;
+      requestAnimationFrame(function () { ticking = false; onScroll(); });
+    }
+  }, { passive: true });
+
+  /* restore last reading position */
+  var saved = null;
+  try { saved = localStorage.getItem(POS_KEY); } catch (e) {}
+  if (saved && document.getElementById(saved)) {
+    var el = document.getElementById(saved);
+    window.scrollTo(0, Math.max(0, docTop(el) - 72));
+  }
+  onScroll();
+
+  /* ── code block copy ── */
+  function fallbackCopy(text) {
+    try {
+      var ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      var ok = document.execCommand('copy');
+      ta.remove();
+      return ok;
+    } catch (e) { return false; }
+  }
+  document.addEventListener('click', function (e) {
+    var btn = e.target.closest('.copy-btn');
+    if (!btn) return;
+    var block = btn.closest('.codeblock');
+    var pre = block && block.querySelector('pre');
+    if (!pre) return;
+    var text = pre.innerText;
+    var done = function (ok) {
+      btn.innerHTML = ok ? 'Copied ✓' : 'Copy failed';
+      setTimeout(function () {
+        btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>Copy';
+      }, 1600);
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(function () { done(true); }, function () { done(fallbackCopy(text)); });
+    } else {
+      done(fallbackCopy(text));
+    }
+  });
+
+  /* ── sidebar chapter filter ── */
+  var filter = document.getElementById('navFilter');
+  var navEmpty = document.getElementById('navEmpty');
+  filter.addEventListener('input', function () {
+    var q = filter.value.trim().toLowerCase();
+    var anyVisible = false;
+    Array.prototype.slice.call(document.querySelectorAll('.nav-group')).forEach(function (g) {
+      var groupVisible = false;
+      Array.prototype.slice.call(g.querySelectorAll('.nav-item')).forEach(function (a) {
+        var hit = !q || a.textContent.toLowerCase().indexOf(q) !== -1;
+        a.style.display = hit ? '' : 'none';
+        if (hit) groupVisible = true;
+      });
+      g.style.display = groupVisible ? '' : 'none';
+      if (groupVisible) anyVisible = true;
+    });
+    navEmpty.style.display = anyVisible ? 'none' : 'block';
+  });
+
+  /* ── mobile drawer ── */
+  var menuBtn = document.getElementById('menuBtn');
+  var scrim = document.getElementById('scrim');
+  menuBtn.addEventListener('click', function () { document.body.classList.toggle('sidebar-open'); });
+  scrim.addEventListener('click', function () { document.body.classList.remove('sidebar-open'); });
+  Array.prototype.slice.call(document.querySelectorAll('.nav-item')).forEach(function (a) {
+    a.addEventListener('click', function () { document.body.classList.remove('sidebar-open'); });
+  });
+
+  /* ── back to top ── */
+  backTop.addEventListener('click', function () { window.scrollTo({ top: 0, behavior: 'smooth' }); });
+})();
+</script>
+</body>
+</html>

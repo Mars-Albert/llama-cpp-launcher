@@ -6,7 +6,7 @@
 
 **功能完整的 `llama-server` (llama.cpp) GUI 启动器 — 自带你的 llama.cpp 二进制。**
 
-**226** 个 `llama-server` CLI 参数一屏全出 · 动态默认值检测 · 预设管理 · 实时日志解析 · 内置 GGUF 检查器
+**235** 个 `llama-server` CLI 参数一屏全出 · 动态默认值检测 · 预设管理 · 实时日志解析 · 实时指标带 · 内置 GGUF 检查器
 
 [![Version](https://img.shields.io/github/v/release/Mars-Albert/llama-cpp-launcher?label=version)](https://github.com/Mars-Albert/llama-cpp-launcher/releases/latest)
 [![Python](https://img.shields.io/badge/python-3.11%2B-3776ab)](https://www.python.org/)
@@ -31,11 +31,13 @@
   - [高级模式 — 9 个标签页](#advanced-tabs)
   - [模型浏览器](#model-browser)
   - [实时日志解析](#log-parsing)
+  - [实时指标带](#metrics-row)
   - [日志面板](#log-panel)
   - [预设管理](#presets)
   - [逐参数帮助](#param-help)
   - [GGUF 检查器](#gguf-inspector)
   - [服务生命周期](#server-lifecycle)
+  - [布局与状态栏](#layout)
   - [窗口与界面](#window-ui)
   - [国际化与主题](#i18n-themes)
 - [与其他工具对比](#comparison)
@@ -64,9 +66,9 @@
 
 - **🔍 动态默认值检测** — 启动时运行 `llama-server --help`，解析*你的*二进制版本的真实默认值。不存在过时的硬编码，版本漂移还会通过 ⚠️ 指示器提示。
 - **🗂️ 聊天模板自动发现** — 你的二进制内置的模板会自动出现在 UI 中。
-- **🖥️ GPU 检测** — 通过 `--list-devices` 探测，在卸载层数控制旁显示如 `检测到 2× GPU：RTX 5090 (32GB) + RTX 2080 (8GB)`（只展示，不自动填写，永远由你决定）。
+- **🖥️ GPU 检测** — 通过 `--list-devices` 探测，在**状态栏**（版本号左侧）显示如 `检测到 2× GPU：RTX 5090 (32GB) + RTX 2080 (8GB)`（只展示，不自动填写，永远由你决定）。
 
-**🪶 轻量且私密** — 约 13,000 行 Python，唯一运行时依赖是 PyQt6。无内置后端、无账号、无遥测、不联网上报，100% 本地运行。
+**🪶 轻量且私密** — 约 16,000 行 Python，唯一运行时依赖是 PyQt6。无内置后端、无账号、无遥测、不联网上报，100% 本地运行。
 
 <a id="screenshot"></a>
 
@@ -80,6 +82,9 @@
     <td width="50%"><img src="cn.png" width="560" alt="基础模式运行中（深色主题）" /></td>
   </tr>
 </table>
+
+> 🎭 截图是**渲染出来的，不是拍出来的**：`python tools/render_screenshots.py` 用真实 UI + 合成数据出图（显卡、模型、版本号、日志与各项数字都是编的），所以界面改版后重出图不会把任何人的机器发出去。要更新截图请用它，别改用真机截图。
+> 图片为 2000×1175（即 1600×941 窗口在 125% 缩放下的原生像素），含卡片投影与透明圆角。
 
 <a id="quick-start"></a>
 
@@ -117,7 +122,7 @@ python main.py          # Windows 下也可双击 run.bat
 
 | 基础模式 | 高级模式 |
 |---|---|
-| 模型 & mmproj 选择器（背后是模型浏览器） | **226 个参数**，9 个标签页 |
+| 模型 & mmproj 选择器（背后是模型浏览器） | **235 个参数**，9 个标签页 |
 | 温度 / Top-P / Min-P / 重复惩罚滑块 + Top-K 数值框 | LoRA 适配器与缩放、控制向量、图像 Token 限制 |
 | 上下文快捷按钮：Default → 4K → 262K | 模型来源：本地文件、**HF 仓库**、**URL**、**Docker 仓库** |
 | GPU 层数 auto / all / 手动，host/port/并行数 | 投机解码（draft-mtp、ngram、lookup cache） |
@@ -135,7 +140,7 @@ python main.py          # Windows 下也可双击 run.bat
 | 🎲 采样 | 温度、top-k/p、min-p、惩罚项、语法与重复控制 |
 | 🎮 GPU-性能 | 卸载、显存、CPU 线程、亲和性、优先级 |
 | ⚡ 投机解码 | 草稿模型（draft-mtp）、ngram、lookup cache、草稿 Token 数 |
-| 🌐 服务 | host/port、slots、并行、端点、SSL、CORS、embedding/rerank、router |
+| 🌐 服务 | host/port、slots、并行、端点、SSL、CORS、embedding/rerank、router、Prometheus 指标 |
 | 🤖 Agent/工具 | 工具调用、MCP 服务、agent 设置 |
 | 💬 聊天-推理 | 聊天模板、推理模式、thinking budget |
 | 🔧 高级 | 文本 I/O、日志、`extra_args` 万能出口 |
@@ -170,6 +175,22 @@ python main.py          # Windows 下也可双击 run.bat
 
 面板**实时刷新** — 卸载层数在加载过程中逐步出现，缓冲大小在初始化时填充，服务端开始监听的那一刻状态立即切换为 **就绪**。
 
+<a id="metrics-row"></a>
+
+### 📟 实时指标带
+
+标签页下方的那一行在**任何标签页**都常驻，显示模型跑起来时你真正会盯的数字：
+
+| 组 | 读数 | 来源 |
+|---|---|---|
+| ⚡ 实时（每秒） | **Prefill** t/s · **Decode** t/s · **上下文**计量条 + % | `GET /slots` |
+| 📈 累计（每 5 秒） | **输入** tokens · **缓存** · **输出** tokens · 缓存**命中**率 | `GET /metrics` |
+
+- 上下文是一条细计量条，百分比**写在条里**：绿 → 70% 琥珀 → 90% 红
+- 速度差值在本地计算，并在每次任务边界重新起算基线 —— 新发起一个请求不会算出负速度
+- 累计指标需要开启服务端 metrics 端点：**高级模式 → 服务 → 「Prometheus指标 (--metrics)」**，然后重启服务。第一次采样之前读作 `0`；确实未知的值读作 `—`，每一格的 tooltip 会说明当前是哪一种
+- 未运行时七个读数不折叠：点「启动」不会让窗口重新排版
+
 <a id="log-panel"></a>
 
 ### 📄 日志面板
@@ -178,6 +199,7 @@ python main.py          # Windows 下也可双击 run.bat
 - **级别过滤** — 调试 / 信息 / 警告 / 错误（默认跟随"错误"级别）
 - 📤 导出可见区域或**完整运行日志**（每次运行都会完整镜像到 `~/.llama-cpp-launcher/logs/last_run.log`）
 - 🪟 **每级独立历史窗口** — 调试 / 信息 / 警告 / 错误各保留自己 5,000 行的窗口，隐藏级别的日志爆发（如 debug 提示词转储）不会把你正在过滤的级别挤掉
+- 🔊 默认带上 `--log-verbosity 4 (trace)`：新版 llama.cpp 把自己那些 INFO 行改走 TRACE，若沿用二进制默认级别，运行信息面板会是空的
 - 自动滚动开关、清空按钮、按级别着色
 
 <a id="presets"></a>
@@ -218,6 +240,14 @@ python main.py          # Windows 下也可双击 run.bat
 - ↩️ **撤销** — 800ms 防抖快照，最多回退 20 步
 - 📝 **命令预览** — 精确的 `llama-server` 命令，每次修改即时更新，一键复制（含空格路径已正确加引号）
 
+<a id="layout"></a>
+
+### 🧭 布局与状态栏
+
+- 🗂 **右栏 = 3 个标签页** — 参数配置 · 日志输出 · 运行信息，每个标签页都拿到整列高度（1080p 窗口下日志区约 800px，而不是 200px 的一条缝）；参数区 / 命令预览之间**可拖动分割**
+- 🎛 **一行控制按钮，在标签页外面** — ▶ 启动 · ■ 停止 · 📋 复制 · 🌐 WebUI 与实时指标带：开着哪个标签页都能用
+- 📌 **状态栏** — 检测到的 GPU · `llama-server` 版本 · ⚠ 参数漂移提示（点击看完整列表）· 运行状态点（灰=未启动 / 琥珀=启动中或两端无应答 / 绿=运行中 / 红=异常）· 状态文字 · 运行时长
+
 <a id="window-ui"></a>
 
 ### 🪟 窗口与界面
@@ -244,7 +274,7 @@ python main.py          # Windows 下也可双击 run.bat
 | 自带 llama.cpp 二进制 | ✅ | ❌ | ❌ |
 | 当天使用最新 llama.cpp | ✅ | ❌ | ❌ |
 | 任意自定义后端（CUDA/ROCm/Vulkan/Metal/SYCL） | ✅ | ❌ | ❌ |
-| 完整 CLI 参数访问（226 个） | ✅ | ❌ | 部分 |
+| 完整 CLI 参数访问（235 个） | ✅ | ❌ | 部分 |
 | 实际命令可见且可复制 | ✅ | ❌ | ❌ |
 | 版本感知的预设迁移 | ✅ | ❌ | ❌ |
 | 内置 GGUF 检查器 | ✅ | ❌ | ❌ |
@@ -256,7 +286,7 @@ python main.py          # Windows 下也可双击 run.bat
 ## 🛠️ 开发
 
 - Python 3.11+，PyQt6（版本锁定），pytest 测试
-- 约 13,000 行应用代码（另有约 5,500 行测试）；核心 schema（`core/params_schema.py`）是 UI、CLI 命令生成、get/set 值、i18n 覆盖率的唯一事实来源 — 新增一个参数只需一条记录
+- 约 16,000 行应用代码（另有约 8,000 行测试，531 个测试用例）；核心 schema（`core/params_schema.py`）是 UI、CLI 命令生成、get/set 值、i18n 覆盖率的唯一事实来源 — 新增一个参数只需一条记录
 - `gguf/`、`ui/log_parser.py`、`ui/command_builder.py` 均不依赖 Qt，可无界面单元测试
 
 <details>
@@ -270,8 +300,8 @@ llama-cpp-launcher/
 ├── llama_cpp_launcher.spec  # PyInstaller 构建配置（内嵌图标）
 ├── requirements.txt
 ├── core/
-│   ├── params_schema.py     # ★ 226 参数 schema（Qt-free，唯一事实来源）
-│   ├── params_help.py       # 逐参数帮助文本（226 条）
+│   ├── params_schema.py     # ★ 235 参数 schema（Qt-free，唯一事实来源）
+│   ├── params_help.py       # 逐参数帮助文本（235 条）
 │   ├── defaults.py          # `--help` 解析、回退默认值、GPU 探测
 │   ├── config.py            # 预设与设置 IO（~/.llama-cpp-launcher）
 │   ├── runner.py            # QProcess 封装（启动/停止/就绪检测）
@@ -292,9 +322,11 @@ llama-cpp-launcher/
 │   ├── model_browser.py     # GGUF 扫描器（后台线程）
 │   ├── gguf_inspector.py    # 7 标签页检查器对话框
 │   ├── log_parser.py        # 日志行模式 → 运行时信息（Qt-free）
+│   ├── live_stats.py        # /slots + /metrics 轮询、速度差值（Qt-free）
+│   ├── live_metrics.py      # 实时指标带（七个读数 + 上下文计量条）
 │   ├── command_builder.py   # 参数 → `llama-server` argv（Qt-free）
 │   └── runtime_info.py      # 运行时信息 HTML（Qt-free）
-├── tests/                   # 26 个测试模块（无界面，内存假数据）
+├── tests/                   # 31 个测试模块（无界面，内存假数据）
 └── assets/icon.ico|png
 ```
 
