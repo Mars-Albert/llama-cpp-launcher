@@ -123,7 +123,15 @@ def test_mainwindow_card_chrome_e13(app, temp_settings):
         text_bottom = (w.statusBar().y() + msg.y()
                        + msg.contentsRect().bottom())
         assert text_bottom <= w.height() - SHADOW_MARGIN - 1
-        assert msg.contentsMargins().bottom() == m
+        assert msg.contentsMargins().bottom() == 0
+        # 2026-11 第五轮：带内缩不再挂在消息标签上，而是**状态栏自己的**
+        # contents margins —— 逐条目的 margins 盖不住常驻项（版本信息是
+        # ElidingLabel，paintEvent 直接画 self.rect()、完全忽略
+        # contentsMargins），它当时就画进了右下角的透明圆角带。上面那条
+        # text_bottom 几何断言才是“文字仍在卡片面上”的真正证据。
+        sb_margins = w.statusBar().contentsMargins()
+        assert sb_margins.bottom() == m
+        assert sb_margins.right() >= m      # 右下角弧形的安全距离
         # the band adds to the title row's height
         assert w._title_bar.height() == TITLE_BAR_HEIGHT + m
         # the shadow is part of the minimum size (the band is outside
@@ -154,9 +162,10 @@ def test_mainwindow_card_chrome_e13(app, temp_settings):
         assert w._title_bar.height() == TITLE_BAR_HEIGHT
         cl2, _ct2, cr2, _cb2 = w._central_layout.getContentsMargins()
         assert (cl2, cr2) == (0, 0)
-        # band collapsed → the status message's bottom inset goes with it
+        # band collapsed → the bar's own bottom inset collapses with it
         msg2 = w.statusBar().findChild(QLabel, "statusMsg")
         assert msg2.contentsMargins().bottom() == 0
+        assert w.statusBar().contentsMargins().bottom() == 0
         # normal: band restored
         w.showNormal()
         app.processEvents()

@@ -32,7 +32,8 @@ def test_stylesheets_resolve_all_tokens():
     assert "#1e1e2e" in dark and "#181825" in dark and "#313244" in dark
     assert "#f0f2f5" not in dark and "#d0d4dc" not in dark and "#e8ecf0" not in dark
     # only the fixed white-on-accent text colors may survive in dark:
-    # the four control-bar gradient buttons (start/stop/copy/webui)
+    # the four accent control-row buttons (start/stop/copy/webui — 2026-11
+    # round 5c kept them coloured on purpose: "需要很醒目")
     # + checkbox indicator / list selection / table selection text
     # + server-path OK button + title-bar close-button hover
     # + themed message-box primary button

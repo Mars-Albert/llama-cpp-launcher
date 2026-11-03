@@ -62,6 +62,18 @@ VERSION_CHECK_TIMEOUT_S = 10
 # to cover the usual model/mmproj re-inspection cycle.
 PARSE_CACHE_MAX = 3
 
+# Live-metrics row (below the 参数配置 control bar). /slots is polled at
+# this cadence — the poll interval IS the speed window (speed = counter
+# delta / interval). /metrics' cumulative counters are fetched at the
+# slower cadence: every scrape resets the server's internal rate bucket,
+# so an aggressive poll would slice the window of a real Prometheus
+# scraper. The /metrics probe retries connection failures this many times
+# (on later ticks) before the counters group settles greyed for the
+# session.
+LIVE_STATS_SLOTS_SECONDS = 1
+LIVE_STATS_METRICS_SECONDS = 5
+LIVE_STATS_METRICS_PROBE_MAX_TRIES = 5
+
 # Context size quick-pick buttons
 CONTEXT_SIZE_PRESETS = [4096, 8192, 16384, 32768, 65536, 131072, 262144]
 

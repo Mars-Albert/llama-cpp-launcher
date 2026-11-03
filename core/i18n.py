@@ -71,17 +71,36 @@ _EN = {
     # Command preview & controls
     "📝 启动命令预览": "📝 Launch Command Preview",
     "⚙️ 参数配置": "⚙️ Parameter Config",
-    "▶ 启动服务": "▶ Start",
-    "■ 停止服务": "■ Stop",
-    "📋 复制命令": "📋 Copy Cmd",
-    "🌐 打开WebUI": "🌐 Open WebUI",
+    # 2026-11 第五轮：控制栏与指标行合成一行，按钮文案压成两字（全称移到
+    # tooltip），图标改回普通几何字符 ▶ ■（跟着文字染色，不像 emoji 那样自带颜色）
+# + 📋 🌐 与参数页 ⬇️ 💾 🗑️ 同一套约定 → 带图标的短词与全称都要有条目。
+    "▶ 启动": "▶ Start",
+    "■ 停止": "■ Stop",
+    "📋 复制": "📋 Copy",
+    "🌐 WebUI": "🌐 WebUI",
+    "启动服务": "Start server",
+    "停止服务": "Stop server",
+    "复制命令": "Copy command",
+    "打开WebUI": "Open WebUI",
 
-    # Status indicators
-    "🔍 检测中...": "🔍 Detecting...",
+    # Status indicators（2026-11 第五轮：版本 / 运行状态 / 运行时长搬进状态栏
+    # 右侧，emoji 前缀全部去掉 —— 状态由画出来的点 + 文字颜色表达）。
+    # 没有 t() 包着的条目（_RUN_UI 表里的文字/提示）也必须有条目，否则英文
+    # 模式会漏出中文：test_i18n 的 AST 扫描看不见动态 key。
+    "检测中…": "Detecting…",
     "llama.cpp 版本信息": "llama.cpp version info",
-    "⏸ 未运行": "⏸ Not Running",
-    "⏱ 运行: 00:00": "⏱ Runtime: 00:00",
-    "⏱ 运行: {mins}:{secs}": "⏱ Runtime: {mins}:{secs}",
+    "未启动": "Not started",
+    "启动中": "Starting…",
+    "运行中": "Running",
+    "已停止": "Stopped",
+    "错误": "Error",
+    "⏱ 00:00": "⏱ 00:00",
+    "⏱ {mins}:{secs}": "⏱ {mins}:{secs}",
+    "服务未启动": "Server not running",
+    "正在启动 llama-server…": "Starting llama-server…",
+    "服务已停止": "The server has stopped",
+    "服务异常退出，详见「日志输出」":
+        "The server exited abnormally — see the Log Output tab",
 
     # Log tabs
     "📄 日志输出": "📄 Log Output",
@@ -115,11 +134,7 @@ _EN = {
     "服务尚未启动，是否先启动服务并打开 WebUI？\n\n地址: {url}": "Service not started. Start service and open WebUI?\n\nAddress: {url}",
     "已在浏览器中打开: {url}": "Opened in browser: {url}",
 
-    # State changes
-    "🔄 启动中...": "🔄 Starting...",
-    "🟢 运行中": "🟢 Running",
-    "⏸ 已停止": "⏸ Stopped",
-    "🔴 错误": "🔴 Error",
+    # State changes（状态指示那四条 emoji 键已删，见上面 Status indicators）
     "🚀 服务已启动: {url}": "🚀 Service started: {url}",
     "⏹ 服务已停止": "⏹ Service stopped",
     "❌ 服务异常退出": "❌ Service exited with error",
@@ -427,8 +442,8 @@ _EN = {
     "llama.cpp 版本: {ver}\n提交: {commit}": "llama.cpp version: {ver}\nCommit: {commit}",
     "⚠️ 未检测到 llama-server": "⚠️ llama-server not found",
     "无法找到 llama-server，请确保已添加到系统 PATH 环境变量": "Cannot find llama-server. Make sure it's in your system PATH.",
-    "⚠️ 未找到 llama-server": "⚠️ llama-server not found",
-    "⚠️ 检测失败": "⚠️ Detection failed",
+    "未找到 llama-server": "llama-server not found",
+    "检测失败": "Detection failed",
     "检测 llama-server 版本时出错": "Error detecting llama-server version",
     "检测 llama-server 版本时出错: {e}": "Error detecting llama-server version: {e}",
     "✅ 所有参数与当前版本匹配": "✅ All parameters match current version",
@@ -855,6 +870,9 @@ _EN = {
     "槽位提示相似度 (--slot-prompt-similarity):": "Slot Prompt Similarity (--slot-prompt-similarity):",
     "槽位API (--slots):": "Slots API (--slots):",
     "Prometheus指标 (--metrics):": "Prometheus Metrics (--metrics):",
+    # 同一个标签，去掉尾部冒号的版本：实时指标带的 tooltip 里引用它（走
+    # ui.live_metrics._metrics_nav，名字从 schema 取）
+    "Prometheus指标 (--metrics)": "Prometheus Metrics (--metrics)",
     "属性端点 (--props):": "Props Endpoint (--props):",
     "SSL密钥 (--ssl-key-file):": "SSL Key (--ssl-key-file):",
     "SSL证书 (--ssl-cert-file):": "SSL Cert (--ssl-cert-file):",
@@ -1181,4 +1199,45 @@ _EN = {
     "日志以 JSONL 格式输出（每行一个 JSON 对象），同时禁用彩色日志。适合机器解析日志。": "Log as JSONL (one JSON object per line); also disables colored logging. Useful for machine-parsed logs.",
     "额外参数，原样附加到 llama-server 命令末尾，每行一个。用于界面未暴露的参数（如 --flash-attn 的某个新别名）。": "Extra arguments appended verbatim to the llama-server command, one per line. For parameters not exposed in the UI.",
     "批处理/prompt 处理阶段使用的进程/线程优先级：low(-1)、normal(0)、medium(1)、high(2)、realtime(3)。与 --prio 相同，但作用于批处理阶段。": "Process/thread priority for the batch and prompt processing phase: low(-1), normal(0), medium(1), high(2), realtime(3). Like --prio but applied to the batch processing phase.",
+
+    # === live_metrics.py（实时指标行：单条指标带，单色符号≫/▸/◔/Σ/⊙）===
+    "Prefill": "Prefill",
+    "Decode": "Decode",
+    # 实时指标行（ui/live_metrics.py）：格标签 + 组标题。右组标签刻意缩短
+    # （输入/缓存/输出/命中）——「累计」组标题已说明是服务启动以来的值，
+    # 全称在 tooltip
+    # 全称在 tooltip（「上下文」已在下方其他条目前定义）
+    "输入": "In",
+    "缓存": "Cached",
+    "输出": "Out",
+    "命中": "Hit",
+    "实时": "Live",
+    "累计": "Session",
+    "服务未启动": "Server not running",
+    "服务未启动 · 启动后在这里显示实时速度与累计指标": "Server not running — live speed and session totals show up here once it starts",
+    " · 累计指标：请在{nav}勾选并重启服务":
+        " · session totals: tick {nav} and restart the server",
+    "server 以 unix socket 启动，无 HTTP 端点，指标不可用": "Server runs on a unix socket — no HTTP endpoint, metrics unavailable",
+    "server 以 unix socket 启动 · 无 HTTP 端点，指标不可用": "Server runs on a unix socket — no HTTP endpoint, metrics unavailable",
+    "服务运行中：实时指标来自 /slots（每秒），累计指标来自 /metrics（每 5 秒）": "Server running: live metrics from /slots (every second), totals from /metrics (every 5 seconds)",
+    "服务在运行，但 /slots 与 /metrics 都没有应答，请检查启动参数": "The server is running but neither /slots nor /metrics answers — check the launch arguments",
+    "Prefill 速度：最近窗口 /slots 计数器每秒差值，每秒刷新": "Prefill speed: per-second delta of the /slots counters over the last window, refreshed every second",
+    "Decode 速度：最近窗口 /slots 计数器每秒差值，每秒刷新": "Decode speed: per-second delta of the /slots counters over the last window, refreshed every second",
+    "上下文占用（近似）：(输入 token + 生成 token) / n_ctx，取最忙 slot": "Context occupancy (approximate): (prompt tokens + generated tokens) / n_ctx, busiest slot",
+    "上下文占用（近似）：{used} / {total} tokens ({pct}%)": "Context occupancy (approximate): {used} / {total} tokens ({pct}%)",
+    "服务启动以来输入的 token 数（未缓存 + 缓存）": "Input tokens since server start (uncached + cached)",
+    "服务启动以来输入的 token 数（未缓存 {nc} + 缓存 {c}）": "Input tokens since server start (uncached {nc} + cached {c})",
+    "服务启动以来命中 KV 缓存的输入 token 数": "Input tokens served from the KV cache since server start",
+    "服务启动以来命中 KV 缓存的输入 token 数：{c}": "Input tokens served from the KV cache since server start: {c}",
+    "服务启动以来生成的 token 数": "Tokens generated since server start",
+    "服务启动以来生成的 token 数：{n}": "Tokens generated since server start: {n}",
+    "本任务 {a}%（/slots）· 会话累计 {b}%（/metrics）": "Current task {a}% (/slots) · session total {b}% (/metrics)",
+    "会话累计命中率（/metrics）：{b}%": "Session hit rate (/metrics): {b}%",
+    "会话累计命中率（/metrics）· 尚无输入 token": "Session-wide cache hit rate (/metrics) · no input tokens yet",
+    "会话累计命中率（/metrics）": "Session hit rate (/metrics)",
+    "请在{nav}勾选并重启服务后显示":
+        "Tick {nav} and restart the server to show these counters",
+    "参数已勾选，但本服务实例未提供 /metrics 端点；重启服务后生效（或当前 server 不支持）": "The option is set, but this server instance has no /metrics endpoint — restart the server (or the build doesn't support metrics)",
+    "读取 /metrics 端点失败，请检查服务状态": "Failed to read the /metrics endpoint — check the server status",
+    "该 server 已关闭 /slots 端点（检查启动参数），实时速度不可用": "This server has the /slots endpoint disabled (check the launch arguments) — live speeds are unavailable",
 }

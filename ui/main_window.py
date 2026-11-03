@@ -58,6 +58,8 @@ from ui.gguf_inspector import GGUFInspectorDialog
 from ui.frameless import (TitleBar, FramelessDialog, install_frameless,
                           app_icon)
 from ui.message_box import ThemedMessageBox
+from ui.live_metrics import LiveMetricsBar
+from ui.live_stats import LiveStatsWorker
 
 try:
     # Single source of truth for the launcher version (build_config.py is
@@ -111,43 +113,63 @@ class _ThemedStatusBar(QStatusBar):
     # rows) — 15px is the tight value that clears both.
     _LEFT_MARGIN = 15
 
+    # Right clearance for the permanent (right-aligned) items — the 2026-11
+    # run-state dot / state / runtime / version row. The bottom-right corner
+    # arc recedes exactly like the bottom-left one, so the last glyph needs
+    # the same value.
+    _RIGHT_MARGIN = 15
+
     def __init__(self, parent=None):
         super().__init__(parent)
         # The frameless window is edge-resized by the app-level filter;
         # the native grip would also paint square into the corner band.
         self.setSizeGripEnabled(False)
-        # (label, left-margin) pairs whose bottom margin must follow the
+        # (label, left, right) triples whose margins must follow the
         # shadow band (set_band_inset). The message label is tracked here;
-        # the always-visible run-state labels are added via add_band_label
-        # (E15, from _create_status_bar).
+        # so are the always-visible right-side run/version items
+        # (2026-11, _create_run_status_items).
         self._band = CARD_CONTENT_INSET
         self._band_labels = []
+        # 2026-11 第五轮：阴影带内缩 + 右端安全距离放在**状态栏自己的 contents
+        # margins** 上（它的内部 QHBoxLayout 会把全部条目一起往里推）。之前是每个
+        # 条目各自 contentsMargins —— 普通 QLabel 把文字画在 contentsRect 里所以
+        # 有效，但版本信息是 ElidingLabel：它的 paintEvent 直接用 self.rect()，
+        # contentsMargins 与 QSS color 都管不到它，文字就会压进右下角的透明圆角带
+        # 里（test_status_bar_right_items_stay_on_the_card_face 钉的就是这条）。
+        # 统一交给状态栏，谁都跑不掉。
+        self.setContentsMargins(0, 0, self._RIGHT_MARGIN, self._band)
         self._msg_label = QLabel(self)
         self._msg_label.setObjectName("statusMsg")
-        # Bottom margin = the shadow band (synced by set_band_inset): it
-        # pushes the text up onto the card face's visible strip.
+        # The bar's own margins carry the band inset + the right corner
+        # clearance (see __init__); this label only needs its left clearance
+        # so the first glyph clears the bottom-left corner arc.
         self.add_band_label(self._msg_label, self._LEFT_MARGIN)
         self.addWidget(self._msg_label)
         self._msg_timer = QTimer(self)
         self._msg_timer.setSingleShot(True)
         self._msg_timer.timeout.connect(lambda: self._msg_label.setText(""))
 
-    def add_band_label(self, label, left_margin):
-        """Track a layout-managed label whose bottom margin must follow
-        the shadow band (E15: the run-state labels added from
-        _create_status_bar)."""
-        self._band_labels.append((label, left_margin))
-        label.setContentsMargins(left_margin, 0, 0, self._band)
+    def add_band_label(self, label, left_margin, right_margin=0):
+        """Register a status-bar item and give it its horizontal clearance.
+
+        The gaps between the permanent items live here (a plain QLabel
+        paints its text inside ``contentsRect``, so a left margin is how
+        item N gets breathing room after item N-1). The vertical band inset
+        and the right corner clearance are the *bar's* own contents margins
+        — see __init__ for why they cannot be per-item."""
+        self._band_labels.append((label, left_margin, right_margin))
+        label.setContentsMargins(left_margin, 0, right_margin, 0)
 
     def set_band_inset(self, band):
         """Sync every tracked label's bottom margin to the band width
         *band* (CARD_CONTENT_INSET normally, 0 when maximised — the card
-        then fills the window, so no inset is needed). The bar's height
-        follows the label's sizeHint, so the text re-centres on the
-        visible card strip in both states."""
+        then fills the window, so no inset is needed). Applied as the bar's
+        own bottom contents margin, so every item (the dot, the labels, the
+        drift button) moves together; the bar's height follows the items'
+        sizeHint + this margin, so the row re-centres on the visible card
+        strip in both states."""
         self._band = band
-        for label, left in self._band_labels:
-            label.setContentsMargins(left, 0, 0, band)
+        self.setContentsMargins(0, 0, self._RIGHT_MARGIN, band)
 
     def showMessage(self, message, timeout=0):
         self._msg_label.setText(message)
@@ -777,13 +799,16 @@ class MainWindow(QMainWindow):
         the log got ~150-250px. Now each tab gets the whole column
         (~800px+).
 
-        Tab 1 (参数配置) carries the old stacked blocks (mode bar,
-        parameter area, command preview, control bar) unchanged and keeps
-        E11's rules: the parameter area never scrolls vertically and the
-        window minimum follows the page's hard minimum (see
-        _sync_panel_min). The run-state indicator + runtime (old
-        control-bar children) moved to the main status bar so they stay
-        visible on every tab.
+        Tab 1 (参数配置) carries the parameter blocks (mode bar, the
+        draggable parameter/preview QSplitter) and keeps E11's rules: the
+        parameter area never scrolls vertically and the window minimum
+        follows the page's hard minimum (see _sync_panel_min). The
+        control bar (start/stop/copy/WebUI + version + drift + the run-state
+        indicator/runtime at its tail) and the live-metrics strip live
+        *below* the tab widget (2026-11 user request), so both stay visible
+        and usable on all three tabs; the old status-bar placement of the
+        run-state labels was reverted per user report and they still trail
+        the control bar.
         """
         widget = QWidget()
         self._right_panel = widget
@@ -821,20 +846,10 @@ class MainWindow(QMainWindow):
         self.mode_combo.currentIndexChanged.connect(self._on_mode_changed)
         mode_bar.addWidget(self.mode_label)
         mode_bar.addWidget(self.mode_combo)
-        # E8（2026-10 应用户要求从参数面板移到模式行，靠右）：检测到的 GPU
-        # 设备行，放在 stretch 之后、撤销/恢复默认之前。
-        # ElidingLabel：长设备列表不能撑宽窗口，完整文本在 tooltip。
-        # 统一次级信息样式（主题感知）——见 _sync_secondary_info_labels。
-        self.gpu_info_label = ElidingLabel("")
-        self.gpu_info_label.setObjectName("secondaryInfo")
-        f = self.gpu_info_label.font()
-        f.setPixelSize(11)
-        self.gpu_info_label.setFont(f)
-        self.gpu_info_label.setStyleSheet("font-size: 11px;")
-        self.gpu_info_label.setVisible(False)
-        self._gpu_devices = None  # None = probe 尚未完成
+        # E8 的 GPU 设备行不再在这里（2026-11 第十一轮：“把这个信息也放到状态
+        # 栏上，放在版本号左边”）—— 它属于“读”的信息不是“点”的控件，而且模式行
+        # 只在「参数配置」页看得到，状态栏三个 tab 常驻。见 _create_run_status_items。
         mode_bar.addStretch()
-        mode_bar.addWidget(self.gpu_info_label)
         # 显式输出模式 (2026-10): global switch. While off, no parameter
         # is explicitly emitted and the per-row toggles stay hidden; while on,
         # every explicit-eligible advanced row shows a toggle and the checked
@@ -944,25 +959,48 @@ class MainWindow(QMainWindow):
         self.cmd_split.setStretchFactor(1, 1)
         ptab.addWidget(self.cmd_split)
 
-        control_bar = QHBoxLayout()
-        # One visual language for all four (objectName -> dedicated gradient
-        # rule in _THEME_TEMPLATE): same font-size / weight / radius /
-        # padding, semantic color per role (green=go, red=stop, slate=aux,
-        # blue=service). The #webuiBtn rule used to exist in the QSS but was
-        # never applied because no objectName was set — wired up now.
-        self.btn_start = QPushButton(t("▶ 启动服务"))
-        self.btn_start.setFixedHeight(40)
-        self.btn_start.setObjectName("startBtn")
-        self.btn_stop = QPushButton(t("■ 停止服务"))
-        self.btn_stop.setFixedHeight(40)
-        self.btn_stop.setObjectName("stopBtn")
-        self.btn_copy_cmd = QPushButton(t("📋 复制命令"))
-        self.btn_copy_cmd.setFixedHeight(40)
-        self.btn_copy_cmd.setObjectName("copyBtn")
-        self.btn_webui = QPushButton(t("🌐 打开WebUI"))
-        self.btn_webui.setFixedHeight(40)
-        self.btn_webui.setObjectName("webuiBtn")
+        # ---- 控制行（2026-11 第五轮：控制栏 + 实时指标行**合成一行**）----
+        # 按钮靠左、指标带靠右、中间一条 stretch（用户："按钮与 metric 两行合并
+        # 一行，按钮在左，metrics 在右侧，中间 stretch 隔开"）。行高 = 指标带的
+        # 固定 34px（按钮 28px 垂直居中）→ 比原来两行（46 + 6 + 34 = 86）省
+        # 52px 窗口最小高度。版本信息 / 运行状态 / 运行时长搬去状态栏右侧
+        # （_create_run_status_items）—— 两行变一行要腾出宽度，而且它们是"读"
+        # 的信息不是"点"的控件，待在状态栏更合适。仍然在标签页**外面** →
+        # 三个 tab 都能启动 / 停止 / 复制命令 / 看指标。
+        self.control_bar = QWidget()
+        self.control_bar.setObjectName("rightRow")
+        control_bar = QHBoxLayout(self.control_bar)
+        control_bar.setContentsMargins(0, 0, 0, 0)
+        control_bar.setSpacing(6)
 
+        # 第五轮后半（用户：“这几个按钮还是保持与其他按钮的视觉一致性，要带图标，
+        # 样式也要一致，否则看起来很奇怪” + “不要做成白底的，彩色底，白字体，
+        # 因为这个需要很醒目”）：**形状**走通用 QPushButton 规则（圆角 / padding /
+        # 字号都不写 → 与同页的 ↩ 撤销 / 🔄 恢复默认 / ⬇️ 加载 同族），**配色**
+        # 用强调色 —— 彩色渐变底 + 白字 + 粗体（这四个是启停服务的主操作，扁平
+        # 白底会让人忽略重点）。渐变是本项目强调按钮的既有语言（serverPathOk /
+        # msgBoxBtnAccept 同款），语义分角色：绿=启动 红=停止 灰=复制 蓝=WebUI。
+        # 图标回来但
+        # 启停改用普通几何字符 ▶ ■（跟着文字染色；emoji 自带颜色就没法跟着主题
+        # 与语义走），📋 🌐 与参数页 ⬇️ 💾 🗑️ 是同一套 emoji 约定。
+        # 第五轮的压缩保留：文案两字（全称进 tooltip）、h40→28、fs14→12
+        # —— 按钮整块 451px → ~200px，这是与指标带合成一行放得下的前提。
+        self.btn_start = QPushButton(t("▶ 启动"))
+        self.btn_start.setFixedHeight(28)
+        self.btn_start.setObjectName("startBtn")
+        self.btn_start.setToolTip(t("启动服务"))
+        self.btn_stop = QPushButton(t("■ 停止"))
+        self.btn_stop.setFixedHeight(28)
+        self.btn_stop.setObjectName("stopBtn")
+        self.btn_stop.setToolTip(t("停止服务"))
+        self.btn_copy_cmd = QPushButton(t("📋 复制"))
+        self.btn_copy_cmd.setFixedHeight(28)
+        self.btn_copy_cmd.setObjectName("copyBtn")
+        self.btn_copy_cmd.setToolTip(t("复制命令"))
+        self.btn_webui = QPushButton(t("🌐 WebUI"))
+        self.btn_webui.setFixedHeight(28)
+        self.btn_webui.setObjectName("webuiBtn")
+        self.btn_webui.setToolTip(t("打开WebUI"))
 
         self.btn_start.clicked.connect(self._start_server)
         self.btn_stop.clicked.connect(self._stop_server)
@@ -971,52 +1009,37 @@ class MainWindow(QMainWindow):
         self.btn_stop.setEnabled(False)
         self.btn_webui.setEnabled(False)
 
-        control_bar.addWidget(self.btn_start)
-        control_bar.addWidget(self.btn_stop)
-        control_bar.addWidget(self.btn_copy_cmd)
-        control_bar.addWidget(self.btn_webui)
-        control_bar.addStretch()
+        control_bar.addWidget(self.btn_start, 0,
+                              Qt.AlignmentFlag.AlignVCenter)
+        control_bar.addWidget(self.btn_stop, 0,
+                              Qt.AlignmentFlag.AlignVCenter)
+        control_bar.addWidget(self.btn_copy_cmd, 0,
+                              Qt.AlignmentFlag.AlignVCenter)
+        control_bar.addWidget(self.btn_webui, 0,
+                              Qt.AlignmentFlag.AlignVCenter)
+        control_bar.addStretch(1)
 
-        # E11: eliding label — the full version string must not pin the
-        # window minimum width (see basic_panel.ElidingLabel); the tooltip
-        # keeps the full text.
-        self.version_label = ElidingLabel(t("🔍 检测中..."))
-        f = self.version_label.font()
-        f.setPixelSize(12)
-        self.version_label.setFont(f)
-        pal = self.version_label.palette()
-        pal.setColor(QPalette.ColorRole.Text, QColor("#6b7280"))
-        self.version_label.setPalette(pal)
-        self.version_label.setToolTip(t("llama.cpp 版本信息"))
-        self._version_base_tooltip = t("llama.cpp 版本信息")
-        control_bar.addWidget(self.version_label)
+        # 实时指标带（本行最右）：Maximum 策略 → 只占内容宽，富余宽度全归上面
+        # 那条 stretch。它的固定 34px 就是本行高度。行最小宽 = 按钮 ~200 +
+        # 条带 ~559 ≈ 760 → 窗口最小宽度 947 → ~990（第五轮实测告知过用户的
+        # 代价，换来省 52px 高度 + 少一行）。
+        self.live_metrics = LiveMetricsBar()
+        _lpal = self._THEME_PALETTES[self.theme]
+        self.live_metrics.set_theme_colors(_lpal["text"], _lpal["muted"],
+                                           _lpal["info"])
+        self._live_worker = None
+        # **不要给这一项加对齐标志**（第五轮找了很久的根因）：带 AlignVCenter 时
+        # QLayout 按 sizeHint 供给、并允许把部件压到它自己的布局最小宽度以下 ——
+        # 实测指标态需要 559px 却只拿到 446px，七个数值列被压成 30px，数字直接
+        # 看不见。条带本身就是这一行的高度来源（定高 34px），不需要对齐；要垂直
+        # 居中的是 28px 高的按钮。
+        control_bar.addWidget(self.live_metrics, 0)
+        # 合一行的地板（按钮 sizeHint + 条带 min_content_width）是
+        # `_sync_panel_min` 手算窗口最小宽度的一部分。条带只有一种排版（第七轮：
+        # 未运行也是七格）→ 地板与运行状态无关；polish 之后那一次重同步由
+        # `_resync_minimum_after_show` / 顶层 Resize 兜底（写死的 setMinimumSize
+        # 会关掉 Qt 自己那层“布局最小宽度”保护，地板算少了行就会被压扁）。
 
-        # E7: parameter-drift notice promoted from a tooltip to a clickable
-        # button — the full drift list opens in a dialog on click
-        self._drift_missing = []
-        self._drift_changed = []
-        self.drift_button = QToolButton()
-        self.drift_button.setText("⚠️")
-        self.drift_button.setToolTip(t("参数与当前版本存在差异，点击查看完整列表"))
-        self.drift_button.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.drift_button.clicked.connect(self._show_drift_dialog)
-        self.drift_button.setVisible(False)
-        control_bar.addWidget(self.drift_button)
-
-        # The run-state indicator + runtime trail the control bar (E15
-        # briefly moved them to the main status bar — reverted per user
-        # report: on their machine the status-bar area rendered as a
-        # wrong white box, so the labels went back to their old spot).
-        self.status_indicator = QLabel(t("⏸ 未运行"))
-        self.status_indicator.setObjectName("statusStopped")
-        self.status_indicator.setStyleSheet("color: #6b7280; font-weight: bold; font-size: 13px;")
-        control_bar.addWidget(self.status_indicator)
-
-        self.run_time_label = QLabel(t("⏱ 运行: 00:00"))
-        self.run_time_label.setStyleSheet("color: #6b7280; font-size: 12px;")
-        control_bar.addWidget(self.run_time_label)
-
-        ptab.addLayout(control_bar)
         self.log_output = QPlainTextEdit()
         self.log_output.setReadOnly(True)
         self.log_output.setFont(QFont("Consolas", 10))
@@ -1129,6 +1152,13 @@ class MainWindow(QMainWindow):
         self.tab_widget.addTab(self.info_display, t("📊 运行信息"))
         layout.addWidget(self.tab_widget)
 
+        # 合一行（启动按钮 + 实时指标带）贴在右栏标签页**下方**（第五轮：两行
+        # 合成一行；它原本在 tab 1 页内，切到日志/运行信息就整块消失）。行高 =
+        # 指标带的固定 34px，计入 _sync_panel_min 读的
+        # self._right_panel.layout().minimumSize() → 窗口最小高度比原来两行
+        # （46 + 6 + 34）小 52px；tab 1 页的最小高度同样不含它们。无显隐重同步。
+        layout.addWidget(self.control_bar)
+
         return widget
 
     def _apply_field_heights(self):
@@ -1166,6 +1196,38 @@ class MainWindow(QMainWindow):
                 (QSpinBox, QDoubleSpinBox)):
             if widget.minimumWidth() < 60:
                 widget.setMinimumWidth(60)
+
+    def _resync_minimum_after_show(self, passes=4):
+        """首显示后再补几遍最小宽度同步（有界，收敛即停）。
+
+        指标带的地板（`LiveMetricsBar.min_content_width`）要等 QSS polish + 字体
+        真正解析出来才涨到真值：实测同一台机器上构造期量到 344、就位后 551，差的
+        这 200px 正好是"数值列被压成 30px、数字看不见"的量。而 polish 完成的那一刻
+        没有任何布局事件（参数面板视口尺寸不变、窗口也没被 resize），所以
+        `_sync_panel_min` 不会自己再来一次。
+        这里排几遍 0ms 重同步；每遍都会把窗口最小宽度设成"当前量到的最大值"，
+        地板没再变就停 —— 收敛条件是地板值不变，最多多跑 3 次（每次几十个
+        sizeHint，构造期本来就要跑 6 次左右）。
+        """
+        floor_before = getattr(self, "_strip_floor", None)
+        self._sync_panel_min()
+        if passes <= 1:
+            return
+        if getattr(self, "_strip_floor", None) == floor_before:
+            return            # 已经收敛（真实机器上第一遍就是真值）
+        QTimer.singleShot(0, lambda: self._resync_minimum_after_show(passes - 1))
+
+    def _resync_if_strip_floor_changed(self):
+        """指标带地板变了才重算窗口最小宽度（见 eventFilter 里的调用点）。
+
+        eventFilter 是同步事件路径，构造期也可能会跑到（属性还不存在 →
+        AttributeError 逃出 C++ 分发 = 静默 fastfail 0xC0000409，没有 traceback，
+        见本文件里 log_search_edit 那条同类事故），所以一律 getattr 防护。"""
+        bar = getattr(self, "live_metrics", None)
+        if bar is None or getattr(self, "basic_panel", None) is None:
+            return
+        if bar.min_content_width() != getattr(self, "_strip_floor", None):
+            self._sync_panel_min()
 
     def _sync_panel_min(self):
         """E11/E15: keep the parameter area — and the window minimum — in
@@ -1272,7 +1334,33 @@ class MainWindow(QMainWindow):
         # the integrated TitleBar's sizeHint under-reports its fixed
         # height (41 vs 55 — it would leave a 14px hole that squashes the
         # 参数配置 page onto the status bar at the smallest width).
+        # （右栏布局 = tab widget 的显式最小值 + 间距 + 贴在标签页下方的
+        # 34px 控制行（按钮 + 指标带）+ 布局 margins）
+        #
         right_min = self._right_panel.layout().minimumSize()
+        # 2026-11 第五轮：合一行（按钮 + 指标带）的贡献**按部件算**，不读布局缓存。
+        # 两个原因：
+        # ① 不可靠 —— `control_bar.minimumSizeHint()` / 右栏 `layout().minimumSize()`
+        #    在不同时刻给出 719 / 825 / 1063 三个值（E11 的"晚一个事件循环"缓存
+        #    滞后 + Maximum 策略下 sizeHint 与 minimumSizeHint 谁生效不确定），
+        #    照它算出来的窗口最小宽度会在某个时刻不够用；
+        # ② 真出过事 —— 窗口停在最小宽度时条带被压到 446px，数值单元从 88px 压到
+        #    30px，数字看不见，而这行的全部意义就是那几个数字。
+        # 按钮取 sizeHint（QPushButton 的 minimumSizeHint 就是它，压不得），指标带
+        # 取 min_content_width()（数值 + 计量条 + 固定间距；标签是 ElidingLabel，
+        # 最小宽 0，名称在 tooltip）→ 两态同一个值，服务启停窗口最小宽度不跳。
+        _crow = self.control_bar.layout()
+        _nbtn = 4
+        self._strip_floor = self.live_metrics.min_content_width()
+        row_min_w = (
+            sum(b.sizeHint().width() for b in
+                (self.btn_start, self.btn_stop, self.btn_copy_cmd,
+                 self.btn_webui))
+            + _crow.spacing() * _nbtn          # 3 个按钮间距 + stretch→条带 一格
+            + self._strip_floor
+            + self._right_panel.layout().contentsMargins().left()
+            + self._right_panel.layout().contentsMargins().right())
+        right_min_w = max(right_min.width(), row_min_w)
         cm = self.centralWidget().layout().contentsMargins()
         top_h = max(self._top_bar.sizeHint().height(),
                     self._top_bar.minimumSizeHint().height(),
@@ -1293,7 +1381,7 @@ class MainWindow(QMainWindow):
         # so the pre-layout sync cannot pin a too-small minimum.
         # E13: + the central area's left/right shadow-band insets.
         min_w = (left_w + max(self.splitter.handleWidth(), 10)
-                 + right_min.width()
+                 + right_min_w
                  + 2 * CARD_CONTENT_INSET)
         hint = self.minimumSizeHint()
         new_w = max(MIN_WINDOW_WIDTH, min_w)
@@ -1339,6 +1427,8 @@ class MainWindow(QMainWindow):
         self.runner.log_output.connect(self._append_log)
         self.runner.state_changed.connect(self._on_state_changed)
         self.runner.error_occurred.connect(self._on_error)
+        # 实时指标行：服务端真正 listen 之后才开始轮询
+        self.runner.server_ready.connect(self._start_live_stats)
         self.basic_panel.chk_webui.stateChanged.connect(self._update_webui_button)
         self.advanced_panel.adv_webui.stateChanged.connect(self._update_webui_button)
         self.basic_panel.ctx_spin.valueChanged.connect(self._update_model_info)
@@ -1573,6 +1663,7 @@ class MainWindow(QMainWindow):
         # catches the first full layout pass; direct call covers the rest.
         self._post_show_panel_resync()
         QTimer.singleShot(0, self._post_show_panel_resync)
+        self._resync_minimum_after_show()
         if not self.preview_timer.isActive():
             self.preview_timer.start(PREVIEW_TIMER_MS)
             self._update_cmd_preview()
@@ -1655,9 +1746,70 @@ class MainWindow(QMainWindow):
 
     def _stop_server(self):
         self.runner.stop()
+        self._stop_live_stats()
         self._close_run_log()
         self.timer.stop()
-        self.run_time_label.setText(t("⏱ 运行: 00:00"))
+        self.run_time_label.setText(t("⏱ 00:00"))
+
+    # ------------------------------------------------------------------
+    # 实时指标行（与启动按钮同一行，详见 ui/live_stats.py 模块 docstring）
+    # ------------------------------------------------------------------
+
+    def _start_live_stats(self):
+        """server_ready：起 /slots + /metrics 轮询 worker，点亮指标行。
+
+        连接参数取自当前参数（port 默认 9931）；host 为 0.0.0.0/:: 时
+        探回环地址（它们接受 loopback 连接，与 _is_port_in_use 同规则）；
+        unix socket（host 以 .sock 结尾）没有 HTTP 端点——不起 worker，
+        行保持灰显并带专门 tooltip。
+        """
+        v = self._get_current_values()
+        host = str(v.get("host") or "127.0.0.1")
+        if host.endswith(".sock"):
+            self._stop_live_stats()
+            self.live_metrics.set_running(True)
+            self.live_metrics.set_no_http(True)
+            return
+        check_host = "127.0.0.1" if host in ("0.0.0.0", "::") else host
+        try:
+            port = int(v.get("port") or DEFAULT_PORT)
+        except (TypeError, ValueError):
+            return
+        self._stop_live_stats()
+        self.live_metrics.set_metrics_checked(bool(v.get("metrics", False)))
+        self.live_metrics.set_running(True)
+        worker = LiveStatsWorker(check_host, port)
+        worker.stats_ready.connect(self._on_live_stats)
+        worker.metrics_state.connect(self._on_metrics_state)
+        worker.slots_state.connect(self._on_slots_state)
+        self._live_worker = worker
+        worker.start()
+
+    def _on_metrics_state(self, state):
+        """/metrics 探测结果：转给指标带（决定右组灰显与 tooltip）+ 刷新状态点
+        （两端都不应答 → 点转琥珀）。"""
+        self.live_metrics.set_metrics_state(state)
+        self._update_run_indicator()
+
+    def _on_slots_state(self, state):
+        """/slots 探测结果，同上。"""
+        self.live_metrics.set_slots_state(state)
+        self._update_run_indicator()
+
+    def _stop_live_stats(self):
+        """停轮询 + 指标行回落灰显（幂等，state 变化/closeEvent 都会走到）。"""
+        worker = self._live_worker
+        self._live_worker = None
+        if worker is not None:
+            worker.request_stop()
+            # 切断信号链路再等退出：窗口销毁后收到活着的 worker 的迟到
+            # emit 是原生崩溃（同 _startup_worker 的处置）
+            worker.disconnect()
+            worker.wait(2000)
+        self.live_metrics.set_running(False)
+
+    def _on_live_stats(self, stats):
+        self.live_metrics.update(stats)
 
     def _copy_command(self):
         self._save_current_to_params()
@@ -1710,15 +1862,14 @@ class MainWindow(QMainWindow):
 
     def _on_state_changed(self, state):
         self._current_state = state
+        # 状态点与文字只由 _update_run_indicator 画（2026-11 第五轮：状态点从
+        # 指标行搬进状态栏，这里不再各自 setText/setStyleSheet）
+        self._update_run_indicator()
         if state == "starting":
-            self.status_indicator.setText(t("🔄 启动中..."))
-            self.status_indicator.setStyleSheet("color: #d97706; font-weight: bold; font-size: 13px;")
             self.btn_start.setEnabled(False)
             self.btn_stop.setEnabled(True)
             self.btn_webui.setEnabled(False)
         elif state == "running":
-            self.status_indicator.setText(t("🟢 运行中"))
-            self.status_indicator.setStyleSheet("color: #16a34a; font-weight: bold; font-size: 13px;")
             self.btn_start.setEnabled(False)
             self.btn_stop.setEnabled(True)
             self.start_time = datetime.now()
@@ -1727,10 +1878,9 @@ class MainWindow(QMainWindow):
             self._update_webui_button()
         elif state == "stopped":
             self._flush_log_tail()
+            self._stop_live_stats()
             self._close_run_log()
             self._cancel_pending_webui()
-            self.status_indicator.setText(t("⏸ 已停止"))
-            self.status_indicator.setStyleSheet("color: #6b7280; font-weight: bold; font-size: 13px;")
             self.btn_start.setEnabled(True)
             self.btn_stop.setEnabled(False)
             self.btn_webui.setEnabled(False)
@@ -1738,10 +1888,9 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage(t("⏹ 服务已停止"))
         elif state == "error":
             self._flush_log_tail()
+            self._stop_live_stats()
             self._close_run_log()
             self._cancel_pending_webui()
-            self.status_indicator.setText(t("🔴 错误"))
-            self.status_indicator.setStyleSheet("color: #dc2626; font-weight: bold; font-size: 13px;")
             self.btn_start.setEnabled(True)
             self.btn_stop.setEnabled(False)
             self.btn_webui.setEnabled(False)
@@ -1752,7 +1901,7 @@ class MainWindow(QMainWindow):
         self.timer.stop()
         self.start_time = None
         self._runtime_info = {}
-        self.run_time_label.setText(t("⏱ 运行: 00:00"))
+        self.run_time_label.setText(t("⏱ 00:00"))
         self.info_display.setHtml(empty_info_html())
 
     def _get_web_address(self):
@@ -2035,6 +2184,13 @@ class MainWindow(QMainWindow):
         # from the real geometry on every top-level resize (idempotent).
         elif obj is self and event.type() == QEvent.Type.Resize:
             self._on_card_state_changed()
+            # 指标带的地板要等 QSS polish 之后才量得准（构造期量到 344，polish 完
+            # 是 551，差 ~200px），而 polish 完成时参数面板视口往往一次都不会变 →
+            # 视口触发与 showEvent 那次同步都拿不到真值，窗口最小宽度就停在窄值上，
+            # 运行中整行被压扁、数字被切。顶层 Resize 是 polish 之后最靠得住的时刻
+            # （启动时 E14 的首显示、之后每次用户拉伸都会来）。地板没变时这里只是
+            # 十几个 sizeHint 调用。
+            self._resync_if_strip_floor_changed()
         # E11 (option A): the panel viewport is resized before the panel's
         # own layout pass — re-wrapping the quick-toggles grid here (and
         # re-syncing the hard minimums via quick_wrap_changed) means an
@@ -2172,7 +2328,7 @@ class MainWindow(QMainWindow):
             elapsed = (datetime.now() - self.start_time).total_seconds()
             mins = int(elapsed // 60)
             secs = int(elapsed % 60)
-            self.run_time_label.setText(t("⏱ 运行: {mins}:{secs}", mins=f"{mins:02d}", secs=f"{secs:02d}"))
+            self.run_time_label.setText(t("⏱ {mins}:{secs}", mins=f"{mins:02d}", secs=f"{secs:02d}"))
 
     def _refresh_presets(self, select_name=None):
         # E6: keep the current selection where possible, attach the creation
@@ -2659,6 +2815,8 @@ class MainWindow(QMainWindow):
                  for w in QGuiApplication.allWindows() if w.isVisible()]
         log.info("closeEvent: start; visible widgets=%s qwindows=%s",
                  vis_w or "none", vis_q or "none")
+        self._stop_live_stats()
+        log.info("closeEvent: live stats stopped")
         if self.runner.is_running:
             self.runner.stop(blocking=True)
             log.info("closeEvent: server stopped")
@@ -3134,18 +3292,19 @@ class MainWindow(QMainWindow):
         self._startup_worker.start()
 
     def _on_devices_ready(self, devices):
-        # E8: show detected GPU devices on the 参数配置 tab's mode bar (moved
-        # there from the ngl / split-mode controls — both panels — per user
-        # request, 2026-10). Deliberately no auto-filling of ngl — "auto" is
-        # already the right llama.cpp default and the probe cannot know the
-        # model size.
+        # E8: show detected GPU devices as the leftmost status-bar item (moved
+        # from the ngl / split-mode controls in 2026-10, and from the 参数配置
+        # mode bar in 2026-11 — the status bar is visible on all three tabs).
+        # Deliberately no auto-filling of ngl — "auto" is already the right
+        # llama.cpp default and the probe cannot know the model size.
         self._gpu_devices = devices or []
         self._render_gpu_info()
 
     def _render_gpu_info(self):
-        """E8: render the detected GPU devices (or CPU-only) on the mode bar.
-        Re-called from retranslate_ui (the text is translated). Hidden until
-        the --list-devices probe finishes."""
+        """E8: render the detected GPU devices (or CPU-only) into the status-bar
+        item (left of the version since 2026-11).  Re-called from retranslate_ui
+        (the text is translated). Hidden until the --list-devices probe finishes;
+        a hidden permanent widget takes no width."""
         label = self.gpu_info_label
         devs = self._gpu_devices
         if devs is None:
@@ -3227,12 +3386,12 @@ class MainWindow(QMainWindow):
 
     def _on_version_failed(self, error_type):
         if error_type == "not_found":
-            self.version_label.setText(t("⚠️ 未找到 llama-server"))
-            self.version_label.setStyleSheet("color: #dc2626; font-size: 12px; font-weight: bold;")
+            self.version_label.setText(t("未找到 llama-server"))
+            self._set_version_color("#dc2626")
             self.version_label.setToolTip(t("无法找到 llama-server，请确保已添加到系统 PATH 环境变量"))
         else:
-            self.version_label.setText(t("⚠️ 检测失败"))
-            self.version_label.setStyleSheet("color: #d97706; font-size: 12px;")
+            self.version_label.setText(t("检测失败"))
+            self._set_version_color("#d97706")
             self.version_label.setToolTip(t("检测 llama-server 版本时出错"))
 
     def _validate_params(self):
@@ -3261,7 +3420,7 @@ class MainWindow(QMainWindow):
             # calls do not stack duplicate status sections.
             if not missing and not changed:
                 self.version_label.setToolTip(self._version_base_tooltip + "\n\n" + t("✅ 所有参数与当前版本匹配"))
-                self.version_label.setStyleSheet("color: #16a34a; font-size: 12px; font-weight: bold;")
+                self._set_version_color("#16a34a")
             else:
                 tip = self._version_base_tooltip + "\n\n" + t("⚠️ 参数差异提示:\n")
                 if missing:
@@ -3273,7 +3432,7 @@ class MainWindow(QMainWindow):
                     tip += t("  ... 等更多差异\n")
                 tip += "\n" + t("建议点击「恢复默认」以适配当前版本")
                 self.version_label.setToolTip(tip)
-                self.version_label.setStyleSheet("color: #d97706; font-size: 12px; font-weight: bold;")
+                self._set_version_color("#d97706")
                 self.drift_button.setVisible(True)
         except Exception:
             pass
@@ -3346,10 +3505,16 @@ class MainWindow(QMainWindow):
         self.btn_explicit_mode.setText(t("⚡ 显式输出"))
         self.btn_explicit_mode.setToolTip(
             t("开启后每个参数行显示显式输出开关，勾选的参数无论是否等于默认值都写入启动命令"))
-        self.btn_start.setText(t("▶ 启动服务"))
-        self.btn_stop.setText(t("■ 停止服务"))
-        self.btn_copy_cmd.setText(t("📋 复制命令"))
-        self.btn_webui.setText(t("🌐 打开WebUI"))
+        # 按钮短词 + 图标（全称在 tooltip，第五轮压缩）：两者都要跟着语言切换
+        self.btn_start.setText(t("▶ 启动"))
+        self.btn_start.setToolTip(t("启动服务"))
+        self.btn_stop.setText(t("■ 停止"))
+        self.btn_stop.setToolTip(t("停止服务"))
+        self.btn_copy_cmd.setText(t("📋 复制"))
+        self.btn_copy_cmd.setToolTip(t("复制命令"))
+        self.btn_webui.setText(t("🌐 WebUI"))
+        self.btn_webui.setToolTip(t("打开WebUI"))
+        self.live_metrics.retranslate_ui()
         self.btn_clear_log.setText(t("🗑️ 清空"))
         self.btn_export_log.setText(t("💾 导出"))
         self.chk_auto_scroll.setText(t("📜 自动滚动"))
@@ -3366,18 +3531,11 @@ class MainWindow(QMainWindow):
         self.tab_widget.setTabText(1, t("📄 日志输出"))
         self.tab_widget.setTabText(2, t("📊 运行信息"))
 
-        # Version/status labels
-        state = getattr(self, '_current_state', None)
-        if state == "starting":
-            self.status_indicator.setText(t("🔄 启动中..."))
-        elif state == "running":
-            self.status_indicator.setText(t("🟢 运行中"))
-        elif state == "error":
-            self.status_indicator.setText(t("🔴 错误"))
-        else:
-            self.status_indicator.setText(t("⏸ 已停止"))
+        # Version/status labels（状态点 + 文字 + tooltip 都由
+        # _update_run_indicator 重画：文字与提示都要跟着语言切换）
+        self._update_run_indicator()
         if not self.runner.is_running:
-            self.run_time_label.setText(t("⏱ 运行: 00:00"))
+            self.run_time_label.setText(t("⏱ 00:00"))
 
         # Menus
         self.file_menu.setTitle(t("文件"))
@@ -3414,11 +3572,162 @@ class MainWindow(QMainWindow):
         # layout-managed label (contents-margins keep the text on the card
         # face: left fixed, bottom synced to the shadow band by
         # _set_card_inset) and drops the native size grip.
-        # (E15 once hosted the run-state labels here too — reverted: they
-        # trail the 参数配置 tab's control bar again.)
+        # 2026-11 第五轮：右侧常驻「● 运行状态 · 运行时长 · 版本 · ⚠️」
+        # （控制栏与指标行合成一行后这里才是它们该待的地方）。
+        # ⚠️ 历史：E15 也把这些标签放进过状态栏又按用户反馈回退了 —— 当时
+        # 用户机器上"状态栏区域画成一块错的白框"。那次的根因是 QStatusBar
+        # 自身的底色方块压在透明圆角带上；E13 之后 QStatusBar 与 #statusMsg
+        # 都是 background: transparent，普通 QLabel 默认也不画底色，所以这次
+        # 重新放进来，并用 tests/test_right_tabs_e15.py 的右下角像素断言把
+        # "阴影带必须仍然是透明的"钉死（万一再出现白框，回退点：把这几项移到
+        # 合一行的最右侧）。
         sb = _ThemedStatusBar(self)
         self.setStatusBar(sb)
         sb.showMessage(t("就绪"))
+        self._create_run_status_items(sb)
+
+    def _create_run_status_items(self, sb):
+        """状态栏右侧常驻项：GPU 信息 · 版本号 · ⚠️ · ● 运行状态 · 运行时长。
+
+        顺序（第七轮定下版本组，第十一轮把 GPU 信息插到最左，用户：“把这个信息
+        也放到状态栏上，放在版本号左边”）：GPU → 版本 → ⚠️（⚠️ 说的就是“参数与
+        刚检测到的版本有差异”，跟自已在行的右侧会让两者相隔整个运行状态组）。
+
+        两项机制都要走：
+        * ``addPermanentWidget`` —— 靠右排（左半边留给 showMessage 的临时
+          消息），并且比临时消息优先拿到宽度；
+        * ``add_band_label`` —— 给项与项之间的水平间隙（状态栏横跨整条底边，
+          右下角那 10px 是透明圆角带，但**垂直带内缩与右侧让位是状态栏自己的**
+          contentsMargins，理由见 _ThemedStatusBar.__init__；这里只负责项间
+           gap，组内第一项（GPU 信息）left = 0）。
+        GPU 信息与版本信息都是 ElidingLabel（最小宽 0）→ 长设备列表 / 长版本串
+        都不会把窗口最小宽度顶高（E11），完整文本在 tooltip；运行时长与状态是短
+        定长文本，几项合计的硬最小值远低于中央区域，因此不影响窗口最小尺寸。
+        """
+        # E8: 检测到的 GPU 设备行（2026-10 从 ngl/拆分模式控件移出，2026-11 第十一
+        # 轮再从「参数配置」的模式行移到状态栏最左）。ElidingLabel：长设备列表不能
+        # 撑宽窗口，完整文本在 tooltip；样式走统一次级信息（#secondaryInfo +
+        # palette，见 _sync_secondary_info_labels，ElidingLabel 自绘只认 palette）。
+        # 探针（--list-devices）完成前一直隐藏，隐藏项不占宽度。
+        self._gpu_devices = None  # None = probe 尚未完成
+        self.gpu_info_label = ElidingLabel("")
+        self.gpu_info_label.setObjectName("secondaryInfo")
+        f = self.gpu_info_label.font()
+        f.setPixelSize(11)
+        self.gpu_info_label.setFont(f)
+        # 初始就给 transparent（_sync_secondary_info_labels 接管后会带上颜色）：
+        # inline sheet 存在 → Qt 替普通 QWidget 刷背景，不留 transparent 就会被全局
+        # `QWidget { background-color: win_bg }` 刷成一块补丁
+        self.gpu_info_label.setStyleSheet("background: transparent; font-size: 11px;")
+        self.gpu_info_label.setVisible(False)
+        sb.add_band_label(self.gpu_info_label, 0)
+        sb.addPermanentWidget(self.gpu_info_label)
+
+        # E11: eliding label — the full version string must not pin the
+        # window minimum width (see basic_panel.ElidingLabel); the tooltip
+        # keeps the full text. 与 GPU 信息之间留一档宽 gap：两个不同主题的
+        # 信息（硬件 / 软件版本），靠在一起会读成一句。
+        self.version_label = ElidingLabel(t("检测中…"))
+        self.version_label.setObjectName("statusVersion")
+        f = self.version_label.font()
+        f.setPixelSize(12)
+        self.version_label.setFont(f)
+        self.version_label.setToolTip(t("llama.cpp 版本信息"))
+        self._version_base_tooltip = t("llama.cpp 版本信息")
+        self._set_version_color("#6b7280")
+        sb.add_band_label(self.version_label, 12)
+        sb.addPermanentWidget(self.version_label)
+
+        # E7: parameter-drift notice promoted from a tooltip to a clickable
+        # button — the full drift list opens in a dialog on click. 跟着版本
+        # 走最合理：它说的就是"参数与刚检测到的版本有差异"。
+        self._drift_missing = []
+        self._drift_changed = []
+        self.drift_button = QToolButton()
+        self.drift_button.setText("⚠️")
+        self.drift_button.setObjectName("statusDrift")
+        self.drift_button.setToolTip(t("参数与当前版本存在差异，点击查看完整列表"))
+        self.drift_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.drift_button.clicked.connect(self._show_drift_dialog)
+        self.drift_button.setVisible(False)
+        sb.add_band_label(self.drift_button, 6)
+        sb.addPermanentWidget(self.drift_button)
+
+        # 运行状态点：画出来的 8px 圆角块，不是字符 —— 旧的 🟢/🔴/🔄 是彩色
+        # emoji（在单色 UI 里最跳、Windows 下尺寸还不一致，正是用户嫌"不协调"
+        # 的那类东西）。2026-11 第五轮从指标行搬来：全应用只有这一个运行状态
+        # 指示，位置就在运行时长前面（用户：“那个绿色小圆点…移动到运行时间那”）。
+        self.run_dot = QWidget()
+        self.run_dot.setObjectName("runDot")
+        self.run_dot.setFixedSize(8, 8)
+        self.run_dot.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        sb.add_band_label(self.run_dot, 10)
+        sb.addPermanentWidget(self.run_dot)
+
+        self.status_indicator = QLabel(t("未启动"))
+        self.status_indicator.setObjectName("statusRun")
+        sb.add_band_label(self.status_indicator, 10)
+        sb.addPermanentWidget(self.status_indicator)
+
+        self.run_time_label = QLabel(t("⏱ 00:00"))
+        self.run_time_label.setObjectName("statusRuntime")
+        sb.add_band_label(self.run_time_label, 10)
+        sb.addPermanentWidget(self.run_time_label)
+
+        self._update_run_indicator()
+
+    # 运行状态四态 → (文字, 颜色)。灰=从没启动 / 琥珀=正在启动（或运行中但
+    # 指标两端都不应答，见 _update_run_indicator）/ 绿=运行中 / 红=异常退出。
+    _RUN_UI = {
+        None: ("未启动", "#9aa3af", "服务未启动"),
+        "starting": ("启动中", "#d97706", "正在启动 llama-server…"),
+        "running": ("运行中", "#16a34a",
+                   "服务运行中：实时指标来自 /slots（每秒），"
+                   "累计指标来自 /metrics（每 5 秒）"),
+        "stopped": ("已停止", "#6b7280", "服务已停止"),
+        "error": ("错误", "#dc2626", "服务异常退出，详见「日志输出」"),
+    }
+    _RUN_SILENT_TIP = ("服务在运行，但 /slots 与 /metrics 都没有应答，"
+                      "请检查启动参数")
+
+    def _update_run_indicator(self):
+        """状态栏那个点 + 状态文字的**唯一**入口（运行状态 + 指标端点是否应答）。
+
+        琥珀有两种：正在启动；或已 running 但 /slots 与 /metrics 都不应答 ——
+        后一条由 ``LiveMetricsBar.endpoints_alive()`` 判定（只有它同时知道两端
+        状态），免得两处各写一套语义。点与文字一起染色，悬停给完整解释。
+        调用时机：_on_state_changed / live 两端状态变化 / retranslate_ui /
+        状态栏构建完（此时 live_metrics 还没造出来 → 先按"活"处理）。
+        """
+        state = getattr(self, "_current_state", None)
+        text, color, tip = self._RUN_UI.get(state, self._RUN_UI[None])
+        bar = getattr(self, "live_metrics", None)
+        if state == "running" and bar is not None and not bar.endpoints_alive():
+            color = "#d97706"
+            tip = self._RUN_SILENT_TIP
+        text, tip = t(text), t(tip)
+        self.run_dot.setStyleSheet(
+            "background-color: %s; border: none; border-radius: 4px;" % color)
+        self.status_indicator.setText(text)
+        self.status_indicator.setStyleSheet(
+            "color: %s; font-weight: bold; font-size: 12px;" % color)
+        for w in (self.run_dot, self.status_indicator):
+            w.setToolTip(tip)
+
+    def _set_version_color(self, color):
+        """版本信息的颜色：ElidingLabel 自绘只认 **palette** 的 Text 色（QSS
+        color 会被它的 paintEvent 忽略 —— 旧代码里那几条 setStyleSheet("color: …")
+        其实一直没生效，版本一直是创建时设的灰色）。而 app 级 QWidget 规则会在
+        show 之后 re-polish 掉代码里设的 palette，所以与 #secondaryInfo / 指标行
+        标签同款做法：inline sheet（定字号/字重，赢过 re-polish）+ palette（喂
+        paintEvent）一起给。
+        """
+        self.version_label.setStyleSheet(
+            "color: %s; background: transparent; font-size: 12px;" % color
+            + ("; font-weight: bold;" if color != "#6b7280" else ""))
+        pal = self.version_label.palette()
+        pal.setColor(QPalette.ColorRole.Text, QColor(color))
+        self.version_label.setPalette(pal)
 
     def _apply_theme(self):
         """E5: apply the current theme application-wide.
@@ -3443,6 +3752,12 @@ class MainWindow(QMainWindow):
         # ElidingLabel #secondaryInfo variants paint via palette, not QSS:
         # sync their palette + inline sheet with the theme's info colour
         self._sync_secondary_info_labels()
+        # 实时指标行的 HTML span 颜色 + ElidingLabel palette 在 QSS 管不到的
+        # 地方 —— 随主题同步（LiveMetricsBar.set_theme_colors）
+        if getattr(self, "live_metrics", None) is not None:
+            _lpal = self._THEME_PALETTES[self.theme]
+            self.live_metrics.set_theme_colors(_lpal["text"], _lpal["muted"],
+                                               _lpal["info"])
         self.update()
 
     def _sync_secondary_info_labels(self):
@@ -3460,7 +3775,12 @@ class MainWindow(QMainWindow):
         info = MainWindow._THEME_PALETTES[self.theme]["info"]
         if hasattr(self, "gpu_info_label"):
             label = self.gpu_info_label
-            label.setStyleSheet(f"color: {info}; font-size: 11px;")
+            # background: transparent 不能省：它带 inline sheet → Qt 会替普通 QWidget
+            # 刷背景，而全局 `QWidget { background-color: win_bg }` 就会在它底下刷一
+            # 块补丁（现在 win_bg == 卡片面色以看不出来，但主题一旦让两者不相等就是
+            # 一块脏矩形 —— 与指标行 #metricCell 强制透明同一个道理）。
+            label.setStyleSheet(f"color: {info}; background: transparent;"
+                                " font-size: 11px;")
             pal = label.palette()
             pal.setColor(QPalette.ColorRole.Text, QColor(info))
             label.setPalette(pal)
@@ -3546,17 +3866,108 @@ class MainWindow(QMainWindow):
                 color: @@info@@;
                 font-size: 11px;
             }
+            /* Live-metrics strip (实时指标行, ui/live_metrics.py): one
+               soft-tinted rounded bar sharing the control row with the
+               start/stop/copy/WebUI buttons (2026-11 round 5), always
+               visible. 2026-11 redesign: the inner cell widgets are forced
+               transparent — a plain QWidget inside the bar otherwise paints
+               the generic QWidget win_bg rect over the bar's own tint, which
+               read as patchwork squares (user report). Symbol icons were
+               dropped (they fell back to a different font/size/baseline per
+               glyph inside Consolas); grouping is the 实时/累计 captions plus
+               whitespace, so only the one between-group rule remains, and the
+               idle state is a single hint line instead of seven "—" cells.
+               Value/label colours live in the widget (rich-text spans +
+               ElidingLabel palettes via set_theme_colors). The inline ctx
+               meter track is the border colour (hover_bg was invisible on the
+               hover_bg bar). */
+            /* 第八轮“加外边框线方便视觉分隔”→ 整条带一个 1px 外框，用户“看不出来，
+               做成一个指标一个框的”；第九轮整格芯片，又“太小、不自然，别给 label
+               加框”；第十轮定案：**框只框数值**（下面 #metricValueBox）。1px 的
+               border 色画在 hover_bg 淡底上几乎与底色糊在一起（明暗两套都是），
+               所以整条带一个框根本读不出边界。
+               条带自己**必须**透明无边框：否则框里有框（当初"7 个独立描边格"被
+               嫌丑，病根是那些格子各自刷 win_bg 形成深浅补丁 + 彩色 emoji 字号不齐，
+               不是"有边框"本身）。 */
+            QWidget#liveMetricsBar {
+                background: transparent;
+                border: none;
+            }
+            /* 标签就是普通文字（#metricCell 透明容器）；#metricValueBox 是"读数窗"：
+               field_bg 底 + 1px 边框 + 圆角。第十一轮（用户：“这些框看起来比文字矮，
+               视觉不统一，起码跟进度条一样高吧”）：**高度不在这里写**，代码里
+               `box.setFixedHeight(_FIELD_H)` 与计量条共用一个常量 → 两者永远齐平；
+               靠 padding 撑高则实得高 = padding + 标签行高（字体一变就漂）。
+               竖向 padding 必须为 0：否则 20px 被扣成 12px，装不下 13px 高的数字，
+               字会溢出到边框上。 */
+            QWidget#liveMetricsBar QWidget#metricCell {
+                background: transparent;
+                border: none;
+            }
+            QWidget#liveMetricsBar QWidget#metricValueBox {
+                background: @@field_bg@@;
+                border: 1px solid @@border@@;
+                border-radius: 6px;
+                padding: 0px 10px;
+            }
+            /* the value column's invisible strut lives in here (fixed-width
+               value cells — see ui/live_metrics.py _ValueColumn) */
+            QWidget#liveMetricsBar QWidget#metricValueCol {
+                background: transparent;
+                border: none;
+            }
+            QWidget#liveMetricsBar QLabel {
+                color: @@text@@;
+                background: transparent;
+                border: none;
+                font-size: 11px;
+            }
+            /* The value cells keep a fixed width via the transparent
+               #metricStrut label, so the strut and the value must share one
+               font — the QSS font therefore has to agree with the QFont the
+               widgets are built with (Consolas 11px bold). */
+            QWidget#liveMetricsBar QLabel#metricValue,
+            QWidget#liveMetricsBar QLabel#metricStrut {
+                font-family: Consolas;
+                font-size: 11px;
+                font-weight: bold;
+            }
+            /* 上下文计量条：不加框（用户明确“也不用加框”），但**轨道必须用 border
+               色**：它现在直接坐在 win_bg 面上，而 hover_bg 与 win_bg 几乎同色
+               → 轨道看不见，绿块像凭空飘着。第十一轮：与读数框等高（_FIELD_H）且
+               圆角同档（6px），chunk 少 1px → 填满时不碰圆角；百分比写在条里面。 */
+            QProgressBar#metricMiniBar {
+                border: none;
+                background: @@border@@;
+                border-radius: 6px;
+            }
+            QProgressBar#metricMiniBar::chunk {
+                border-radius: 5px;
+            }
+            /* 控制行四个按钮（第五轮最终定案，见 _create_right_panel 的注释）：
+               **形状**继承通用 QPushButton（圆角 / padding / 字号一个都不写 →
+               与 ↩ 撤销 那排同族），**配色**用强调色（彩色底 + 白字 + 粗体）
+               —— 它们是启停服务的主操作，必须比一般按钮醒目（用户：“不要做成
+               白底的，彩色底，白字体，因为这个需要很醒目，跟一般的按钮不一样，
+               现在这种效果让人忽略了重点”）。渐变是本项目强调按钮的既有语言
+               （serverPathOk / msgBoxBtnAccept / tab 下划线同款）。
+               两个 Qt QSS 特异性坑（(id, 属性/伪类, 类型)）：
+               ① QPushButton#startBtn(1,0,1) 压过 QPushButton:disabled(0,1,1)
+                  → 禁用态必须显式写，否则“已经禁用还是鲜绿”；
+               ② #id:hover / #id:pressed 与 #id:disabled 特异性相同 (1,1,1)，
+                  谁在后面谁赢 → :disabled 必须排在 hover/pressed 之后。
+               border 显式 none：通用规则的 1px @@border@@ 描边会把色块框成灰边。 */
             QPushButton#startBtn {
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #22c55e, stop:1 #16a34a);
                 color: #ffffff;
                 border: none;
-                border-radius: 8px;
                 font-weight: bold;
-                font-size: 14px;
-                padding: 8px 22px;
             }
             QPushButton#startBtn:hover {
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #4ade80, stop:1 #22c55e);
+            }
+            QPushButton#startBtn:pressed {
+                background: #15803d;
             }
             QPushButton#startBtn:disabled {
                 background: @@start_dis_bg@@;
@@ -3566,13 +3977,13 @@ class MainWindow(QMainWindow):
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #ef4444, stop:1 #dc2626);
                 color: #ffffff;
                 border: none;
-                border-radius: 8px;
                 font-weight: bold;
-                font-size: 14px;
-                padding: 8px 22px;
             }
             QPushButton#stopBtn:hover {
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #f87171, stop:1 #ef4444);
+            }
+            QPushButton#stopBtn:pressed {
+                background: #b91c1c;
             }
             QPushButton#stopBtn:disabled {
                 background: @@stop_dis_bg@@;
@@ -3582,13 +3993,13 @@ class MainWindow(QMainWindow):
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #94a3b8, stop:1 #64748b);
                 color: #ffffff;
                 border: none;
-                border-radius: 8px;
                 font-weight: bold;
-                font-size: 14px;
-                padding: 8px 22px;
             }
             QPushButton#copyBtn:hover {
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #a9b7c6, stop:1 #718096);
+            }
+            QPushButton#copyBtn:pressed {
+                background: #475569;
             }
             QPushButton#copyBtn:disabled {
                 background: @@copy_dis_bg@@;
@@ -3598,13 +4009,13 @@ class MainWindow(QMainWindow):
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #3b82f6, stop:1 #2563eb);
                 color: #ffffff;
                 border: none;
-                border-radius: 8px;
                 font-weight: bold;
-                font-size: 14px;
-                padding: 8px 22px;
             }
             QPushButton#webuiBtn:hover {
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #60a5fa, stop:1 #3b82f6);
+            }
+            QPushButton#webuiBtn:pressed {
+                background: #1d4ed8;
             }
             QPushButton#webuiBtn:disabled {
                 background: @@webui_dis_bg@@;
@@ -3806,10 +4217,20 @@ class MainWindow(QMainWindow):
                 border-radius: 8px;
                 background-color: @@field_bg@@;
             }
+            /* Tab 高度与合一行的四个按钮一致（都是 28px）—— 2026-11 第八轮用户：
+               "3 个 tab 高度比按钮都高一些，看着不太协调，改为一致"。按钮是
+               setFixedHeight(28)，所以 tab 的高度要**写死成内容高**而不是靠
+               padding 顶：`height: 18px`（内容盒）+ 2×4 padding + 2×1 边框 = 28。
+               只调 padding 会被字体顶开 —— 实测同一条 padding 在捆绑字体下量到
+               28、在别的字体环境（全量跑里 app 字体是别的模块建 QApplication 时
+               设的那个）量到 31，差 3px 恰好是文字行高之差；给了 height 之后
+               内容盒固定，行高只影响文字在不在中间，不再改变 tab 高度。
+               只动竖向，横向排版与窗口最小宽度不受影响。 */
             QTabBar::tab {
                 background: @@hover_bg@@;
                 color: @@muted@@;
-                padding: 8px 16px;
+                height: 17px;
+                padding: 4px 16px;
                 border: 1px solid @@border@@;
                 border-bottom: none;
                 border-top-left-radius: 6px;
@@ -4022,6 +4443,26 @@ class MainWindow(QMainWindow):
                 color: @@muted@@;
                 font-size: 12px;
             }
+            /* 2026-11 第五轮：状态栏右侧常驻项（● 运行状态 · 运行时长
+               · 版本 · ⚠️）。全部透明无边框 —— 状态栏横跨整条底边，任何
+               底色都会在透明圆角带上画出一块方块（E15 那次"状态栏白框"
+               事故就是这个形状）。文字颜色由代码给：inline sheet + palette
+               （_update_run_indicator / _set_version_color —— 版本是
+               ElidingLabel，自绘只认 palette，QSS color 对它无效）。 */
+            QLabel#statusRun, QLabel#statusRuntime,
+            QLabel#statusVersion, QToolButton#statusDrift {
+                background: transparent;
+                border: none;
+                padding: 0;
+            }
+            QLabel#statusRuntime { font-size: 12px; }
+            QToolButton#statusDrift { font-size: 12px; }
+            /* 运行状态点：底色由 _update_run_indicator 按状态内联给
+               （四态染色），这里只保证没有边框/内边距 */
+            QWidget#runDot { border: none; }
+            /* 合一行（启动按钮 + 指标带）本身不画底色：指标带有自己的
+               hover_bg 圆角，行底色会和卡片面叠出一块可见矩形 */
+            QWidget#rightRow { background: transparent; }
             /* E13: the shadow band around the card is part of the central
                widget's rect — it must paint nothing there */
             QWidget#centralArea {

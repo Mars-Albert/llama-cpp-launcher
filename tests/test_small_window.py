@@ -99,6 +99,12 @@ def _overlaps(win):
     from PyQt6.QtCore import QRect
     from PyQt6.QtWidgets import QWidget
 
+    # 指标带的透明 strut 与数值标签**就是**完全重合的：同一个 QGridLayout 单元里
+    # 叠两层（strut 撑出"该指标最宽取值"的宽度，value 在上面画字，strut 的
+    # color: transparent）—— 那是定宽数值列的实现方式，不是排版缺陷。第七轮之前
+    # 未运行折叠成提示语、strut 跟着隐藏，所以这个测试从没抓到它。
+    _intentional = {"metricStrut", "metricValue"}
+
     client = QRect(0, 0, win.width(), win.height())
 
     def is_leaf(w):
@@ -122,6 +128,8 @@ def _overlaps(win):
             a, ra = leaves[i]
             b, rb = leaves[j]
             inter = ra.intersected(rb)
+            if {a.objectName(), b.objectName()} == _intentional:
+                continue
             if (inter.width() >= 4 and inter.height() >= 4
                     and a not in b.children() and b not in a.children()):
                 bad.append((a, b, inter))

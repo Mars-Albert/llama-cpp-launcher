@@ -106,7 +106,8 @@ def window(tmp_path, monkeypatch):
 
 
 def test_window_gpu_info_dual(window):
-    """E8 (moved to the mode bar, 2026-10): dual-GPU line + tooltip."""
+    """E8：双 GPU 行 + tooltip（2026-10 移出参数面板 → 2026-11 第十一轮从模式行
+    再移到**状态栏最左**，用户：“把这个信息也放到状态栏上，放在版本号左边”）。"""
     window._on_devices_ready(parse_device_list(DUAL_OUTPUT))
     label = window.gpu_info_label
     assert "RTX 5090" in label.text()
@@ -114,6 +115,15 @@ def test_window_gpu_info_dual(window):
     assert "32GB" in label.text()
     assert label.isHidden() is False
     assert "CUDA1: NVIDIA GeForce RTX 2080" in label.toolTip()
+    # 常驻项在状态栏（三个 tab 都看得见），并且排在版本信息左边。
+    # 顺序用几何量（QStatusBar 把常驻项存在自己内部，layout().indexOf() 永远 -1）
+    from PyQt6.QtCore import QPoint
+    window.show()
+    for _ in range(6):
+        _qapp().processEvents()
+    x_of = lambda c: c.mapTo(window, QPoint(0, 0)).x()
+    assert x_of(label) < x_of(window.version_label), (x_of(label),
+                                                      x_of(window.version_label))
 
 
 def test_window_gpu_info_cpu_only(window):

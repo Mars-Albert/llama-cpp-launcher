@@ -51,6 +51,28 @@ class _FakeScreen:
         return self.r
 
 
+def _assert_left_panel(win, wanted):
+    """左侧默认宽 = `wanted`，**除非**右侧真的要那块地方。
+
+    QSplitter 把宽度让给最小值更硬的一侧，而 2026-11 第七轮之后合一行（四个按钮
+    + 常驻指标带）在两种状态下都是同一条硬最小宽度：字体偏宽的环境里这一行能要到
+    1200px 以上，右侧的最小值就压过了"左栏 400"这个默认请求 → 左栏拿到剩下的
+    部分。这符合本项目的定案：宁可左栏窄一点，也不把指标数字切掉。
+    所以这里断言的是真正的契约：**要么就是 wanted，要么正好是右侧让下来的那点
+    剩余**（且不得低于左栏自己的 180px 下限），而不是一个写死的 400。
+    """
+    from ui.main_window import CARD_CONTENT_INSET, SPLITTER_HANDLE_W
+    left = win.splitter.sizes()[0]
+    right_min = win._right_panel.layout().minimumSize().width()
+    content = win.width() - 2 * CARD_CONTENT_INSET - SPLITTER_HANDLE_W
+    assert left >= 180, left
+    if right_min <= content - wanted:
+        assert left == wanted, (left, wanted, right_min, content)
+    else:
+        assert left == content - right_min, (
+            left, right_min, content, wanted)
+
+
 def _fake_primary(monkeypatch, w, h):
     from PyQt6.QtWidgets import QApplication
     monkeypatch.setattr(QApplication, "primaryScreen",
@@ -105,7 +127,7 @@ def test_first_launch_opens_at_default_size_not_minimum(
             app.processEvents()
             time.sleep(0.01)
         assert w.width() == WINDOW_WIDTH
-        assert w.splitter.sizes()[0] == 400
+        _assert_left_panel(w, 400)
     finally:
         w.close()
 
@@ -129,6 +151,6 @@ def test_saved_numeric_geometry_roundtrip(temp_settings, monkeypatch):
             app.processEvents()
             time.sleep(0.01)
         assert w.width() == 1500
-        assert w.splitter.sizes()[0] == 420
+        _assert_left_panel(w, 420)
     finally:
         w.close()
