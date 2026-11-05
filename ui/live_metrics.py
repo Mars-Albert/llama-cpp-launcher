@@ -590,7 +590,7 @@ class LiveMetricsBar(QWidget):
     def _make_meter(self):
         """上下文计量条：**定长 _BAR_W × 统一高 _FIELD_H**，百分比画在里面。
 
-        定长而不是弹性：与启动按钮合一行后，富余宽度归行级 stretch（用户要
+        定长而不是弹性：与启动按钮合一行后，富余宽度归行级 stretch（当时的要求是
         “中间 stretch 隔开”），条带自己只能贴内容（Maximum 策略）。高度与数值
         读数框共用 `_FIELD_H`（后来的要求：“起码跟进度条一样高吧” —— 一个常量两处
         用，字才不会再显得比条矮、条比字高）；垂直居中、tooltip 与 ctx 格同步

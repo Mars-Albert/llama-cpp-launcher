@@ -737,7 +737,7 @@ def test_bar_value_columns_are_fixed_width():
 
 
 def test_bar_layout_follows_content_not_equal_columns():
-    """2026-11 用户逐轮反馈钉住（“不要每个指标都均匀排布、prefill 这些就一个数字
+    """2026-11 那批逐轮反馈钉住（“不要每个指标都均匀排布、prefill 这些就一个数字
     占那么大位置” / “进度条那个显示的特别短，可拉长啊” / “不同的指标间应留有一定
     的分隔或空白” / “那个进度条的数字从左侧改到右侧” / 后来“按钮与 metric 两行
     合并一行，中间 stretch 隔开”）。
@@ -1146,8 +1146,8 @@ def test_first_task_prefill_average_is_there_during_its_own_decode(temp_settings
     根因不在指标带，而在数据源：`print_timings()`（`prompt eval time` /
     `eval time`）只在任务**结束**分支里调（llama.cpp server-context.cpp），所以第一个
     任务的 decode 阶段全仓没有任何 prefill 均值可用 —— 第二个任务才拿得到上一个
-    任务的那对。修法是多认两行**阶段运行中**的 slot print_timing（下面直接重放用户
-    自己 last_run.log 里的真实行）。
+    任务的那对。修法是多认两行**阶段运行中**的 slot print_timing（下面直接重放真实环境里
+    的 last_run.log 里的真实行）。
     """
     _qapp()
     w = _window(temp_settings)

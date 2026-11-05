@@ -1021,7 +1021,7 @@ class MainWindow(QMainWindow):
 
         # 实时指标带（本行最右）：Maximum 策略 → 只占内容宽，富余宽度全归上面
         # 那条 stretch。它的固定 34px 就是本行高度。行最小宽 = 按钮 ~200 +
-        # 条带 ~559 ≈ 760 → 窗口最小宽度 947 → ~990（改版后实测告知过用户的
+        # 条带 ~559 ≈ 760 → 窗口最小宽度 947 → ~990（改版后实测确认过的
         # 代价，换来省 52px 高度 + 少一行）。
         self.live_metrics = LiveMetricsBar()
         _lpal = self._THEME_PALETTES[self.theme]
@@ -3598,7 +3598,7 @@ class MainWindow(QMainWindow):
         # 2026-11 改版：右侧常驻「● 运行状态 · 运行时长 · 版本 · ⚠️」
         # （控制栏与指标行合成一行后这里才是它们该待的地方）。
         # ⚠️ 历史：E15 也把这些标签放进过状态栏又因反馈回退了 —— 当时
-        # 用户机器上"状态栏区域画成一块错的白框"。那次的根因是 QStatusBar
+        # 个别机器上出现过"状态栏区域画成一块错的白框"。那次的根因是 QStatusBar
         # 自身的底色方块压在透明圆角带上；E13 之后 QStatusBar 与 #statusMsg
         # 都是 background: transparent，普通 QLabel 默认也不画底色，所以这次
         # 重新放进来，并用 tests/test_right_tabs_e15.py 的右下角像素断言把
@@ -3913,7 +3913,7 @@ class MainWindow(QMainWindow):
                ElidingLabel palettes via set_theme_colors). The inline ctx
                meter track is the border colour (hover_bg was invisible on the
                hover_bg bar). */
-            /* 后来“加外边框线方便视觉分隔”→ 整条带一个 1px 外框，用户“看不出来，
+            /* 后来“加外边框线方便视觉分隔”→ 整条带一个 1px 外框，被反馈“看不出来，
                做成一个指标一个框的”；后来整格芯片，又“太小、不自然，别给 label
                加框”；后来定案：**框只框数值**（下面 #metricValueBox）。1px 的
                border 色画在 hover_bg 淡底上几乎与底色糊在一起（明暗两套都是），
@@ -3964,7 +3964,7 @@ class MainWindow(QMainWindow):
                 font-size: 11px;
                 font-weight: bold;
             }
-            /* 上下文计量条：不加框（用户明确“也不用加框”），但**轨道必须用 border
+            /* 上下文计量条：不加框（明确要求“也不用加框”），但**轨道必须用 border
                色**：它现在直接坐在 win_bg 面上，而 hover_bg 与 win_bg 几乎同色
                → 轨道看不见，绿块像凭空飘着。后来：与读数框等高（_FIELD_H）且
                圆角同档（6px），chunk 少 1px → 填满时不碰圆角；百分比写在条里面。 */

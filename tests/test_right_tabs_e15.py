@@ -400,7 +400,7 @@ def test_control_buttons_wear_the_accent_style(temp_settings):
         # 强调按钮的禁用底色 / 文字色必须两主题都有定义
         for obj in ("start", "stop", "copy", "webui"):
             assert pal["%s_dis_bg" % obj] in qss and pal["%s_dis_fg" % obj] in qss
-    # 图标 + 两字文案（上一版用户“要带图标”仍然生效），全称仍在 tooltip
+    # 图标 + 两字文案（上一版“要带图标”的要求仍然生效），全称仍在 tooltip
     w = _window(temp_settings)
     try:
         assert w.btn_start.text() == "▶ 启动"

@@ -281,7 +281,7 @@ def test_slot_timings_in_flight_lines():
     """阶段**运行中**的两行 print_timing（与上面那对结束行同前缀，函数名被
     SLT_INF 的 `%12.*s` 截成 `print_timing`）也写 `*_tps_last`。
 
-    样本直接取自用户自己的 `~/.llama-cpp-launcher/logs/last_run.log`。没有它们，
+    样本直接取自真实运行落盘的 `~/.llama-cpp-launcher/logs/last_run.log`。没有它们，
     第一个任务的 decode 阶段就没有 prefill 均值可用（`print_timings()` 只在任务结束
     分支里调）—— 就是“第一次 decode 时 Prefill 显示 -”的根因。
     同时钉住：这两行**不改**给人看的 `prompt_speed` / `decode_speed`（运行信息页的
