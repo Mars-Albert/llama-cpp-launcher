@@ -70,42 +70,100 @@ jobs:
         shell: bash
         run: |
           TAG="${GITHUB_REF_NAME}"
+          NOTES=""
+          SRC="none"
           # Annotated tag (`git tag -a`) carries the release notes; write them out
           # verbatim. generate_release_notes is not usable here: it only lists
           # merged pull requests, and this repo pushes straight to main, so every
           # release body came out empty except for the compare link.
-          #
-          # The tag ref must be re-fetched on purpose. On a tag push checkout fetches
-          # the *peeled commit* (that is what GITHUB_SHA is), and depending on how the
-          # ref arrives locally it can end up pointing straight at the commit — the tag
-          # object is the only place the message lives. This refspec stores the tag
-          # object itself; --force because replacing a peeled ref is not a fast-forward.
-          # (v1.9.1 fell through to the fallback with a perfectly good annotated tag on
-          # the remote; the runner's git state is not readable from outside — job logs
-          # need admin rights — hence the explicit fetch plus the diagnostics below.)
-          git fetch --no-tags --force origin "refs/tags/$TAG:refs/tags/$TAG" \
-            || echo "::warning::could not re-fetch refs/tags/$TAG; trying the local ref"
 
+          # Source 1: the local repo, if the tag object survived checkout.
           # for-each-ref rather than `git tag -l --format`: -l takes a *pattern*, and
           # %(contents) on a lightweight tag returns the *commit* body, which would
           # silently ship as release notes. Check the object type instead.
-          OBJTYPE="$(git for-each-ref "refs/tags/$TAG" --format='%(objecttype)')"
-          NOTES=""
-          if [ "$OBJTYPE" = "tag" ]; then
+          LOCAL_TYPE="$(git for-each-ref "refs/tags/$TAG" --format='%(objecttype)' 2>/dev/null)"
+          if [ "$LOCAL_TYPE" = "tag" ]; then
             NOTES="$(git for-each-ref "refs/tags/$TAG" --format='%(contents)')"
+            [ -n "$NOTES" ] && SRC="local-tag"
           fi
-          echo "tag ref type: ${OBJTYPE:-<missing>}"
-          echo "notes bytes : ${#NOTES}"
+          echo "local refs/tags/$TAG: type=${LOCAL_TYPE:-<missing>} notes_bytes=${#NOTES}"
+
+          # Source 2: the tag object as the *server* sees it. v1.9.1 fell through to the
+          # fallback twice with a perfectly good annotated tag on the remote (verified
+          # with git ls-remote, and an identical fetch verified in a clean clone), so
+          # whatever checkout leaves under refs/tags/<tag> cannot be trusted - and the
+          # runner's git state is unreadable from outside (job logs need admin rights).
+          # This endpoint is one hop from the truth and GITHUB_TOKEN already has
+          # contents:write.
+          if [ -z "$NOTES" ]; then
+            rm -f .ci_tag_type .ci_tag_notes.txt
+            # setup-python exports GITHUB_PATH, so bash sees python too; the guard keeps
+            # a missing interpreter from failing the whole release step.
+            PY="$(command -v python || command -v python3 || echo '')"
+            if [ -z "$PY" ]; then
+              echo "::warning::no python on PATH; cannot read the tag message over the API"
+            else
+            GITHUB_TOKEN="${GITHUB_TOKEN:-}" GH_REPO="$GITHUB_REPOSITORY" GH_TAG="$TAG" "$PY" - <<'PY'
+          import json, os, sys, urllib.request
+
+          tok = os.environ.get("GITHUB_TOKEN") or ""
+          repo = os.environ.get("GH_REPO") or ""
+          tag = os.environ.get("GH_TAG") or ""
+          headers = {"Accept": "application/vnd.github+json", "User-Agent": "release-notes"}
+          if tok:
+              headers["Authorization"] = "Bearer " + tok
+
+
+          def get(url):
+              req = urllib.request.Request(url, headers=headers)
+              with urllib.request.urlopen(req, timeout=30) as resp:
+                  return json.load(resp)
+
+
+          # Written to files rather than stdout: the notes are CJK, and a Windows
+          # console/stdout encoding (cp1252, cp936) would mangle or reject them.
+          try:
+              ref = get("https://api.github.com/repos/%s/git/ref/tags/%s" % (repo, tag))
+              obj_type = ref["object"]["type"]
+              with open(".ci_tag_type", "w", encoding="utf-8") as fh:
+                  fh.write(obj_type)
+              if obj_type != "tag":
+                  # A lightweight tag has no message; the commit-list fallback is right.
+                  sys.exit(0)
+              message = get(ref["object"]["url"]).get("message") or ""
+          except Exception as exc:  # noqa: BLE001 - never fail a release over notes
+              print("::warning::tag message lookup over the API failed: %r" % exc,
+                    file=sys.stderr)
+              sys.exit(0)
+
+          lines = message.splitlines()
+          with open(".ci_tag_notes.txt", "w", encoding="utf-8") as fh:
+              fh.write("\n".join(lines).rstrip() + "\n")
+          PY
+            fi
+            NOTES="$(cat .ci_tag_notes.txt 2>/dev/null || echo '')"
+          fi
 
           if [ -n "$NOTES" ]; then
-            # Drop a leading tag-name subject (GitHub renders the tag name itself, so
-            # repeating it reads like a heading glitch) and the blank line after it.
-            NOTES="$(printf '%s\n' "$NOTES" | awk -v tag="$TAG" '
-              NR == 1 && $0 == tag { skip = 1; next }
-              skip && $0 ~ /^[ \t]*$/ { next }
-              { skip = 0; print }')"
+            # Drop a leading subject that only repeats the tag name (GitHub's own
+            # "release notes from tag" UI does the same, and the page header already
+            # shows it), with the blank line behind it. Pure bash: the sed this replaces
+            # tried to re-test "line 1" after deleting it, which never happens - sed
+            # numbers the input stream, so a leading blank line survived.
+            NOTES="${NOTES//$'\r'/}"
+            if [ "$NOTES" != "${NOTES#*$'\n'}" ] && [ "${NOTES%%$'\n'*}" = "$TAG" ]; then
+              NOTES="${NOTES#*$'\n'}"
+              while [ "$NOTES" != "${NOTES#*$'\n'}" ] && [ -z "${NOTES%%$'\n'*}" ]; do
+                NOTES="${NOTES#*$'\n'}"
+              done
+            fi
             printf '%s\n' "$NOTES" > RELEASE_NOTES.md
+            [ "$SRC" = "none" ] && SRC="api-tag"
+          else
+            SRC="fallback"
           fi
+          API_TYPE="$(cat .ci_tag_type 2>/dev/null || echo '')"
+          echo "notes source: $SRC | local ref type: ${LOCAL_TYPE:-<missing>} | api object type: ${API_TYPE:-<unknown>} | notes bytes: ${#NOTES}"
 
           if [ ! -s RELEASE_NOTES.md ]; then
             # Fallback for a lightweight tag: subject lines since the previous tag.
@@ -121,6 +179,11 @@ jobs:
                 git log --no-merges -n 40 --pretty='- %s' "$TAG"
               fi
             } > RELEASE_NOTES.md
+            # Self-diagnosing: job logs need admin rights, so leave the object types on
+            # the release page itself. An HTML comment is invisible to readers, and one
+            # look at the published body then pins the cause instead of another guess.
+            printf '\n<!-- ci-diag: notes=%s local_ref=%s api_tag=%s -->\n' \
+              "$SRC" "${LOCAL_TYPE:-missing}" "${API_TYPE:-missing}" >> RELEASE_NOTES.md
           fi
 
           echo "----- release notes -----"
