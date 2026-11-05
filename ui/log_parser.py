@@ -1,6 +1,6 @@
 """Pure log line parsing and coloring for llama-server output (no Qt dependency).
 
-Extracted from ui/main_window.py (optimization-plan C2): level-based HTML
+Extracted from ui/main_window.py so it can be tested without Qt: level-based HTML
 coloring and the pre-compiled pattern table that feeds runtime info.
 
 Verbosity note (llama.cpp >= #23021, commit 67b2b7f2f "logs: reduce"): the

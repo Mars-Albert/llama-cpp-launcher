@@ -1,6 +1,6 @@
 """HTML rendering of parsed runtime info (no Qt dependency).
 
-Extracted from ui/main_window.py (optimization-plan C2): info dict -> HTML.
+Extracted from ui/main_window.py so it can be tested without Qt: info dict -> HTML.
 """
 import html as html_mod
 

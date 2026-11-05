@@ -1,6 +1,6 @@
 """Pure llama-server command line construction (no Qt dependency).
 
-Extracted from ui/main_window.py (optimization-plan C2). CommandBuilder holds
+Extracted from ui/main_window.py so it can be tested without Qt. CommandBuilder holds
 the live-parsed defaults and emits a CLI flag only when a parameter differs
 from its default (see is_default / neg_flag).
 

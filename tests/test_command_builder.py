@@ -1,6 +1,6 @@
 """Tests for llama-server command construction (ui/command_builder.py).
 
-Covers (optimization-plan D2, with A2/A3 behavior):
+Covers:
 - default values are not emitted;
 - negatable flags emit bidirectionally (default-on -> --no-X, default-off -> --X);
 - n_gpu_layers "all" -> 999, numeric, and default "auto" handling;
