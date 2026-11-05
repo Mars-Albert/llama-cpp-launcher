@@ -4,6 +4,16 @@ on:
   push:
     tags:
       - 'v*'
+  # Re-publish a tag without rewriting it (fixing notes, rebuilding the exe). The
+  # push trigger only fires on a tag creation, so without this the only way to
+  # re-run a release is to delete and move the tag - which is what v1.9.1 needed
+  # three times.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to publish, e.g. v1.9.1'
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -43,13 +53,27 @@ jobs:
           QT_QPA_PLATFORM: offscreen
         run: python -m pytest tests/ -q
 
-      - name: Extract version from tag
+      - name: Resolve the tag to publish
         id: version
         shell: bash
+        env:
+          INPUT_TAG: ${{ github.event.inputs.tag }}
         run: |
-          VERSION="${GITHUB_REF_NAME#v}"
+          TAG="${INPUT_TAG:-$GITHUB_REF_NAME}"
+          case "$TAG" in
+            v[0-9]*) ;;
+            *) echo "Not a version tag: $TAG"; exit 1 ;;
+          esac
+          # A workflow_dispatch run checks out a branch, so the tag object has to be
+          # fetched before anything can read its message. Verified in a clean clone:
+          # this refspec stores the tag object itself (for-each-ref says "tag");
+          # --force because replacing a peeled ref is not a fast-forward.
+          git fetch --no-tags --force origin "refs/tags/$TAG:refs/tags/$TAG" \
+            || echo "::warning::could not fetch refs/tags/$TAG"
+          echo "TAG=$TAG" >> "$GITHUB_OUTPUT"
+          VERSION="${TAG#v}"
           echo "VERSION=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "Building version: $VERSION"
+          echo "Building $VERSION from tag $TAG"
 
       - name: Update version in build_config.py
         shell: bash
@@ -69,7 +93,7 @@ jobs:
       - name: Write release notes from the tag message
         shell: bash
         run: |
-          TAG="${GITHUB_REF_NAME}"
+          TAG="${{ steps.version.outputs.TAG }}"
           NOTES=""
           SRC="none"
           # Annotated tag (`git tag -a`) carries the release notes; write them out
@@ -106,6 +130,10 @@ jobs:
             GITHUB_TOKEN="${GITHUB_TOKEN:-}" GH_REPO="$GITHUB_REPOSITORY" GH_TAG="$TAG" "$PY" - <<'PY'
           import json, os, sys, urllib.request
 
+          # The notes are CJK; a Windows console encoding (cp1252, cp936) would mangle
+          # or reject anything printed.
+          sys.stdout.reconfigure(encoding="utf-8")
+          sys.stderr.reconfigure(encoding="utf-8")
           tok = os.environ.get("GITHUB_TOKEN") or ""
           repo = os.environ.get("GH_REPO") or ""
           tag = os.environ.get("GH_TAG") or ""
@@ -202,3 +230,74 @@ jobs:
           overwrite_files: true
           draft: false
           prerelease: false
+
+      - name: Enforce the release body and prove it landed
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          GH_TAG: ${{ steps.version.outputs.TAG }}
+        run: |
+          # action-gh-release does send a body on update ("g = E || f"), and it wrote
+          # ours on the first publish of v1.9.1 - but on the two re-runs for the same
+          # tag it replaced the asset twice while the body stayed byte-identical to the
+          # first run (the commit list still ended at that run's tip, 4 entries instead
+          # of 5 and 6). Whatever its merge rule turns out to be, the body is ours:
+          # PATCH it, then read it back and fail the run if it did not land.
+          PY="$(command -v python || command -v python3 || echo '')"
+          if [ -z "$PY" ]; then
+            echo "::error::no python on PATH; cannot verify the release body"
+            exit 1
+          fi
+          "$PY" - <<'PY'
+          import json, os, sys, urllib.request
+
+          sys.stdout.reconfigure(encoding="utf-8")
+          tok = os.environ["GITHUB_TOKEN"]
+          repo = os.environ["GH_REPO"]
+          tag = os.environ["GH_TAG"]
+          api = "https://api.github.com/repos/" + repo
+          headers = {
+              "Accept": "application/vnd.github+json",
+              "User-Agent": "enforce-release-body",
+          }
+          if tok:
+              headers["Authorization"] = "Bearer " + tok
+
+
+          def call(method, url, payload=None):
+              data = json.dumps(payload).encode() if payload is not None else None
+              req = urllib.request.Request(url, data=data, method=method, headers=headers)
+              with urllib.request.urlopen(req, timeout=60) as resp:
+                  raw = resp.read()
+                  return json.loads(raw) if raw else {}
+
+
+          want = open("RELEASE_NOTES.md", encoding="utf-8").read()
+          rel = call("GET", api + "/releases/tags/" + tag)
+          have = rel.get("body") or ""
+          print("release id:", rel.get("id"), "| stored chars:", len(have),
+                "| wanted chars:", len(want), flush=True)
+          print("stored first line:", (have.splitlines() or [""])[0], flush=True)
+          if have.strip() == want.strip():
+              print("body already correct", flush=True)
+              sys.exit(0)
+          if not tok:
+              sys.exit("body differs and GITHUB_TOKEN is empty; cannot PATCH it")
+
+          call("PATCH", "%s/releases/%s" % (api, rel["id"]), {"body": want})
+          back = call("GET", api + "/releases/tags/" + tag).get("body") or ""
+          print("after PATCH, stored chars:", len(back), flush=True)
+          print("file has ci-diag:", "ci-diag" in want, "| stored has ci-diag:",
+                "ci-diag" in back, flush=True)
+          if back.strip() != want.strip():
+              print("stored first line:", (back.splitlines() or [""])[0], flush=True)
+              # Only a difference in the HTML comment means GitHub strips comments from
+              # stored release bodies - a real fact worth having, since the comment is
+              # the fallback self-diagnostic. Say so instead of guessing about it.
+              if back.strip() == want.split("<!--")[0].strip():
+                  print("NOTE: everything matches except the trailing HTML comment",
+                        flush=True)
+              sys.exit("release body still differs from RELEASE_NOTES.md")
+          print("body enforced: ok", flush=True)
+          PY
