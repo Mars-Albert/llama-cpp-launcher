@@ -1026,7 +1026,9 @@ class MainWindow(QMainWindow):
         self.live_metrics = LiveMetricsBar()
         _lpal = self._THEME_PALETTES[self.theme]
         self.live_metrics.set_theme_colors(_lpal["text"], _lpal["muted"],
-                                           _lpal["info"])
+                                           _lpal["info"],
+                                           _lpal["phase_prefill"],
+                                           _lpal["phase_decode"])
         self._live_worker = None
         # **不要给这一项加对齐标志**（第五轮找了很久的根因）：带 AlignVCenter 时
         # QLayout 按 sizeHint 供给、并允许把部件压到它自己的布局最小宽度以下 ——
@@ -1811,6 +1813,24 @@ class MainWindow(QMainWindow):
     def _on_live_stats(self, stats):
         self.live_metrics.update(stats)
 
+    def _sync_last_task_speeds(self):
+        """把“上一段连续活动的均值”转给指标带（prefill / decode 各一份）。
+
+        数值是服务端自己在 `slot print_timing` 里算的单任务均值（`ui/log_parser.py`
+        存的 `prompt_tps_last` / `decode_tps_last`）。指标带在本窗口无该类活动时（服务
+        空闲，或正处在另一个阶段：decode 期间的 Prefill 格）拿它顶位，而不是画一排
+        破折号；runtime info 里没有这两个键（一个任务都没跑过 / 日志等级调低到看不到
+        slot INFO）时传 None → 保持现有的破折号。重绘由带内自己控频（值每任务只变 2 次）。
+        """
+        bar = getattr(self, "live_metrics", None)
+        if bar is None:      # 构造期防御：指标带未建出来时不得报错
+            return
+        info = self._runtime_info
+        bar.set_last_task_speeds(info.get("prompt_tps_last"),
+                                 info.get("prompt_tokens_last"),
+                                 info.get("decode_tps_last"),
+                                 info.get("decode_tokens_last"))
+
     def _copy_command(self):
         self._save_current_to_params()
         args = self._build_args_from_params()
@@ -1901,6 +1921,7 @@ class MainWindow(QMainWindow):
         self.timer.stop()
         self.start_time = None
         self._runtime_info = {}
+        self._sync_last_task_speeds()   # 指标带的“上一段均值”跟着清空（→ 回到 —）
         self.run_time_label.setText(t("⏱ 00:00"))
         self.info_display.setHtml(empty_info_html())
 
@@ -2259,6 +2280,8 @@ class MainWindow(QMainWindow):
     def _parse_log_line(self, line):
         if parse_log_line(line, self._runtime_info):
             self._update_info_display()
+            # 日志里可能刚出现 slot print_timing 的单任务均值（全仓唯一的数据源）
+            self._sync_last_task_speeds()
 
 
     def _update_info_display(self):
@@ -3757,7 +3780,9 @@ class MainWindow(QMainWindow):
         if getattr(self, "live_metrics", None) is not None:
             _lpal = self._THEME_PALETTES[self.theme]
             self.live_metrics.set_theme_colors(_lpal["text"], _lpal["muted"],
-                                               _lpal["info"])
+                                               _lpal["info"],
+                                               _lpal["phase_prefill"],
+                                               _lpal["phase_decode"])
         self.update()
 
     def _sync_secondary_info_labels(self):
@@ -3830,6 +3855,10 @@ class MainWindow(QMainWindow):
             "copy_dis_bg": "#c9cdd3", "copy_dis_fg": "#8a8f98",
             "webui_dis_bg": "#c8d0d8", "webui_dis_fg": "#8a9098",
             "warn": "#b45309",
+            # 指标带的阶段色（格标签）：prefill 蓝 / decode 绿。不参与 QSS
+            # （ElidingLabel 自绘只认 palette + inline sheet），经
+            # `LiveMetricsBar.set_theme_colors` 注入
+            "phase_prefill": "#2563eb", "phase_decode": "#16a34a",
         },
         # Catppuccin-ish dark, harmonized with the always-dark log areas
         "dark": {
@@ -3845,6 +3874,9 @@ class MainWindow(QMainWindow):
             "copy_dis_bg": "#2f3136", "copy_dis_fg": "#767c88",
             "webui_dis_bg": "#2e333d", "webui_dis_fg": "#6b7280",
             "warn": "#f59e0b",
+            # 暗色下浅蓝/浅绿在 win_bg 上对比不够，换亮一档的同族色（与按钮
+            # 暗色用 #4ade80/#f87171 同一理由）
+            "phase_prefill": "#60a5fa", "phase_decode": "#4ade80",
         },
     }
 

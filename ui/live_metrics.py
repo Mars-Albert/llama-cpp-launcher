@@ -42,10 +42,16 @@
    填充侧白字 / 轨道侧正文色各裁一半，见 _CtxMeter）；tooltip 挂在格与条两处。
 5. 未运行 / unix socket：第七轮（2026-11）定案为**七格常驻** —— 曾经折叠成
    一句提示（"服务未启动 · 启动后…"），用户指着那行说"这行文字换成指标值，
-   即不用启动后再显示出来，一直都显示" → 提示语删除，未运行时七格仍是定宽灰
-   破折号，"为什么还没有数值"进 tooltip（未启动 / 未勾选 --metrics / unix
-   socket 无 HTTP 端点 三种情形各有专门说明）。行高 34px 常驻，E11 最小高度
-   算术不变，而且条带只有一种排版 → 窗口最小宽度不随服务启停变化。
+   即不用启动后再显示出来，一直都显示" → 提示语删除，未运行时七格仍在原位，
+   "为什么还没有数值"进 tooltip 的那一行身份（未启动 / unix socket 无 HTTP 端点；
+   “未勾选 --metrics”的导航引导只在**运行中且端点不支持**时才说 —— 那才是行动点，
+   没启动时用户能做的只有先把服务跑起来）。行高 34px 常驻，E11 最小高度算术不变，而且
+   条带只有一种排版 → 窗口最小宽度不随服务启停变化。**哪格是 0、哪格是破折号**：
+   速度格未知 → 定宽灰破折号；累计组与**上下文条** → **0**（用户：“上下文
+   进度条仅在有活动时显示，停止了就不显示了，应该一直显示，哪怕刚开始时也
+   应为 0”）——
+   0 是个值、破折号是“读不到”；服务停掉后 KV 随之消失，0% 就是真实情况。只有
+   **读不到**（/slots 被关、unix socket）时上下文条才回到破折号（见 _set_ctx_zero）。
 6. 组内 1px 竖分隔线删除（旧版 7px 间距让线贴着下一个字，像断笔的 ``|Σ``），
    只留两组之间一条。
 7. 格标签用 ElidingLabel（最小宽度 0）：整行最小宽度（捆绑字体实测）
@@ -57,13 +63,60 @@
    画出来的 8px 圆角块，四态染色，位置就在运行时长前面），本条带成为纯数据；
    “运行中但 /slots 与 /metrics 都不应答”仍由本模块判定（endpoints_alive()），
    避免两处各写一套语义。
+9. **阶段提示（2026-11 尾轮，用户：“在不同阶段（prefill/decode）时，它的 label
+   最好能显示个不同颜色，用于指示提醒用户当前在哪个阶段”）**：`diff_slots` 额外
+   发布 `prefilling` / `decoding`（判据 = 该 slot `is_processing` 且 `n_decoded`
+   是否为 0；**不用 `processed < n_prompt_tokens`** —— 投机解码会把生成 token 追进
+   那段历史，使该式在生成期间也成立 → 阶段永远卡在 prefill，同一个坑见
+   `ui/live_stats.py` 的 ctx 注释），条带据此给**正在进行的阶段那一格的格标签**染
+   阶段色（prefill 蓝 / decode 绿，其余保持 info 灰；多 slot 混合阶段时两个同时亮，
+   空闲与停服回灰）。阶段色两套主题各一份，经 `set_theme_colors(..., prefill,
+   decode)` 从 `MainWindow._THEME_PALETTES` 的 `phase_prefill` / `phase_decode` 注入
+   （暗色下浅蓝/浅绿在 `win_bg` 上对比不够，换亮一档）；模块里 `_PHASE_PREFILL` /
+   `_PHASE_DECODE` 只是浅色默认值。**只上色、不加粗**（粗体会改标签宽度，而整行按
+   内容定宽、E11 的最小宽度就是从这条量出来的），且只在阶段**变化**时重染（/slots
+   一秒一帧，`setStyleSheet` 会重新 polish ElidingLabel）。不给**数值**上阶段色：
+   数值的颜色已经编码了“实时 / 上一段均值 / 未知 / 最后已知值”，再叠一层就没人读
+   得懂。阶段本身不进 tooltip：颜色已经把这件事说了，再追一句就是“刻意”。
+10. **tooltip 的固定三槽（尾轮，用户：“tooltip 里不要刻意地写，重新整体规划
+    下显示的内容”）**：`_tip(key, value, note)` 是七格的唯一入口，**缺的不占行**：
+    ① 全名（`_FULL_NAMES`，格标签会被省略号截断，这里不会）；② **精确值**
+    （屏上那个可能缩成了 1.5K；速度带单位，破折号不占行）；③ **一行身份**，
+    只在“这**不是**主来源的当前值”时出现：上一段的均值 / 最后已知值 / 读不到的
+    原因（服务未启动、unix socket 无 HTTP 端点、/slots 端点已关闭、当前没有该类
+    活动）。**第三行与次要色同进同出**（同一个分支给出，不会只改一边）。含义 /
+    算法 / 数据来源 / 刷新频率 这类长期说明全部删除（选定两行结构），“本任务
+    命中率”这类额外数据也一律不再挤进 tooltip（代价：这个值现在无处可查）。
+    `tests/test_live_metrics.py::test_bar_tooltips_share_one_shape_name_value_optional_identity`
+    钉住形状与旧文案不得复活。
 
 左组（实时，/slots @1s）：Prefill · Decode · 上下文（内联计量条：正常 →
 70% 琥珀 → 90% 红）。右组（服务启动以来的累计，/metrics @5s，需勾选
 --metrics）：输入 · 缓存 · 输出 · 命中。格标签刻意缩短（总输入→输入…），
-全称在 tooltip；组标题删除后"累计"这层意思也靠 tooltip + 分隔线传达。
-右组的"还没有数据"是 **0**（计数从 0 起算，第八轮），左组的"还没有数据"
-是破折号（当前速率/占用确实是未知）。
+全称在 tooltip 第一行；组标题删除后“累计”这层意思只剩两组之间的留白与名称本身
+（尾轮 tooltip 重写后不再逐格写“服务启动以来…”，见第 10 条）。
+右组的"还没有数据"是 **0**（计数从 0 起算，第八轮），**上下文条也是 0%**
+（尾轮：常驻，不再只在有活动时才显示）；只有速度格（当前速率）的"还没有
+数据"是破折号。累计值只要非 0 就一直显示：`/metrics` 半路挂了也用次要色保留
+最后已知值（转次要色 + tooltip 那一行身份说原因），只有从没读到过数时才回到破折号。
+
+** Prefill / Decode 的空档不再是破折号，而是上一段的均值 **（2026-11 尾轮，用户：
+“没有活动时应显示上一段请求处理的平均值，仅前一段连续活动、不是全程平均；首次
+没处理可以保持 —”）：本窗口无该类活动时（服务空闲，**或正处在另一个阶段**——
+decode 期间的 Prefill 格），改显示上一段连续活动的均值，拿 `slot print_timing` 里
+服务端自己算的单任务累计值（→ `ui/log_parser.py` 的 `prompt_tps_last` /
+`decode_tps_last` → `MainWindow._parse_log_line` → `set_last_task_speeds`）：它天然就是
+“上一段”而非累计，也没有 1s 轮询差分的边界误差。均值有**两层**：阶段运行中的
+`prompt processing, … / 2792.41 tokens per second` 与 `n_gen = …, tg = 104.02 t/s`（每约 1s /
+3s 一行），然后阶段结束时那对精确的 `prompt eval time` / `eval time` 再覆盖 —— 只靠后者
+就是用户报的 bug：“第一次 prefill 完了到 decode 时 prefill 显示 -，第二次才有”，因为
+`print_timings()` 只在任务结束分支里调，第一个任务的 decode 阶段拿不到本任务 prefill
+的均值。画**次要色**（与破折号同族）+ tooltip 说明，免把静止的历史均值读成当前速度；
+一个任务都没跑过（无该日志行）时仍是破折号，停服时清空（`set_running(False)`）。短
+prefill（<3s）与短生成（<100 token）服务端不打阶段内那两行 → 那种任务的第一个阶段空档
+仍是破折号，**宁可破折号也不拿 1s 轮询差分数估算**（短段会低估几倍）。依赖 slot INFO：
+启动器把 `log_verbosity` 钉为 4 且不采纳 --help 解析值 → 默认配置下必然在；用户手动
+降到 3 可能没有 → 退化成现有的破折号，**不会编出一个错的数**。
 
 数值颜色（HTML span）由 MainWindow 经 set_theme_colors 从主题色板注入
 （QSS 管不进 rich text）；标签/组标题/提示是 ElidingLabel，颜色走 palette
@@ -102,6 +155,14 @@ _BAR_GREEN = "#16a34a"
 _BAR_AMBER = "#d97706"
 _BAR_RED = "#dc2626"
 
+# 阶段色（**浅色主题默认值**；暗色由 MainWindow 从主题色板注入更亮的同名色）：
+# prefill = 应用通用强调蓝，decode = “运行中”那个绿（状态点 / 版本行同一族）。
+# 只给**格标签**上色：数值的颜色已经编码了“实时 / 上一段均值 / 未知”，再叠一层
+# 阶段色就没人读得懂了。也**不加粗**：这一行按内容定宽，粗体会让标签宽度在阶段
+# 切换时跳几个像素（整行布局按内容走，E11 的最小宽度也是从这条量出来的）。
+_PHASE_PREFILL = "#2563eb"
+_PHASE_DECODE = "#16a34a"
+
 # 数值列的定宽样本（该指标的最宽取值 + 单位）：列宽 = 这个样本的宽度，与当前
 # 文本无关 → 1Hz 刷新整行不抖动、数字右对齐到同一列（实现见 _ValueColumn 的
 # strut；刻意不用 QFontMetrics 量宽，也不用 &nbsp; 填充 —— 前者可以量到垃圾值，
@@ -123,6 +184,9 @@ _UNITS = {"prefill": "t/s", "decode": "t/s", "ctx": "%", "hit_rate": "%"}
 # 宽度，不抖动。
 _ZERO_TEXT = {"total_in": "0", "cached_in": "0", "total_out": "0",
               "hit_rate": "0.0"}
+# 上下文格的“没有内容”：与累计组同一套规矩（0 是个值，不是“读不到”），
+# 而且服务停掉后 KV 随之消失，0% 就是真实情况（见 _set_ctx_zero）
+_CTX_ZERO_TEXT = "0.0"
 # 数值字体（与 _THEME_TEMPLATE 里 #metricValue 的 QSS 一致：Consolas 11px 粗体）
 _VALUE_PX = 11
 
@@ -342,9 +406,10 @@ class LiveMetricsBar(QWidget):
     状态入口：set_running / set_no_http（unix socket 启动，无 HTTP 端点）/
     set_metrics_checked / set_metrics_state（"available" | "unsupported" |
     "error"）/ set_slots_state（"available" | "off"）/ update(stats_dict) /
-    set_theme_colors(text, muted, info)；endpoints_alive() 供状态栏的运行状态点
-    使用。数值经 update() 灌入，其余状态变化只重绘文案与 tooltip。未运行 / 无
-    HTTP → 同一批格子改为定宽灰破折号 + 说明性 tooltip（不再有"提示态"）。
+    set_last_task_speeds(...) / set_theme_colors(text, muted, info)；
+    endpoints_alive() 供状态栏的运行状态点使用。数值经 update() 灌入，其余状态
+    变化只重绘文案与 tooltip。未运行 / 无 HTTP → 同一批格子改为定宽灰破折号 +
+    说明性 tooltip（不再有"提示态"）。
 
     ``_tiles[key] = (cell_widget, value_label, bar_or_None)``：tooltip 挂在
     格上（整格可悬停），数值文本在 value_label（HTML）。
@@ -362,12 +427,20 @@ class LiveMetricsBar(QWidget):
         "total_out": "输出",
         "hit_rate": "命中",
     }
-    _SPEED_TIPS = {
-        "prefill": "Prefill 速度：最近窗口 /slots 计数器每秒差值，每秒刷新",
-        "decode": "Decode 速度：最近窗口 /slots 计数器每秒差值，每秒刷新",
+    # 每格在 tooltip 里的**全称**（格标签会被省略号截断，这里不会）
+    _FULL_NAMES = {
+        "prefill": "Prefill 速度",
+        "decode": "Decode 速度",
+        "ctx": "上下文占用",
+        "total_in": "输入 token",
+        "cached_in": "缓存命中输入 token",
+        "total_out": "输出 token",
+        "hit_rate": "缓存命中率",
     }
-    _CTX_TIP = ("上下文占用（近似）：(输入 token + 生成 token) / n_ctx，"
-                "取最忙 slot")
+    # tooltip 第二行给的是**精确值**（屏上那个是被缩写过的 1.5K / 0）：零值这一档
+    # 在常驻排版里用得到，非零值当场算（见 _render_right）
+    _EXACT_ZERO = {"total_in": "0 tokens", "cached_in": "0 tokens",
+                   "total_out": "0 tokens", "hit_rate": "0.0%"}
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -378,6 +451,9 @@ class LiveMetricsBar(QWidget):
         self.setSizePolicy(QSizePolicy.Policy.Maximum,
                            QSizePolicy.Policy.Fixed)
         self._last = {}
+        # 上一段连续活动的均值（服务端 print_timing）：{key: (tps, tokens)}。
+        # 实时速率为空时拿它顶位（见 _speed_from_last_task），停服时清空。
+        self._last_task = {}
         self._running = False
         self._no_http = False
         self._metrics_checked = False
@@ -387,13 +463,18 @@ class LiveMetricsBar(QWidget):
         self._text = "#1a1a2e"
         self._muted = "#666"
         self._info = "#6b7280"
+        # 当前阶段（用户：“不同阶段时 label 最好显示个不同颜色，用于指示当前在哪个
+        # 阶段”）：("prefill",) / ("decode",) / 两者（多 slot 混合阶段）/ ()
+        self._phases = ()
+        self._phase_colors = {"prefill": _PHASE_PREFILL, "decode": _PHASE_DECODE}
         self._tiles = {}
 
         row = QHBoxLayout(self)
         row.setContentsMargins(10, 0, 10, 0)
         row.setSpacing(0)
 
-        # 七格常驻（第七轮）：未运行也在这里，只是定宽灰破折号。行内无弹性项：
+        # 七格常驻（第七轮）：未运行也在这里（速度格 = 定宽灰破折号，上下文与
+        # 累计组 = 0）。行内无弹性项：
         # 条带宽度 = 内容宽，靠右由外层合一行（MainWindow.control_bar）负责。
         # 「实时 / 累计」两个组标题于第八轮删除（用户："live 和 session 这两个
         # label 不需要，光占地方"）：分组交给「数值读数框 + 两组之间一道比组内宽的
@@ -522,11 +603,13 @@ class LiveMetricsBar(QWidget):
         bar.setTextVisible(False)     # 文字由 _CtxMeter.paintEvent 自己画（分两侧）
         return bar
 
-    def set_theme_colors(self, text, muted, info=None):
+    def set_theme_colors(self, text, muted, info=None, prefill=None,
+                         decode=None):
         """主题同步：数值 HTML 的 span 颜色 + ElidingLabel 的 palette 色。
 
         MainWindow 构造后与每次 _apply_theme 调用（QSS 管不进 rich text，
-        ElidingLabel 自绘也只认 palette）。
+        ElidingLabel 自绘也只认 palette）。`prefill` / `decode` 是**阶段色**：
+        暗色主题下浅色的蓝/绿在 `win_bg` 上对比不够，所以两套主题各给一份。
         """
         if text:
             self._text = text
@@ -534,6 +617,10 @@ class LiveMetricsBar(QWidget):
             self._muted = muted
         if info:
             self._info = info
+        if prefill:
+            self._phase_colors["prefill"] = prefill
+        if decode:
+            self._phase_colors["decode"] = decode
         ctx = self._tiles.get("ctx")
         if ctx is not None:
             # 条里的百分比是自己画的（QSS 管不到 paintEvent 的 pen）
@@ -555,20 +642,48 @@ class LiveMetricsBar(QWidget):
         pal.setColor(QPalette.ColorRole.Text, QColor(color))
         lab.setPalette(pal)
 
+    def _caption_color(self, key):
+        """格标签颜色：正在进行的阶段用**阶段色**，其余一律 info（次要灰）。
+
+        “正在跑的那一格自己亮着”比“两格都在、颜色互换”更好读：空闲时两格都是
+        灰色，一眼就知道没在活动。
+        """
+        return self._phase_colors[key] if key in self._phases else self._info
+
     def _apply_caption_colors(self):
-        """组标题 muted、格标签与单行提示 info（随主题同步）。"""
+        """格标签：当前阶段染阶段色，其余 info（都随主题同步）。"""
         for key in self._ALL_KEYS:
             cap = self._tiles[key][0].property("cap")
             if cap is not None:
-                self._caption_style(cap, self._info, False)
+                self._caption_style(cap, self._caption_color(key), False)
+
+    def _note_phases(self, stats):
+        """从这一帧 /slots 差分里读出当前阶段，**只在变化时**重染格标签。
+
+        /slots 每秒一帧，而 `setStyleSheet` 会让 ElidingLabel 重新 polish；阶段是
+        稳态量（一秒一跳的是数值），没变就什也不做。
+        """
+        phases = tuple(k for k, on in (("prefill", stats.get("prefilling")),
+                                       ("decode", stats.get("decoding")))
+                       if on)
+        if phases == self._phases:
+            return
+        self._phases = phases
+        self._apply_caption_colors()
 
     def set_running(self, running):
         self._running = running
         if not running:
             self._last = {}
+            # 上一段均值属于**这个**服务实例：停服/异常退出就清掉，否则重启后
+            # 会出现“累计计数已归零、速度却还写着上个实例的成绩”的自相矛盾。
+            self._last_task = {}
             self._no_http = False
             self._slots_state = "unknown"
             self._metrics_state = "unknown"
+            # 阶段也归零（没在服务 = 两格都回灰色），并重新染一次标签
+            self._phases = ()
+            self._apply_caption_colors()
         self._render()
 
     def set_no_http(self, on):
@@ -589,9 +704,38 @@ class LiveMetricsBar(QWidget):
         self._slots_state = state
         self._render()
 
+    def set_last_task_speeds(self, prefill_tps, prefill_tokens, decode_tps,
+                             decode_tokens):
+        """灌入**上一段连续活动**的均值（prefill / decode 各一份，None = 从未跑过）。
+
+        数据是 llama.cpp 自己在 `slot print_timing` 前缀下报的单任务累计值（全部走
+        `ui/log_parser.py` → `MainWindow._parse_log_line`）：阶段**运行中**就有
+        `prompt processing, …` / `n_gen = …, tg = …`（短 prefill <3s、短生成 <100 token 不打），
+        阶段**结束时**再来一对精确的 `prompt eval time` / `eval time` 覆盖它。只靠结束那
+        一对是不够的：第一个请求的 decode 阶段拿不到本任务 prefill 的均值，会整段显示
+        破折号（用户报的 bug：“第一次 prefill 完了到 decode 时 prefill 那里会显示 -，
+        第二次就显示”）。所以：① 精确（服务端 ms 级计时），不带 1s 轮询差分的边界误差；
+        ② 语义就是“上一段连续活动”，而不是服务启动以来的平均值；③ 一个任务都没跑过
+        时两者都是 None → 格子里仍是现有的定宽破折号（绝不估算）。
+
+        **先比较再重绘**：MainWindow 每解析到一条会改 runtime info 的日志都会同步一次，
+        而均值只在阶段运行中（约每秒一行 print_timing）与阶段结束时变 —— 与 /slots 的
+        1Hz 刷新同量级；模型加载那种日志洪水期（每秒上百行）绝不得次次 `_render()`。
+        """
+        incoming = {}
+        if prefill_tps is not None:
+            incoming["prefill"] = (prefill_tps, prefill_tokens)
+        if decode_tps is not None:
+            incoming["decode"] = (decode_tps, decode_tokens)
+        if incoming == self._last_task:
+            return
+        self._last_task = incoming
+        self._render()
+
     def update(self, stats):
         if self._running and not self._no_http:
             self._last = stats
+            self._note_phases(stats)
             self._render()
 
     def retranslate_ui(self):
@@ -615,6 +759,32 @@ class LiveMetricsBar(QWidget):
             gap = "" if unit == "%" else "&nbsp;"
             html += f'<span style="color:{self._muted}">{gap}{unit}</span>'
         return html
+
+    def _tip(self, key, value=None, note=None):
+        """一格 tooltip 的全部内容：**名称 / 精确值 /（必要时）一行身份**。
+
+        用户（2026-11 尾轮）：“tooltip 里不要刻意地写，重新整体规划下显示的内容”
+        → 选定两行结构。以前是一句基础文案后面按分支拼“· 提醒”，同一个意思在四个
+        分支里各写一遍（阶段进行中、空闲仍占 KV、--metrics 引导、上一段均值……）。
+        现在只有三个固定槽位，**缺的不占行**：
+
+        1. **名称** —— 全称（格标签会被省略号截断，这里不会）；
+        2. **数值** —— 精确值（屏上那个可能已被缩写成 1.5K）；无值（破折号）
+           时不占行；
+        3. **身份** —— 只在“这**不是**主来源的当前值”时出现：上一段的均值 /
+           最后已知值 / 读不到的原因。这一行与格子的**颜色同源**（次要色 ↔ 这一行
+           同时出现，两者由同一个分支决定），颜色变了必须有个文字说法。
+
+        其余全删：含义、算法、数据来源、刷新频率这类长期说明（选定两行），以及
+        “本阶段正在进行”（格标签已经变色）、“服务空闲，这段上下文仍在 KV 里”
+        （那是 ctx 这个指标本来的含义，不是提醒）。
+        """
+        rows = [t(self._FULL_NAMES[key])]
+        if value is not None:
+            rows.append(value)
+        if note:
+            rows.append(note)
+        return "\n".join(rows)
 
     def _set_cell(self, key, text, tip, color=None):
         cell, value, meter = self._tiles[key]
@@ -655,114 +825,164 @@ class LiveMetricsBar(QWidget):
         sess_ok = self._metrics_state not in ("unsupported", "error")
         return live_ok or sess_ok
 
-    def _render_placeholder(self, tip):
+    def _set_ctx_zero(self, tip):
+        """上下文条的“没内容”就是 **0.0%**，不是破折号。
+
+        用户：“上下文进度条仅在有活动时显示，停止了就不显示了，应该一直显示，
+        哪怕刚开始时也应为 0”。这与累计组同一套规矩（第八轮：“session 里的值
+        开始不应该没有值，开始就是 0”）：**0 是个值，破折号是“读不到”**。服务停掉后
+        KV 缓存随之消失，0% 就是真实情况，不是“暂无数据”。
+        只有**读不到**（/slots 被关、unix socket 无 HTTP 端点）才给破折号。
+        """
+        self._set_cell("ctx", _CTX_ZERO_TEXT, tip)
+        self._set_bar(0.0, 0)
+
+    def _render_placeholder(self, note, ctx_known=True):
         """未运行 / 无 HTTP 端点时的常驻排版（第七轮起条带只有一种排版）。
 
-        两组分别对待：
-        * 实时组（当前速度 / 上下文占用）**确实未知** → 定宽灰破折号；
-        * 累计组是"服务启动以来"的计数，一次任务都没跑过就是 **0** —— 0 是个值，
-          不是"没有值"（第八轮，用户："session 里的值开始不应该没有值，开始就
-          是 0"；旧版整排破折号看着像坏了）。
-        "为什么还是 0 / —"（未启动 / 未勾选 --metrics / unix socket 无 HTTP 端点）
-        在 tooltip 里；“怎么勾上”用**准确导航路径**（_metrics_nav：「高级模式」→
-        「服务」→「Prometheus指标 (--metrics)」，名字从 schema 取，不手写）。
+        三档分别对待（都还是"0 是个值、破折号是读不到"那条规矩）：
+        * 速度格（当前速率）**确实未知** → 定宽灰破折号；
+        * 上下文：`ctx_known` 为真就是 **0.0%**（没启动 = KV 里一个 token 都没有），
+          否则是真读不到（unix socket 无 HTTP 端点）→ 破折号；
+        * 累计组是"服务启动以来"的计数，一次任务都没跑过就是 **0**（第八轮，
+          用户："session 里的值开始不应该没有值，开始就是 0"；旧版整排破折号
+          看着像坏了）。
+
+        `note` 是那"一行身份"，七格共用一句（"怎么勾上 --metrics"不再拼到这里：
+        启动服务之后才可行动，届时累计格自己会说，见 _render_right）。
         """
-        for key in self._SPEED_KEYS + ("ctx",):
-            self._set_cell(key, None, tip)
-        self._set_bar(None, 0)
+        for key in self._SPEED_KEYS:
+            self._set_cell(key, None, self._tip(key, None, note))
+        if ctx_known:
+            self._set_ctx_zero(self._tip("ctx", _CTX_ZERO_TEXT + "%", note))
+        else:
+            self._set_cell("ctx", None, self._tip("ctx", None, note))
+            self._set_bar(None, 0)
         for key in self._METRIC_KEYS:
-            self._set_cell(key, _ZERO_TEXT[key], tip)
+            self._set_cell(key, _ZERO_TEXT[key],
+                           self._tip(key, self._EXACT_ZERO[key], note))
 
     def _render(self):
-        """常驻七格：没有数值时画定宽灰破折号，原因写进 tooltip。"""
+        """常驻七格：没有数值时画定宽灰破折号，原因在 tooltip 的那行身份里。"""
         if self._no_http:
-            self._render_placeholder(
-                t("server 以 unix socket 启动 · 无 HTTP 端点，指标不可用"))
+            # 连 HTTP 端点都没有 → 实时组与上下文真的读不到
+            self._render_placeholder(t("unix socket 无 HTTP 端点"),
+                                     ctx_known=False)
             return
         if not self._running:
-            tip = t("服务未启动 · 启动后在这里显示实时速度与累计指标")
-            if not self._metrics_checked:
-                tip += t(" · 累计指标：请在{nav}勾选并重启服务",
-                         nav=_metrics_nav())
-            self._render_placeholder(tip)
+            self._render_placeholder(t("服务未启动"))
             return
         self._render_left(self._last)
         self._render_right(self._last)
 
+    def _speed_from_last_task(self, key, note=None):
+        """本窗口无该类活动时，画上一段的均值（**次要色** + 同一分支的那行身份）。
+
+        "上一段"既可能是**同一个任务的上一阶段**（prefill 已完、正在 decode：数值来自
+        服务端阶段内的 `prompt processing, …` 行），也可能是上一个任务 —— 所以文案写
+        "上一段"而不写"上一段任务"。
+
+        次要色而不是主色：一个静止不动的历史均值如果与实时速率同色，会被读成
+        "当前速度"（与破折号同族，表示"这不是现在的数"）。颜色与那行身份由同一个
+        分支给出 —— 两者必须同进同出（旧版是两处各写一遍，改文案时容易漏一处）。
+        """
+        tps, tokens = self._last_task[key]
+        text = _fmt_speed(tps)
+        if note is None:
+            note = (t("上一段的均值 · {n} tokens", n=f"{int(tokens):,}")
+                    if tokens else t("上一段的均值"))
+        self._set_cell(key, text,
+                       self._tip(key, text + " t/s", note), self._muted)
+
     def _render_left(self, d):
         off = self._slots_state == "off"
-        off_tip = t("该 server 已关闭 /slots 端点（检查启动参数），实时速度不可用")
+        off_note = t("/slots 端点已关闭")
         for key in self._SPEED_KEYS:
-            if off:
-                self._set_cell(key, None, off_tip)
+            value = None if off else d.get(key + "_tps")
+            if value is not None:
+                text = _fmt_speed(value)
+                # tooltip 里要带单位：屏上那个 " t/s" 是 HTML 单位后缀，
+                # 不在 `_fmt_speed` 的返回里
+                self._set_cell(key, text, self._tip(key, text + " t/s"))
                 continue
-            value = d.get(key + "_tps")
-            tip = t(self._SPEED_TIPS[key])
-            self._set_cell(key, None if value is None else _fmt_speed(value),
-                           tip)
+            # 本窗口没有该类活动（服务空闲，或正处在另一个阶段：decode 期间的
+            # Prefill 格）—— 先试上一段的均值，一个任务都没跑过才回到定宽破折号。
+            # /slots 被关掉时同样走这里：均值来自日志、与端点无关，比整排破折号
+            # 有用；但身份那行要换成"端点被关"，不能写"当前没有该类活动"（那会让人
+            # 以为服务在空转）。
+            last = self._last_task.get(key)
+            if last is not None:
+                self._speed_from_last_task(key, off_note if off else None)
+                continue
+            self._set_cell(key, None,
+                           self._tip(key, None,
+                                     off_note if off
+                                     else t("当前没有该类活动")))
 
         if off:
-            self._set_cell("ctx", None, off_tip)
+            self._set_cell("ctx", None, self._tip("ctx", None, off_note))
             self._set_bar(None, 0)
             return
         frac = d.get("ctx_frac")
+        used, total = d.get("ctx_used"), d.get("ctx_total")
         if frac is None:
-            self._set_cell("ctx", None, t(self._CTX_TIP))
-            self._set_bar(None, 0)
+            # /slots 正常应答但还没有读数（模型还在加载、slot 未建好）：那也是
+            # “KV 里还没有 token” → 0%，上下文条常驻（见 _set_ctx_zero）
+            self._set_ctx_zero(self._tip("ctx", _CTX_ZERO_TEXT + "%",
+                                         t("KV 缓存为空")))
             return
         pct = frac * 100
-        used, total = d.get("ctx_used"), d.get("ctx_total")
-        if used is not None and total:
-            tip = t("上下文占用（近似）：{used} / {total} tokens ({pct}%)",
-                    used=f"{used:,}", total=f"{total:,}", pct=f"{pct:.1f}")
-        else:
-            tip = t(self._CTX_TIP)
-        self._set_cell("ctx", f"{pct:.1f}", tip)
+        # tooltip 第二行给完整账（屏上只有百分比）。缺 used/total 时（只能从
+        # ctx_frac 拿到比例）也不能把格刷成 0%：比例是真读数
+        exact = (f"{int(used):,} / {int(total):,}（{pct:.1f}%）"
+                 if used is not None and total else f"{pct:.1f}%")
+        # “空闲时这段上下文仍在 KV 里”**不写**：那就是“上下文占用”这个指标
+        # 本来的含义（任务结束 slot 不释放缓存，下个请求直接复用），不是提醒
+        self._set_cell("ctx", f"{pct:.1f}", self._tip("ctx", exact))
         self._set_bar(frac, pct)
 
     def _render_right(self, d):
-        if self._metrics_state in ("unsupported", "error"):
-            if self._metrics_state == "error":
-                tip = t("读取 /metrics 端点失败，请检查服务状态")
-            elif not self._metrics_checked:
-                tip = t("请在{nav}勾选并重启服务后显示", nav=_metrics_nav())
-            else:
-                tip = (t("参数已勾选，但本服务实例未提供 /metrics 端点；"
-                         "重启服务后生效（或当前 server 不支持）"))
-            for key in self._METRIC_KEYS:
-                self._set_cell(key, None, tip)
-            return
-
         # 累计组：/metrics 还没回数据时按 0 计（第八轮："开始就是 0"）—— 这些是
         # 服务启动以来的累计计数，"还没有"与"是 0"是同一件事，画成破折号反而像
-        # 坏了。真正未知的是实时组。/metrics 明确不可用（unsupported / error）
-        # 时仍走上面的破折号分支：那是"读不到"，不是"值为 0"。
+        # 坏了。真正未知的是实时组。
         total = d.get("prompt_total") or 0
         cached = d.get("prompt_cached_total") or 0
         predicted = d.get("predicted_total") or 0
+        note = None
+        color = None
 
-        self._set_cell("total_in", _fmt_tokens(total + cached),
-                       t("服务启动以来输入的 token 数（未缓存 {nc} + 缓存 {c}）",
-                         nc=f"{int(total):,}", c=f"{int(cached):,}"))
-        self._set_cell("cached_in", _fmt_tokens(cached),
-                       t("服务启动以来命中 KV 缓存的输入 token 数：{c}",
-                         c=f"{int(cached):,}"))
-        self._set_cell("total_out", _fmt_tokens(predicted),
-                       t("服务启动以来生成的 token 数：{n}",
-                         n=f"{int(predicted):,}"))
+        if self._metrics_state in ("unsupported", "error"):
+            if self._metrics_state == "error":
+                why = t("读取 /metrics 端点失败")
+            elif not self._metrics_checked:
+                why = t("请在{nav}勾选并重启服务后显示", nav=_metrics_nav())
+            else:
+                why = t("本服务实例未提供 /metrics 端点，重启服务后生效")
+            if not (total or cached or predicted):
+                # 读不到、而且手里一个数都没有 → 破折号（/metrics 明确不可用
+                # 就是"读不到"，不是"值为 0"）。写 0 是说不过去的：这一场可能
+                # 已经跑了几百万 token，只是端点没开 / 打不通
+                for key in self._METRIC_KEYS:
+                    self._set_cell(key, None, self._tip(key, None, why))
+                return
+            # 读不到了，但手里**有已知的非 0 值** → 继续把它们显示出来，而不是把
+            # 已经不为 0 的数字藏成破折号（用户："只要不为 0，就要保持一直显示"）。
+            # 次要色与"最后已知值"那一行由同一个分支给出。停服仍归零：那些 counter
+            # 属于**那个**服务进程（与左组"上一段均值"停服清空同一理由）。
+            note = t("最后已知值 · {why}", why=why)
+            color = self._muted
+
+        def cell(key, shown, exact):
+            """一格累计值：屏上是缩写（1.5K），tooltip 第二行给精确值。"""
+            self._set_cell(key, shown, self._tip(key, exact, note), color)
+
+        cell("total_in", _fmt_tokens(total + cached),
+             f"{int(total + cached):,} tokens")
+        cell("cached_in", _fmt_tokens(cached), f"{int(cached):,} tokens")
+        cell("total_out", _fmt_tokens(predicted), f"{int(predicted):,} tokens")
         denom = total + cached
-        task_rate = d.get("task_cache_hit")
-        if denom <= 0:
-            # 0/0 的命中率是未定义，但"0%"与"还没开始"在视觉上等价，且比破折号
-            # 更符合"开始就是 0"；tooltip 说清楚分母还是 0。
-            tip = t("会话累计命中率（/metrics）· 尚无输入 token")
-        elif task_rate is not None:
-            tip = t("本任务 {a}%（/slots）· 会话累计 {b}%（/metrics）",
-                    a=f"{task_rate * 100:.0f}",
-                    b=f"{cached / denom * 100:.1f}")
-        else:
-            tip = t("会话累计命中率（/metrics）：{b}%",
-                    b=f"{cached / denom * 100:.1f}")
-        self._set_cell("hit_rate",
-                       "0.0" if denom <= 0 else f"{cached / denom * 100:.1f}",
-                       tip)
+        # 0/0 的命中率未定义，但"0%"与"还没开始"在视觉上等价，且比破折号更符合
+        # "开始就是 0"（第八轮）；屏上那个数就是答案，不再补一行解释
+        cell("hit_rate",
+             "0.0" if denom <= 0 else f"{cached / denom * 100:.1f}",
+             "0.0%" if denom <= 0 else f"{cached / denom * 100:.1f}%")

@@ -54,7 +54,7 @@ def test_diff_slots_first_poll_is_baseline_only():
     assert res["prefill_tps"] is None
     assert res["decode_tps"] is None
     assert res["active"] is False
-    assert res["ctx_frac"] == pytest.approx(100 / 4096)  # n_prompt + decoded
+    assert res["ctx_frac"] == pytest.approx(600 / 4096)  # processed 500 + cached 0 + decoded 100
     assert prev["slots"][0]["decoded"] == 100
 
 
@@ -91,16 +91,111 @@ def test_diff_slots_sums_multiple_slots():
     assert res["decode_tps"] == pytest.approx(8.0)  # 3 + 5，跨 slot 求和
 
 
+def test_diff_slots_ctx_keeps_the_occupancy_when_the_slot_goes_idle():
+    """回归（用户报的 bug）：“不活动时 context 怎么还是 0？”
+
+    任务结束那一刻 `server_slot::release()` → `reset()` 就 `stats = {}`（普通 slot
+    的 prompt **不**清，只有 child/stateless/tts 才 `prompt_clear()`）：于是
+    `n_prompt_tokens_processed` / `_cache` / `n_decoded` 全归零，而
+    `n_prompt_tokens` 仍是整段对话的长度（`ptask = task ? task : task_prev` →
+    这几个字段任务后依旧发布）。只按任务账本算 ⇒ 一空闲就显示 0%，而 KV 里
+    几万 token 还占着（prompt cache 复用的整个意义）—— 上一轮为修“投机解码
+    双计”换成纯任务账本，把这个暴露出来了。现在取两本账的较大值。
+    """
+    gen = 15364
+    busy = _slot(processed=25825, n_cached=4096, decoded=gen, n_ctx=200000,
+                 active=True)
+    busy["n_prompt_tokens"] = 25825 + 4096 + gen
+    _, prev = diff_slots(None, [busy], 0.0)
+
+    # 任务结束后那一帧（重放 llama.cpp 的 reset()：stats 归零、prompt 保留）
+    idle = _slot(processed=0, n_cached=0, decoded=0, n_ctx=200000, active=False)
+    idle["n_prompt_tokens"] = 25825 + 4096 + gen
+    res, _ = diff_slots(prev, [idle], 1.0)
+    assert res["ctx_used"] == 45285
+    assert res["ctx_frac"] == pytest.approx(45285 / 200000)
+    assert res["active"] is False      # 阶段也归空（两格标签回灰）
+    # 空实为空（模型刚加载、一个请求都没跑过 / `prompt_clear()` 之后）仍是 0
+    res2, _ = diff_slots(None, [_slot(n_ctx=200000)], 0.0)
+    assert res2["ctx_used"] == 0
+    assert res2["ctx_frac"] == pytest.approx(0.0)
+
+
+def test_diff_slots_publishes_the_phase():
+    """阶段（prefill / decode）跟着 /slots 一起发布 —— 指标带给格标签染色提示用。"""
+    def _res(slot):
+        return diff_slots(None, [slot], 0.0)[0]
+
+    pre = _res(_slot(active=True, processed=1000, n_prompt=2000))
+    assert pre["prefilling"] is True and pre["decoding"] is False
+    dec = _res(_slot(active=True, processed=2000, n_prompt=2000, decoded=57))
+    assert dec["decoding"] is True and dec["prefilling"] is False
+    idle = _res(_slot(active=False, processed=2000, n_prompt=2000, decoded=57))
+    assert idle["prefilling"] is False and idle["decoding"] is False
+
+
+def test_diff_slots_phase_ignores_the_speculative_prompt_growth():
+    """阶段不能拿 `processed < n_prompt_tokens` 判：投机解码会把生成 token 追进那段
+    历史（同一个坑见 ctx 那两条测试），使该式在生成期间也成立 → 阶段会永远卡在
+    prefill。用 `n_decoded` 才干净。
+    """
+    slot = _slot(active=True, processed=25825, n_cached=4096, decoded=15364,
+                 n_ctx=200000)
+    slot["n_prompt_tokens"] = 25825 + 4096 + 15364   # 历史长度远超已处理：仍在生成
+    res = diff_slots(None, [slot], 0.0)[0]
+    assert res["decoding"] is True
+    assert res["prefilling"] is False
+
+
 def test_diff_slots_ctx_uses_busiest_slot():
     _, prev = diff_slots(None, [], 0.0)
     res, _ = diff_slots(
         prev,
-        [_slot(id=0, n_prompt=100, n_ctx=4096),
-         _slot(id=1, n_prompt=2000, decoded=500, n_ctx=4096)],
+        [_slot(id=0, n_prompt=100, processed=100, n_ctx=4096),
+         _slot(id=1, n_prompt=2000, processed=1600, n_cached=400, decoded=500,
+               n_ctx=4096)],
         1.0)
+    # 与 llama.cpp 自带 WebUI 同一套账：processed + cached + decoded（不是
+    # n_prompt_tokens + decoded，理由见下一个测试）
     assert res["ctx_frac"] == pytest.approx(2500 / 4096)
     assert res["ctx_used"] == 2500
     assert res["ctx_total"] == 4096
+
+
+def test_diff_slots_ctx_is_not_double_counted_while_spec_decoding():
+    """回归（用户报的 bug）：开投机解码（`--spec-type draft-mtp`）时上下文条偏大，
+    下一个请求 prefill 一开始又“变准”。
+
+    投机解码每验收到一批 token 就把它们追进到 slot 的 prompt 历史（llama.cpp
+    server-context.cpp：“add accepted tokens to the prompt”），于是
+    `n_prompt_tokens` 把生成部分也算进去了；旧算法 `n_prompt + decoded` 就把同一批
+    token 数了两遍（偏差 = 已生成的全部 token）。prompt 侧计数器不受污染 —— 它们就
+    是 WebUI 用的 `prompt_n` / `cache_n`。
+    """
+    slot0 = _slot(processed=25825, n_cached=4096, decoded=0, n_ctx=200000)
+    slot0["n_prompt_tokens"] = 29921          # 历史长度 = prompt + cached（未生成）
+    _, prev = diff_slots(None, [slot0], 0.0)
+
+    gen = 15364
+    slot1 = _slot(processed=25825, n_cached=4096, decoded=gen, n_ctx=200000)
+    # 生成过程中历史长度跟着 n_decoded 一起长（草稿 + 被接受的 token）
+    slot1["n_prompt_tokens"] = 29921 + gen
+    res, _ = diff_slots(prev, [slot1], 1.0)
+
+    assert res["ctx_used"] == 25825 + 4096 + gen          # WebUI 的数
+    assert res["ctx_frac"] == pytest.approx(45285 / 200000)
+    # 旧算法会多报整整一叠生成 token（45285 → 60649，+34%）
+    assert res["ctx_used"] != slot1["n_prompt_tokens"] + gen
+
+
+def test_diff_slots_ctx_falls_back_without_prompt_counters():
+    """老服务端不发布 `n_prompt_tokens_processed` / `_cache`：退回旧算法，
+    否则新算法会永远算出 0。"""
+    legacy = {"id": 0, "n_ctx": 4096, "is_processing": True,
+              "n_prompt_tokens": 1200, "next_token": [{"n_decoded": 300}]}
+    res, _ = diff_slots(None, [legacy], 0.0)
+    assert res["ctx_used"] == 1500
+    assert res["ctx_frac"] == pytest.approx(1500 / 4096)
 
 
 def test_diff_slots_task_cache_hit_deduped_by_id_task():
@@ -277,14 +372,15 @@ def test_worker_emits_slot_stats_and_merges_metrics(monkeypatch):
 def test_live_metrics_key_tables_translated():
     import core.i18n as I
     from ui.live_metrics import LiveMetricsBar
-    # 格标签 / 速度 tooltip / ctx tooltip 都是经变量喂给 t() 的（组标题
+    # 格标签与 tooltip 的全名都是经变量喂给 t() 的（AST 扫不到；组标题
     # 「实时 / 累计」第八轮删除，不再有这一项）
     missing = [s for s in LiveMetricsBar._LABELS.values()
                if s not in I._EN]
-    missing += [s for s in LiveMetricsBar._SPEED_TIPS.values()
+    missing += [s for s in LiveMetricsBar._FULL_NAMES.values()
                 if s not in I._EN]
-    if LiveMetricsBar._CTX_TIP not in I._EN:
-        missing.append(LiveMetricsBar._CTX_TIP)
+    # 每一格都得有全名：tooltip 第一行没有兜底，漏一格就是 KeyError
+    missing += [k for k in LiveMetricsBar._ALL_KEYS
+                if k not in LiveMetricsBar._FULL_NAMES]
     assert not missing, f"live-metrics i18n keys missing from _EN: {missing}"
 
 
@@ -329,6 +425,9 @@ _STATS = {
     "prefill_tps": 85.3, "decode_tps": 12.4,
     "ctx_frac": 0.423, "ctx_used": 1733, "ctx_total": 4096,
     "active": True,
+    # 这一帧在算输入（阶段格的默认值）；需要另一阶段时用
+    # `_live(bar, prefilling=False, decoding=True)` 覆盖
+    "prefilling": True, "decoding": False,
     "task_cache_hit": 0.5, "task_cache_tokens": 100,
     "prompt_total": 1000, "prompt_cached_total": 500,
     "predicted_total": 800,
@@ -437,13 +536,15 @@ def test_metrics_tooltip_uses_the_real_navigation_path():
     label = PARAMS_BY_KEY["metrics"].label.rstrip(":")
     assert tab in nav and label in nav, nav
     assert "服务页" not in tip and "Prometheus 指标" not in tip, tip
-    # 未启动那一行用的也是同一条路径
+    # 未启动时**不再**写这段引导（用户：“tooltip 里不要刻意地写”）：没启动
+    # 时行动点还不是“勾选项”，而是“先把服务跑起来”；启动后累计格自己会说
     bar.set_running(False)
-    assert nav in _tip(bar, "total_in"), _tip(bar, "total_in")
+    assert nav not in _tip(bar, "total_in"), _tip(bar, "total_in")
     # 英文模式：三个名字各自跟着翻译走（不是中文夹英文）
     set_language("en")
     try:
-        bar.set_metrics_state("unsupported")     # 重画才会用新语言重组 tooltip
+        bar.set_running(True)          # 停服会重置端点状态 → 重新报一次
+        bar.set_metrics_state("unsupported")   # 重画才会用新语言重组 tooltip
         tip_en = _tip(bar, "total_in")
         assert "Server" in tip_en, tip_en
         assert "Prometheus Metrics (--metrics)" in tip_en, tip_en
@@ -734,17 +835,62 @@ def test_bar_layout_follows_content_not_equal_columns():
         assert "上下文占用" in ctx_cell.toolTip()
         assert "上下文占用" in ctx_meter.toolTip()
         # 第七轮：未运行也是同一副七格 → ctx 的「标签 / 条 / 数字」三处一直在原位、
-        # 一直可悬停，只是数值换成灰破折号、原因进 tooltip
+        # 一直可悬停；第十二轮：停服后上下文条是 **0.0%**（KV 已空）而不是破折号
         bar.set_running(False)
         bar.resize(1100, 34)
         bar.layout().activate()
         app.processEvents()
         assert bar._tiles["ctx"][1].isVisibleTo(bar)
         assert bar._tiles["ctx"][2].isVisibleTo(bar)
-        assert _val(bar, "ctx").startswith("—")
+        assert _val(bar, "ctx") == "0.0%"
         assert "服务未启动" in _tip(bar, "ctx")
     finally:
         bar.close()
+def test_bar_ctx_meter_stays_visible_with_zero_when_there_is_no_activity():
+    """上下文条常驻：刚开始（还没跑过任何请求）就是 0.0%，停服后回到 0.0%，
+    只有**读不到**（/slots 被关 / 无 HTTP 端点）才给破折号。
+
+    用户：“上下文进度条仅在有活动时显示，停止了就不显示了，应该一直显示，
+    哪怕刚开始时也应为 0”。与累计组“开始就是 0”同一套规矩（第八轮）。
+    """
+    _qapp()
+    bar = _bar()
+    # ① 未启动 → 0.0%（而不是 —），计量条为空
+    assert _val(bar, "ctx") == "0.0%"
+    assert bar._tiles["ctx"][2].value() == 0
+    # ② 运行中、/slots 已应答但还没有读数（模型还在加载）→ 仍是 0.0%
+    bar.set_running(True)
+    bar.set_slots_state("available")
+    bar.set_metrics_state("available")
+    bar.update({"prefill_tps": None, "decode_tps": None})
+    assert _val(bar, "ctx") == "0.0%"
+    assert _tip(bar, "ctx") == "上下文占用\n0.0%\nKV 缓存为空"
+    # ③ 跑过一段后是真数；停服后 KV 消失 → 回到 0.0%（而不是破折号）
+    bar.update({"prefill_tps": 100.0, "decode_tps": 20.0,
+                "ctx_frac": 0.25, "ctx_used": 1024, "ctx_total": 4096})
+    assert _val(bar, "ctx") == "25.0%"
+    # ③b 服务空闲但 KV 里仍占着这段上下文 → 保持真数（不回到 0%）
+    #（用户：“不活动时 context 怎么还是 0？” —— 任务结束后服务端把任务计数器
+    # 归零了，但 prompt 缓存故意留着）
+    bar.update({"ctx_frac": 0.25, "ctx_used": 1024, "ctx_total": 4096,
+                "active": False})
+    assert _val(bar, "ctx") == "25.0%"
+    # tooltip 就两行（名称 + 精确值）：不再追写“这段仍在 KV 里”那类解释
+    #（用户：“tooltip 里不要刻意地写，重新整体规划下显示的内容”）
+    assert _tip(bar, "ctx") == "上下文占用\n1,024 / 4,096（25.0%）"
+    bar.set_running(False)
+    assert _val(bar, "ctx") == "0.0%"
+    assert bar._tiles["ctx"][2].value() == 0
+    # ④ /slots 被关 → 真的读不到 → 才是破折号
+    bar.set_running(True)
+    bar.set_slots_state("off")
+    assert _val(bar, "ctx").startswith("—")
+    # ⑤ unix socket 无 HTTP 端点 → 同上
+    bar.set_no_http(True)
+    assert _val(bar, "ctx").startswith("—")
+    assert "unix socket" in _tip(bar, "ctx")
+
+
 def test_bar_session_counters_read_zero_before_first_poll():
     """运行中、/metrics 还没回第一批数据：累计组是 0，不是破折号（第八轮）。
 
@@ -760,7 +906,8 @@ def test_bar_session_counters_read_zero_before_first_poll():
     assert _val(bar, "cached_in") == "0"
     assert _val(bar, "total_out") == "0"
     assert _val(bar, "hit_rate") == "0.0%"
-    assert "尚无输入 token" in _tip(bar, "hit_rate")
+    # 0/0 的命中率写 0.0%（“开始就是 0”），tooltip 不再补一句“尚无输入 token”
+    assert _tip(bar, "hit_rate") == "缓存命中率\n0.0%"
     # 实时组仍是当前值（有就显示，没有就破折号）
     assert _val(bar, "prefill") == "10.0 t/s"
     assert _val(bar, "decode").startswith("—")
@@ -771,6 +918,122 @@ def test_bar_session_counters_read_zero_before_first_poll():
     assert _val(bar, "total_in") == "6.0K"
     assert _val(bar, "hit_rate") == "16.7%"
     assert bar._tiles["total_in"][1].width() == w_before
+
+
+def test_bar_labels_highlight_the_current_phase():
+    """格标签按当前阶段染色（用户：“在不同阶段（prefill/decode）时，它的 label
+    最好能显示个不同颜色，用于指示提醒用户当前在哪个阶段”）。
+
+    正在跑的那一格自己亮着，其余保持 info 灰 —— 空闲时两格都灰，一眼就知道没活动；
+    多 slot 混合阶段时两个同时亮。停服归灰；换主题 / 换语言后阶段色不丢。
+    """
+    _qapp()
+    prefill_c, decode_c, info = "#1234ab", "#56cd65", "#707070"
+    bar = _bar()
+    bar.set_theme_colors("#101010", "#606060", info, prefill_c, decode_c)
+
+    def cap(key):
+        return bar._tiles[key][0].property("cap").styleSheet()
+
+    # 空闲：两格都是 info 灰
+    assert info in cap("prefill") and info in cap("decode")
+    # prefill 阶段（_STATS 默认）：只有 Prefill 亮蓝
+    _live(bar)
+    assert prefill_c in cap("prefill") and info in cap("decode")
+    # tooltip 不再写“本阶段正在进行”（颜色已经说了这件事）：活动格也只有两行
+    assert _tip(bar, "prefill") == "Prefill 速度\n85.3 t/s"
+    assert _tip(bar, "decode") == "Decode 速度\n12.4 t/s"
+    # decode 阶段：反过来
+    _live(bar, prefilling=False, decoding=True)
+    assert decode_c in cap("decode") and info in cap("prefill")
+    # 多 slot 混合：两个同时亮
+    _live(bar, prefilling=True, decoding=True)
+    assert prefill_c in cap("prefill") and decode_c in cap("decode")
+    # 本窗口无活动（两个阶段都没报）→ 回到灰
+    bar.update({})
+    assert info in cap("prefill") and info in cap("decode")
+    # 停服也归灰，并且重新染一次
+    _live(bar, prefilling=False, decoding=True)
+    bar.set_running(False)
+    assert info in cap("prefill") and info in cap("decode")
+    # 主题同步（_apply_theme 走同一入口）不会把阶段色洗成 info
+    _live(bar, prefilling=True, decoding=False)
+    bar.set_theme_colors("#101010", "#606060", info, prefill_c, decode_c)
+    assert prefill_c in cap("prefill") and info in cap("decode")
+
+
+def test_bar_phase_colors_do_not_move_the_layout():
+    """阶段色只改颜色、不改宽度：这一行按内容定宽，阶段来回切不能让整行跳动
+    （也提醒后人别给标签加粗体 —— 那会让 sizeHint 变）。
+    """
+    _qapp()
+    bar = _live(_bar())
+    bar.resize(1200, 34)
+    bar.layout().activate()
+    width = bar.sizeHint().width()
+    for _ in range(3):
+        _live(bar, prefilling=True, decoding=False)
+        _live(bar, prefilling=False, decoding=True)
+    bar.layout().activate()
+    assert bar.sizeHint().width() == width
+
+
+def test_bar_tooltips_share_one_shape_name_value_optional_identity():
+    """用户（2026-11 尾轮）：“tooltip 里不要刻意地写，重新整体规划下显示的内容”
+    → 七格固定三槽：**名称 / 精确值 /（必要时）一行身份**，缺的不占行。
+
+    钉住：① 第一行永远是全名（格标签会被省略号截断，这里不会）；② 当前值
+    就只两行 —— 含义/算法/来源/刷新频率一律不写；③ 第三行只在三档出现（上一段
+    的均值 / 最后已知值 / 读不到的原因），而且**出现时格子必是次要色**（颜色与
+    那行由同一个分支给出）；④ 旧版那些“追加一句提醒”不得复活。
+    """
+    from ui.live_metrics import LiveMetricsBar
+    _qapp()
+    banned = ("本阶段正在进行", "仍在 KV 缓存里", "计数器每秒差值",
+              "同一套算法", "启动后在这里显示", "服务启动以来")
+
+    def rows(bar, key):
+        tip = _tip(bar, key)
+        for word in banned:
+            assert word not in tip, (key, word, tip)
+        return tip.split("\n")
+
+    # ①② 实时值：两行，第一行是全名，第二行是带单位的值
+    bar = _live(_bar())
+    for key in bar._ALL_KEYS:
+        line1 = rows(bar, key)[0]
+        assert line1 == LiveMetricsBar._FULL_NAMES[key], (key, line1)
+        assert len(rows(bar, key)) == 2, (key, rows(bar, key))
+    assert rows(bar, "prefill")[1].endswith(" t/s")
+    assert rows(bar, "total_in")[1] == "1,500 tokens"     # 屏上是缩写的 1.5K
+
+    # ③ 上一段的均值：第三行 + 次要色同进同出
+    bar.set_last_task_speeds(1990.01, 74152, 92.63, 196)
+    _live(bar, prefill_tps=None, decode_tps=None)
+    lines = rows(bar, "prefill")
+    assert len(lines) == 3 and lines[2].startswith("上一段的均值")
+    assert bar._muted in bar._tiles["prefill"][1].text()
+    # tokens 缺席（临界日志）时那一行缩短，但仍存在
+    bar.set_last_task_speeds(1990.01, None, 92.63, None)
+    assert rows(bar, "prefill")[2] == "上一段的均值"
+
+    # ③ 最后已知值：第三行 + 次要色
+    bar2 = _live(_bar())
+    bar2.set_metrics_state("error")
+    lines = rows(bar2, "total_in")
+    assert len(lines) == 3 and lines[2].startswith("最后已知值")
+    assert bar2._muted in bar2._tiles["total_in"][1].text()
+
+    # ③ 读不到：第一行名称 + 最后一行原因（破折号不占一行）
+    bar3 = _bar()
+    assert rows(bar3, "prefill") == ["Prefill 速度", "服务未启动"]
+    bar3.set_running(True)
+    bar3.set_slots_state("available")
+    assert rows(bar3, "decode") == ["Decode 速度", "当前没有该类活动"]
+    bar3.set_slots_state("off")
+    assert rows(bar3, "ctx") == ["上下文占用", "/slots 端点已关闭"]
+    bar3.set_no_http(True)
+    assert rows(bar3, "prefill")[-1] == "unix socket 无 HTTP 端点"
 
 
 def test_bar_running_update_renders_values():
@@ -786,12 +1049,167 @@ def test_bar_running_update_renders_values():
     cbar = bar._tiles["ctx"][2]
     assert cbar.value() in (422, 423)
     assert "#16a34a" in cbar.styleSheet()
-    # 命中率 tooltip 同时带本任务与会话累计
-    tip = _tip(bar, "hit_rate")
-    assert "50%" in tip and "33.3%" in tip
-    # 无 decode 活动的窗口：数值位仍是定宽破折号（列宽不变）
+    # 命中率 tooltip：屏上那个值的精确版（本任务那一档不再写 —— 两行结构）
+    assert _tip(bar, "hit_rate") == "缓存命中率\n33.3%"
+    # 实时速度格的 tooltip：名称 + 带单位的值
+    assert _tip(bar, "prefill") == "Prefill 速度\n85.3 t/s"
+    assert _tip(bar, "ctx") == "上下文占用\n1,733 / 4,096（42.3%）"
+    # 无 decode 活动的窗口、且一个任务都没跑过 → 仍是定宽灰破折号（列宽不变）
     _live(bar, decode_tps=None)
     assert _val(bar, "decode") == "— t/s"
+
+
+def test_bar_shows_previous_run_average_when_no_live_rate():
+    """空档格显示**上一段连续活动**的均值，不再是一排破折号。
+
+    数值是服务端自己在 `slot print_timing` 里算的单任务总量 ÷ 总时长（见
+    `ui/log_parser.py` 的 `prompt_tps_last` / `decode_tps_last`），所以它天然就是
+    “上一段”而不是全程平均，也没有 1s 轮询差分的边界误差。
+    """
+    _qapp()
+    bar = _live(_bar())
+    bar.set_last_task_speeds(1990.01, 74152, 92.63, 196)
+    # 本窗口两类活动都没有（服务空闲）→ 两格都落到上一段均值
+    _live(bar, prefill_tps=None, decode_tps=None)
+    assert _val(bar, "prefill") == "1990.0 t/s"
+    assert _val(bar, "decode") == "92.6 t/s"
+    # 次要色（与破折号同族）：静止的历史均值不能被读成“当前速度”
+    html = bar._tiles["prefill"][1].text()
+    assert bar._muted in html and bar._text not in html
+    # tooltip 说清来历：上一段 + 精确值 + token 数
+    tip = _tip(bar, "prefill")
+    assert "上一段" in tip and "1990.0" in tip and "74,152" in tip
+    # 实时值优先：均值绝不覆盖当前速率
+    _live(bar)
+    assert _val(bar, "prefill") == "85.3 t/s"
+    assert _val(bar, "decode") == "12.4 t/s"
+    # 跳阶段（decode 期间的 Prefill 格）同样走均值
+    _live(bar, prefill_tps=None, decode_tps=12.4)
+    assert _val(bar, "prefill") == "1990.0 t/s"
+    assert _val(bar, "decode") == "12.4 t/s"
+
+
+def test_bar_previous_run_average_clears_on_stop():
+    """停服回到破折号：均值属于**这个**服务实例，不能留给下个实例。"""
+    _qapp()
+    bar = _live(_bar())
+    bar.set_last_task_speeds(1990.01, 74152, 92.63, 196)
+    _live(bar, prefill_tps=None, decode_tps=None)
+    assert _val(bar, "prefill") == "1990.0 t/s"
+    bar.set_running(False)
+    assert bar._last_task == {}
+    assert _val(bar, "prefill") == "— t/s"
+    # 重新起服务、还没跑过任务 → 仍是破折号
+    bar.set_running(True)
+    bar.set_slots_state("available")
+    bar.update({})
+    assert _val(bar, "prefill") == "— t/s"
+
+
+def test_bar_slots_off_falls_back_to_average_with_its_own_tooltip():
+    """/slots 被关：均值来自日志、与端点无关 → 显示它，但 tooltip 换成 slots 的说法；
+    token 数缺席（畸形日志）时 tooltip 不写那一截。"""
+    _qapp()
+    bar = _bar()
+    bar.set_running(True)
+    bar.set_slots_state("off")
+    bar.set_last_task_speeds(1990.01, 74152, 92.63, None)
+    assert _val(bar, "prefill") == "1990.0 t/s"
+    tip = _tip(bar, "prefill")
+    assert "/slots" in tip and "1990.0" in tip and "74,152" not in tip
+    assert "tokens" not in _tip(bar, "decode")
+
+
+def test_bar_previous_run_average_follows_language():
+    """新 tooltip 在英文模式下跟着走（字面量全部进了 _EN）。"""
+    from core.i18n import get_language, set_language
+    _qapp()
+    bar = _live(_bar())
+    bar.set_last_task_speeds(1990.01, 74152, 92.63, 196)
+    _live(bar, prefill_tps=None, decode_tps=None)
+    back = get_language()
+    try:
+        set_language("en")
+        bar.retranslate_ui()
+        assert "last segment's average" in _tip(bar, "prefill")
+        set_language("zh")
+        bar.retranslate_ui()
+        assert "上一段的均值" in _tip(bar, "prefill")
+    finally:
+        set_language(back)
+
+
+def test_first_task_prefill_average_is_there_during_its_own_decode(temp_settings):
+    """回归（用户报的 bug）：“第一次 prefill 完了到 decode 时 prefill 那里会显示 -，
+    第二次就显示出来”。
+
+    根因不在指标带，而在数据源：`print_timings()`（`prompt eval time` /
+    `eval time`）只在任务**结束**分支里调（llama.cpp server-context.cpp），所以第一个
+    任务的 decode 阶段全仓没有任何 prefill 均值可用 —— 第二个任务才拿得到上一个
+    任务的那对。修法是多认两行**阶段运行中**的 slot print_timing（下面直接重放用户
+    自己 last_run.log 里的真实行）。
+    """
+    _qapp()
+    w = _window(temp_settings)
+    try:
+        w.live_metrics.set_running(True)
+        w.live_metrics.set_slots_state("available")
+        w.live_metrics.set_metrics_state("available")
+        # prefill 还在跑（阶段内的累计均值，每约 1s 一行）
+        w._parse_log_line(
+            "0.22.925.546 I slot print_timing: id  0 | task 10 | prompt processing,"
+            " n_tokens =  25814, progress = 1.00, t =   9.09 s / 2838.98 tokens per second")
+        # 进入 decode：本窗口没有 prefill 活动，而本任务的精确均值（prompt eval time）
+        # 还没打 —— 以前这里就是破折号
+        w.live_metrics.update({"prefill_tps": None, "decode_tps": 104.0,
+                               "ctx_frac": 0.5, "ctx_used": 2048, "ctx_total": 4096})
+        assert _val(w.live_metrics, "prefill") == "2839.0 t/s"
+        assert _val(w.live_metrics, "decode") == "104.0 t/s"
+        # 生成中的 tg 行把 decode 均值也带进来（任务结束前就能读到）
+        w._parse_log_line(
+            "0.26.103.860 I slot print_timing: id  0 | task 10 | n_gen =    310,"
+            " tg = 102.37 t/s, tg_3s = 102.70 t/s")
+        assert w.live_metrics._last_task["decode"] == (102.37, 310)
+        # 任务结束：精确的那对覆盖阶段内的累计值（取精确值，不取 tg_3s 那种窗口值）
+        w._parse_log_line(
+            "2.43.428.294 I slot print_timing: id  0 | task 10 | prompt eval time ="
+            "    9333.32 ms / 25825 tokens (    0.36 ms per token,  2766.97 tokens per second)")
+        w._parse_log_line(
+            "2.43.428.299 I slot print_timing: id  0 | task 10 |        eval time ="
+            "  140342.79 ms / 15364 tokens (    9.14 ms per token,   109.47 tokens per second)")
+        assert w.live_metrics._last_task["prefill"] == (2766.97, 25825)
+        assert w.live_metrics._last_task["decode"] == (109.47, 15364)
+    finally:
+        w.close()
+
+
+def test_last_task_speeds_come_from_the_log_and_reach_the_row(temp_settings):
+    """接线：slot print_timing 日志行 → runtime info 数值键 → 指标带。
+
+    这是全仓唯一的数据源：没有 MainWindow._parse_log_line 里那一同步，带上的
+    均值分支就是死代码（而日志行只到 runtime info，带自己读不到）。
+    """
+    _qapp()
+    w = _window(temp_settings)
+    try:
+        w.live_metrics.set_running(True)
+        w.live_metrics.set_slots_state("available")
+        w._parse_log_line(
+            "slot print_timing: id  0 | task 0 | prompt eval time =   37262.14 ms"
+            " / 74152 tokens (    0.50 ms per token,  1990.01 tokens per second)")
+        w._parse_log_line(
+            "slot print_timing: id  0 | task 0 |        eval time =    2105.08 ms"
+            " /   196 tokens (   10.80 ms per token,    92.63 tokens per second)")
+        assert w._runtime_info["prompt_tps_last"] == 1990.01
+        assert w.live_metrics._last_task["prefill"] == (1990.01, 74152)
+        assert w.live_metrics._last_task["decode"] == (92.63, 196)
+        # 没实时值时真的画到格子上
+        assert _val(w.live_metrics, "prefill") == "1990.0 t/s"
+        # 停服/异常退出：_reset_runtime_state 一并清空（回到 —）
+        w._reset_runtime_state()
+        assert w.live_metrics._last_task == {}
+    finally:
+        w.close()
 
 
 def test_ctx_percent_is_painted_inside_the_bar():
@@ -843,10 +1261,15 @@ def test_bar_ctx_bar_color_tiers():
     for frac, color in ((0.5, "#16a34a"), (0.75, "#d97706"), (0.95, "#dc2626")):
         bar.update({"ctx_frac": frac, "ctx_used": None, "ctx_total": None})
         assert color in bar._tiles["ctx"][2].styleSheet()
-    # 无数据 → 计量条清空（旧版空轨道像渲染 bug 的方块）
+    # 无读数（/slots 还没回数据）→ 计量条为空、写 0.0%（第十二轮：常驻，
+    # 不再是破折号；chunk 宽 0 所以什么也不画）
     bar.update({})
-    assert bar._tiles["ctx"][2].styleSheet() == ""
     assert bar._tiles["ctx"][2].value() == 0
+    assert _val(bar, "ctx") == "0.0%"
+    # 真的读不到（/slots 被关）→ 清空样式 + 破折号（旧版空轨道像渲染 bug 的方块）
+    bar.set_slots_state("off")
+    assert bar._tiles["ctx"][2].styleSheet() == ""
+    assert _val(bar, "ctx").startswith("—")
 
 
 def test_bar_metrics_unavailable_dims_right_group():
@@ -863,6 +1286,44 @@ def test_bar_metrics_unavailable_dims_right_group():
     # 已勾选 → "重启后生效" tooltip
     bar.set_metrics_checked(True)
     assert "重启服务" in _tip(bar, "total_in")
+
+
+def test_bar_session_totals_survive_the_metrics_endpoint_dying():
+    """端点半路挂了（error）：已经不为 0 的累计值继续显示，不藏成破折号。
+
+    用户：“右边那几个指标，是否也符合这个逻辑：表达这次 session 状态、累积的
+    数值（非瞬时值），只要不为 0，就要保持一直显示” —— 之前唯一违反这条的就是
+    `metrics_state` 一变成 error/unsupported 就整组改破折号（把手里已有的数藏了）。
+    次要色 + tooltip 把“为什么不再更新”写在最前面；**一个数都没读到过**时仍是
+    破折号（未知≠0）。
+    """
+    _qapp()
+    bar = _live(_bar())          # 运行中 + 两端可用 + 一帧完整数据（累计组非 0）
+    assert _val(bar, "total_in") == "1.5K"
+    normal = bar._tiles["total_in"][1].text()
+    assert bar._text in normal and bar._muted not in normal
+    bar.set_metrics_state("error")
+    # 数字留在原地（而不是变破折号），转次要色，tooltip 先说原因
+    assert _val(bar, "total_in") == "1.5K"
+    assert _val(bar, "cached_in") == "500"
+    assert _val(bar, "total_out") == "800"
+    assert _val(bar, "hit_rate") == "33.3%"
+    html = bar._tiles["total_in"][1].text()
+    assert bar._muted in html and bar._text not in html
+    tip = _tip(bar, "total_in")
+    assert "/metrics" in tip and "1,500" in tip
+    # 新结构：第一行永远是全名，第二行是精确值，第三行才是“最后已知值”
+    assert tip.startswith("输入 token\n1,500 tokens\n")
+    # /metrics 恢复 → 回到主色（不需要新数据也能恢复：状态信号自己会回来）
+    bar.set_metrics_state("available")
+    assert bar._text in bar._tiles["total_in"][1].text()
+    # 一个数都没读到过 → 仍是破折号
+    bar2 = _bar()
+    bar2.set_running(True)
+    bar2.set_slots_state("available")
+    bar2.set_metrics_checked(True)
+    bar2.set_metrics_state("unsupported")
+    assert all(_val(bar2, k).startswith("—") for k in bar2._METRIC_KEYS)
 
 
 def test_bar_slots_off_dims_left_group_and_row_stays():
@@ -902,20 +1363,22 @@ def test_bar_idle_shows_the_metric_cells_not_a_hint():
     """第七轮：未运行时**不再**折叠成一句提示。
 
     用户指着「服务未启动 · 启动后在这里显示…」那行说："这行文字换成指标值，即
-    不用启动后再显示出来，一直都显示" → 提示语删除，未运行时七格常驻（定宽灰破
-    折号），"为什么还没有数值"进 tooltip。
+    不用启动后再显示出来，一直都显示" → 提示语删除，未运行时七格常驻。
 
-    钉住：① 未运行时七格 + 两个组标题都可见、数值是破折号；② 原因在 tooltip
-    （未勾选 --metrics 时带引导，勾选后换成通用说明）；③ 启动前后**只有一种排
-    版** → 地板不变 → 窗口最小宽度不随服务启停跳（旧版提示语比七格窄得多，模式
-    切换会改变整行需要的宽度）。
+    钉住：① 未运行时七格都可见：速度格是破折号，**上下文条与累计组是 0**
+    （0 是个值，不是“读不到”）；② 原因在 tooltip（未勾选 --metrics 时带引导，
+    勾选后换成通用说明）；③ 启动前后**只有一种排版** → 地板不变 → 窗口最小宽度
+    不随服务启停跳（旧版提示语比七格窄得多，模式切换会改变整行需要的宽度）。
     """
     _qapp()
     bar = _bar()
     assert bar._tiles["prefill"][0].isVisibleTo(bar)
-    # 实时组：未知 → 破折号
-    assert all(_val(bar, k).startswith("—")
-               for k in bar._SPEED_KEYS + ("ctx",))
+    # 速度格：未知 → 破折号
+    assert all(_val(bar, k).startswith("—") for k in bar._SPEED_KEYS)
+    # 上下文条：0.0%，不是破折号（用户：“停止了就不显示了，应该一直显示，
+    # 哪怕刚开始时也应为 0”）—— 没启动就是 KV 为空，0 是个值
+    assert _val(bar, "ctx") == "0.0%"
+    assert bar._tiles["ctx"][2].value() == 0
     # 累计组：**0**，不是破折号（第八轮："session 里的值开始不应该没有值，
     # 开始就是 0"）—— 计数从 0 起算，一排破折号看着像坏了
     assert _val(bar, "total_in") == "0"
@@ -923,8 +1386,10 @@ def test_bar_idle_shows_the_metric_cells_not_a_hint():
     assert _val(bar, "total_out") == "0"
     assert _val(bar, "hit_rate") == "0.0%"
     assert "服务未启动" in _tip(bar, "prefill")
-    # 未勾选 --metrics → tooltip 里带引导；勾选后消失
-    assert "Prometheus" in _tip(bar, "total_in")
+    # 三行结构（名称 / 精确值 / 一行身份）：未启动时七格共用“服务未启动”那一句。
+    # “怎么勾上 --metrics”不再拼到这里：没启动时不可行动，启动后累计格自己会说
+    assert _tip(bar, "total_in") == "输入 token\n0 tokens\n服务未启动"
+    assert "Prometheus" not in _tip(bar, "total_in")
     bar.set_metrics_checked(True)
     assert "Prometheus" not in _tip(bar, "total_in")
     # Maximum：宽度 = 内容宽，不给就不撑（富余归外层合一行的 stretch）
@@ -944,11 +1409,17 @@ def test_theme_and_language_sync_survives_reapply():
     _qapp()
     bar = _bar()
     bar.set_theme_colors("#cdd6f4", "#7f849c", "#9399b2")
-    _live(bar)
+    _live(bar)          # 一帧完整数据（默认处在 prefill 阶段）
     assert "#cdd6f4" in bar._tiles["prefill"][1].text()
-    cap = bar._tiles["prefill"][0].property("cap")
     from PyQt6.QtGui import QPalette
+    # 不在阶段的格标签 → info
+    cap = bar._tiles["total_in"][0].property("cap")
     assert cap.palette().color(QPalette.ColorRole.Text).name() == "#9399b2"
+    # 正在进行的阶段 → 阶段色（这里没传 prefill/decode → 浅色默认值）；
+    # 换主题时 MainWindow 会重注两套阶段色，这里验证同一入口不会把它洗回 info
+    pre = bar._tiles["prefill"][0].property("cap")
+    assert pre.palette().color(
+        QPalette.ColorRole.Text).name() == bar._phase_colors["prefill"]
     assert "Prefill 速度" in _tip(bar, "prefill")
 
 

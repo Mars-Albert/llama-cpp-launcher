@@ -55,10 +55,25 @@ def diff_slots(prev, slots, now):
 
     返回 (result, new_prev)：
       result —— {"prefill_tps", "decode_tps", "ctx_frac", "ctx_used",
-                 "ctx_total", "active", "task_cache_hit",
-                 "task_cache_tokens"}；速度字段为 None 表示"本窗口无该
-                 活动"（首轮 / 任务边界 / 纯 decode 窗口里的 prefill）。
+                 "ctx_total", "active", "prefilling", "decoding",
+                 "task_cache_hit", "task_cache_tokens"}；速度字段为 None 表示
+                 "本窗口无该活动"（首轮 / 任务边界 / 纯 decode 窗口里的 prefill）；
+                 `prefilling` / `decoding` = 此刻有 slot 在算输入 / 在生成
+                 （多 slot 时可能同时 True）。
+                 上下文占用 = max(slot 账本 `n_prompt_tokens`, 任务账本
+                 `processed + cached + decoded`)；两个都不能单独用，也不能相加，
+                 理由见函数 docstring 与下方注释。
       new_prev —— 下次调用作为 prev 传入。
+
+    两个账本：**任务账本** = `n_prompt_tokens_processed +
+    n_prompt_tokens_cache + n_decoded`（与 llama.cpp WebUI 的 `contextUsed` 同一
+    套），**slot 账本** = `n_prompt_tokens`（= `slot.prompt.tokens.size()`）。上下文
+    占用取两者的 **较大值**，因为任务账本只在任务期间存在：任务一结束
+    `server_slot::reset()` 就把 `stats = {}`（而 prompt 缓存故意保留），三个计数器
+    归零但 KV 里整段对话还在 → 只用任务账本会“一空闲就显示 0%”（用户报的 bug，
+    见 `test_diff_slots_ctx_keeps_the_occupancy_when_the_slot_goes_idle`）。
+    **绝不能把两个账本相加**（旧算法 `n_prompt_tokens + n_decoded` 就是把生成
+    token 数了两遍，同一个坑见下方注释）。
 
     计数器按任务在服务端重置，new < old 即任务边界：该 slot 本窗口只重新
     起算基线。n_prompt_tokens_cache 在整个任务内固定，因此"本任务缓存
@@ -71,6 +86,9 @@ def diff_slots(prev, slots, now):
         "ctx_used": None,
         "ctx_total": None,
         "active": False,
+        # 当前阶段（指标带的格标签颜色拿它做提示）：多 slot 时两个可能同时为 True
+        "prefilling": False,
+        "decoding": False,
         "task_cache_hit": None,
         "task_cache_tokens": None,
     }
@@ -98,6 +116,13 @@ def diff_slots(prev, slots, now):
         n_ctx = _int_or_zero(slot.get("n_ctx"))
         active = bool(slot.get("is_processing"))
         result["active"] = result["active"] or active
+        # 阶段判定：**看 `n_decoded` 是不是还在 0**。不用 `processed < n_prompt_tokens`
+        # 判“输入还没算完”：投机解码会把生成 token 追进 `n_prompt_tokens`（那个历史
+        # 长度，见上面 ctx 那段注释），使该式在生成期间也成立 → 阶段永远停在 prefill。
+        if active and decoded > 0:
+            result["decoding"] = True
+        elif active:
+            result["prefilling"] = True
 
         old = prev_slots.get(sid)
         if old is not None:
@@ -109,7 +134,46 @@ def diff_slots(prev, slots, now):
         new_slots[sid] = {"decoded": decoded, "processed": processed}
 
         if n_ctx > 0:
-            used = n_prompt + decoded
+            # 上下文占用：两个账本取**较大者**。
+            #
+            # ① 任务账本 `processed + cached + decoded`：与 llama.cpp 自带 WebUI
+            #    同一套账（tools/ui `contextUsed` = `prompt_n + cache_n +
+            #    predicted_n`，而 server-common.cpp 的 timings 就是
+            #    `n_prompt_processed` / `n_prompt_cached` / `n_gen`）。
+            # ② slot 账本 `n_prompt_tokens` = `slot.prompt.tokens.size()`：这个 slot
+            #    真正占着的 token 数。prefill 期间随处理进度增长（每批
+            #    `prompt.tokens.insert(...)`，见 server-context.cpp：“caller need to
+            #    update prompt.tokens after a successful call to keep track of the
+            #    processing progress”），生成期间每接受一个 `push_back`，新请求只复用
+            #    前缀时 `keep_first(n_past)` 会把它砍到前缀长，`prompt_clear()` 清零
+            #    —— 不写虚数，也不写陈旧数。
+            #
+            # **为何需要两个（尾轮，用户：“不活动时 context 怎么还是 0？”）**：任务
+            # 一结束 `server_slot::release()` → `reset()` 就 `stats = {}`（普通 slot 的
+            # prompt **不**清，只有 child/stateless/tts 才 `prompt_clear()`），于是
+            # `n_prompt_tokens_processed` / `_cache` / `n_decoded` 全变 0，而
+            # `n_prompt_tokens` 仍是整段对话长度（`ptask = task ? task : task_prev`
+            # 所以任务后这几个字段依旧发布）。只取①⇒空闲时假性 0%，而 KV 里几
+            # 万 token 还占着（prompt cache 复用的整个意义）。取 max ⇒ 任务内两本账
+            # 本来就应该相当（旧断言不受影响），任务后只剩②。
+            #
+            # **绝不能相加**：投机解码（`--spec-type` / `--model-draft`，本仓库预设
+            # 常用的 draft-mtp 就是）每验收到一批 token 就把它们追进②那段历史，而
+            # `n_decoded` 计的正是同一批 —— 旧算法 `n_prompt + decoded` 把生成部分
+            # **数了两遍**：decode 期间明显偏大（偏差 = 已生成的全部 token），下一个
+            # 请求一进 prefill（n_decoded 归零）又“莫名变准”（上一轮用户报的 bug，
+            # 见 test_diff_slots_ctx_is_not_double_counted_while_spec_decoding）。
+            #
+            # 老服务端没有①那两个字段时退回 `n_prompt + decoded`（那个年代
+            # `n_prompt_tokens` = `task->n_tokens()`，是个常量，不含生成 token），
+            # 否则新算法会永远算出 0。
+            # 分母用的是 **slot 自己的** n_ctx（`n_ctx_slot()`）—— “这个槽位有多满”；
+            # parallel = 1 时它等于 WebUI 用的 `/props n_ctx`，多槽位时它就是单槽上限
+            # （比除以全局 ctx 更符合“取最忙 slot”这个展示意图）。
+            if "n_prompt_tokens_processed" in slot:
+                used = max(n_prompt, processed + n_cached + decoded)
+            else:
+                used = n_prompt + decoded
             frac = used / n_ctx
             if result["ctx_frac"] is None or frac > result["ctx_frac"]:
                 result["ctx_frac"] = frac

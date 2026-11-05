@@ -265,11 +265,65 @@ def test_slot_timings():
         "(   10.80 ms per token,    92.63 tokens per second)", info)
     assert info["prompt_speed"] == "1990.01 t/s · 74,152 tokens"
     assert info["decode_speed"] == "92.63 t/s · 196 tokens"
+    # 实时指标带要**数值原值**（自己排版/上色/定宽列，不从给人看的字符串反解）；
+    # 这两个键就是带子上“上一段连续活动的平均值”的全仓唯一数据源
+    assert info["prompt_tps_last"] == 1990.01
+    assert info["prompt_tokens_last"] == 74152
+    assert info["decode_tps_last"] == 92.63
+    assert info["decode_tokens_last"] == 196
 
 
 # ---------------------------------------------------------------------------
 # runtime info display
 # ---------------------------------------------------------------------------
+
+def test_slot_timings_in_flight_lines():
+    """阶段**运行中**的两行 print_timing（与上面那对结束行同前缀，函数名被
+    SLT_INF 的 `%12.*s` 截成 `print_timing`）也写 `*_tps_last`。
+
+    样本直接取自用户自己的 `~/.llama-cpp-launcher/logs/last_run.log`。没有它们，
+    第一个任务的 decode 阶段就没有 prefill 均值可用（`print_timings()` 只在任务结束
+    分支里调）—— 就是“第一次 decode 时 Prefill 显示 -”的根因。
+    同时钉住：这两行**不改**给人看的 `prompt_speed` / `decode_speed`（运行信息页的
+    「最近任务」是已完成任务的总结）。
+    """
+    info = {}
+    parse_log_line(
+        "0.22.925.546 I slot print_timing: id  0 | task 10 | prompt processing, "
+        "n_tokens =  25814, progress = 1.00, t =   9.09 s / 2838.98 tokens per second", info)
+    assert info["prompt_tps_last"] == 2838.98
+    assert info["prompt_tokens_last"] == 25814
+    assert "prompt_speed" not in info
+    parse_log_line(
+        "0.26.103.860 I slot print_timing: id  0 | task 10 | n_gen =    310,"
+        " tg = 102.37 t/s, tg_3s = 102.70 t/s", info)
+    # 取 tg（本段累计均值），不取 tg_3s（最近 3s 窗口）
+    assert info["decode_tps_last"] == 102.37
+    assert info["decode_tokens_last"] == 310
+    assert "decode_speed" not in info
+    # 任务结束的那对精确值覆盖阶段内的累计值
+    parse_log_line(
+        "2.43.428.294 I slot print_timing: id  0 | task 10 | prompt eval time ="
+        "    9333.32 ms / 25825 tokens (    0.36 ms per token,  2766.97 tokens per second)",
+        info)
+    assert info["prompt_tps_last"] == 2766.97
+    assert info["prompt_speed"] == "2766.97 t/s · 25,825 tokens"
+
+
+def test_slot_timings_in_flight_lines_tolerate_garbage():
+    """inf / 缺字段（旧版 llama.cpp 无这两行，或 %8.2f 溢出成 inf）→ 不写键、不报错。"""
+    for line in (
+            "slot print_timing: id  0 | task 10 | prompt processing, n_tokens = 10,"
+            " progress = 0.01, t =   3.00 s /      inf tokens per second",
+            "slot print_timing: id  0 | task 10 | n_gen = 120, tg =    inf t/s,"
+            " tg_3s =   12.00 t/s",
+            "slot print_timing: id  0 | task 10 | prompt processing, n_tokens = 10,"
+            " progress = 0.01"):
+        info = {}
+        parse_log_line(line, info)
+        assert "prompt_tps_last" not in info
+        assert "decode_tps_last" not in info
+
 
 def test_info_shows_new_rows():
     info = {

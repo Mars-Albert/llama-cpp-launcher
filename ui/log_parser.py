@@ -70,6 +70,18 @@ def colorize_log_line(line, max_len=DISPLAY_LINE_MAX):
     return f'<span style="white-space: pre;">{escaped}</span>'
 
 
+def _tps_or_none(raw):
+    """`tokens per second` 捕获组 → float，解析不了就 None。
+
+    正则里的 `[\\d.]+` 只保证是数字与点（`1.2.3` 这种畸形行也能过），所以数值键
+    走这里而不是裸 `float()`：指标带要的 `*_tps_last` 必须是可用数值，宁可缺席。
+    """
+    try:
+        return float(raw)
+    except ValueError:
+        return None
+
+
 def line_level(line):
     """Return the level char ('D'/'I'/'W'/'E'/'F') of a log line, or None.
 
@@ -215,14 +227,56 @@ def compile_log_patterns():
     # `slot print_timing: id  0 | task 0 | prompt eval time = 37262.14 ms / 74152 tokens (0.50 ms per token, 1990.01 tokens per second)`
     def _handle_prompt_speed(info, m):
         info["prompt_speed"] = f"{m.group(2)} t/s · {int(m.group(1)):,} tokens"
+        # 同时存**数值本身**：实时指标带（ui/live_metrics.py）要自己排版、上色、
+        # 对齐定宽列，不能拿给人看的字符串反解。这是服务端算的**单个任务**的均值
+        # （总量 ÷ 总时长），正好是指标带空闲时想要的"上一段连续活动的平均值"。
+        tps = _tps_or_none(m.group(2))
+        if tps is not None:
+            info["prompt_tps_last"] = tps
+            info["prompt_tokens_last"] = int(m.group(1))
         return True
     _add(["prompt eval time"], r"prompt eval time =\s+[\d.]+ ms /\s*(\d+) tokens \(\s*[\d.]+ ms per token,\s*([\d.]+) tokens per second\)", _handle_prompt_speed)
 
     # `slot print_timing: id  0 | task 0 | eval time = 2105.08 ms / 196 tokens (10.80 ms per token, 92.63 tokens per second)`
     def _handle_decode_speed(info, m):
         info["decode_speed"] = f"{m.group(2)} t/s · {int(m.group(1)):,} tokens"
+        tps = _tps_or_none(m.group(2))                 # 同上，指标带用
+        if tps is not None:
+            info["decode_tps_last"] = tps
+            info["decode_tokens_last"] = int(m.group(1))
         return True
     _add(["eval time"], r"\beval time =\s+[\d.]+ ms /\s*(\d+) tokens \(\s*[\d.]+ ms per token,\s*([\d.]+) tokens per second\)", _handle_decode_speed, exclude=["prompt"])
+
+    # --- In-flight per-task timings (the pair above only lands at task *end*) ---
+    # 上一对只在任务**结束时**才打（`print_timings()` 在 stop/EOS/error 分支里调），所以
+    # 当前任务的 decode 阶段拿不到本任务 prefill 的均值 —— 这就是“第一个请求的 decode
+    # 期间 Prefill 格仍是 -，第二个请求才有”的根因。llama.cpp 在两个阶段**运行中**各自
+    # 还会打一行累计均值（`print_timings_pp` / `print_timings_tg`，函数名被 SLT_INF 的
+    # `%12.*s` 截成同样的 `print_timing` 前缀）。它们写同一批 `*_tps_last` 键，而日志本身
+    # 就是时序 → 阶段内的累计均值先用，任务结束时的精确值自然覆盖它。
+    # 刻意**不动** `prompt_speed` / `decode_speed` 那两串：运行信息页的「最近任务」是
+    # 已完成任务的总结，不该被进行中的阶段性均值改写（两个消费者的语义不同）。
+    # 短于 3s 的 prefill / 少于 100 个 token 的生成不会打这两行（服务端自己限的），
+    # 那时依旧靠任务结束的那对 → 没有任何均值时指标带就保持破折号（绝不估算）。
+    # `slot print_timing: id  0 | task 10 | prompt processing, n_tokens =  25821, progress = 1.00, t =   9.25 s / 2792.41 tokens per second`
+    def _handle_prompt_progress(info, m):
+        tps = _tps_or_none(m.group(2))
+        if tps is not None:
+            info["prompt_tps_last"] = tps
+            info["prompt_tokens_last"] = int(m.group(1))
+        return True
+    _add(["prompt processing"], r"prompt processing, n_tokens =\s*(\d+),\s*progress =\s*[\d.]+,\s*t =\s*[\d.]+ s /\s*([\d.]+) tokens per second", _handle_prompt_progress)
+
+    # `slot print_timing: id  0 | task 10 | n_gen =   2825, tg = 104.02 t/s, tg_3s =  95.45 t/s`
+    # 取 `tg`（本任务生成阶段的累计均值），**不取 `tg_3s`** —— 后者是最近 3s 窗口，
+    # 与“上一段连续活动的均值”不是一回事（而且实时格已经相当于它了）。
+    def _handle_decode_progress(info, m):
+        tps = _tps_or_none(m.group(2))
+        if tps is not None:
+            info["decode_tps_last"] = tps
+            info["decode_tokens_last"] = int(m.group(1))
+        return True
+    _add(["n_gen ="], r"\bn_gen =\s*(\d+),\s*tg =\s*([\d.]+) t/s", _handle_decode_progress)
 
     # --- Model loaded (new: `srv main: model loaded`) ---
     def _handle_model_loaded_new(info, m):
