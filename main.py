@@ -20,7 +20,7 @@ from PyQt6.QtWidgets import QApplication
 # QFontDatabase.addApplicationFont. The TTF's family name is NOT "Inter" but
 # the private "LlamaCPPLauncher" (name table renamed in-repo; it is still
 # the Inter 4.001 face). Why: the name "Inter" is squat-able — the report
-# machine's font store (2026-09/10 user reports) carries a third-party
+# machine's font store (2026-09/10 field reports) carries a third-party
 # "font beautification" file registered under several common family names at
 # once, with scrambled Latin DIGIT glyphs (0→O,
 # 4→×, 5→6, 8→≠, 9→女; letters and CJK stay intact). While that file
@@ -255,7 +255,7 @@ def main():
     _apply_app_icon(app)
     # The window is shown immediately with fallback defaults; the live
     # llama-server --help / --version results are fetched on a background
-    # thread and merged in asynchronously (plan A10).
+    # thread and merged in asynchronously.
     window = MainWindow(
         work_dir=_get_work_dir(),
         defaults=dict(_FALLBACK_DEFAULTS),

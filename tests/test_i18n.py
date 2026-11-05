@@ -4,7 +4,7 @@
 - every t("literal") call in main.py / ui/ / core/ must have an _EN entry,
   so a forgotten translation fails the build instead of silently showing
   Chinese in English mode;
-- t() must survive literal braces in copy (MCP JSON examples, plan C4).
+- t() must survive literal braces in copy (MCP JSON examples).
 """
 import ast
 import pathlib

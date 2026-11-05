@@ -172,7 +172,7 @@ def refresh_defaults(defaults):
 
 
 class ConfigManager:
-    """Preset JSON IO (plan C3).
+    """Preset JSON IO.
 
     Deliberately stateless about parameter values: MainWindow.params is the
     single source of truth. Presets are passed in / returned as plain dicts;
@@ -188,7 +188,7 @@ class ConfigManager:
         return self._defaults
 
     def set_defaults(self, defaults):
-        """Replace the defaults baseline (live-parsed defaults arriving after startup, plan A10)."""
+        """Replace the defaults baseline (live-parsed defaults arriving after startup)."""
         self._defaults = dict(defaults)
 
     def save_preset(self, name, params):

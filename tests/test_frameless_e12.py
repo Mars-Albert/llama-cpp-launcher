@@ -124,7 +124,7 @@ def test_mainwindow_card_chrome_e13(app, temp_settings):
                        + msg.contentsRect().bottom())
         assert text_bottom <= w.height() - SHADOW_MARGIN - 1
         assert msg.contentsMargins().bottom() == 0
-        # 2026-11 第五轮：带内缩不再挂在消息标签上，而是**状态栏自己的**
+        # 2026-11 改版：带内缩不再挂在消息标签上，而是**状态栏自己的**
         # contents margins —— 逐条目的 margins 盖不住常驻项（版本信息是
         # ElidingLabel，paintEvent 直接画 self.rect()、完全忽略
         # contentsMargins），它当时就画进了右下角的透明圆角带。上面那条
@@ -176,7 +176,7 @@ def test_mainwindow_card_chrome_e13(app, temp_settings):
 
 
 def test_stuck_maximized_flag_self_heals_on_resize(app, temp_settings):
-    """E15 follow-up (user report): a frameless top-level on Windows can
+    """E15 follow-up (field report): a frameless top-level on Windows can
     keep ``Qt.WindowMaximized`` stuck in windowState after the WM
     restores it (restore button's showNormal / taskbar click — no
     follow-up WindowStateChange clears the flag). paintEvent reads the

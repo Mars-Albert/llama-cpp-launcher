@@ -92,7 +92,7 @@ def test_right_column_is_three_tabs(temp_settings):
         assert w.tab_widget.tabText(2) == "📊 运行信息"
         # the pre-E15 stacked blocks live in the 参数配置 page — the
         # parameter area and the command preview are separated by a
-        # draggable vertical QSplitter (E15 follow-up, user request 2026-10)
+        # draggable vertical QSplitter (E15 follow-up, requested change 2026-10)
         assert w.mode_combo.parent() is w.params_tab
         assert w.cmd_split.parent() is w.params_tab
         assert w.cmd_split.widget(0) is w.panel_scroll
@@ -121,13 +121,13 @@ def test_right_column_is_three_tabs(temp_settings):
 
 
 def test_run_state_and_version_live_in_the_status_bar(temp_settings):
-    """2026-11 第五轮：状态点 / 状态文字 / 运行时长 / llama-server 版本 / ⚠️ 全部
+    """2026-11 改版：状态点 / 状态文字 / 运行时长 / llama-server 版本 / ⚠️ 全部
     搬到状态栏右侧（“版本信息与运行时间移到最下面的状态栏底部右侧”）—— 控制栏与
-    指标行合成一行后要腾出那一行的宽度，而且它们是"读"的信息。第十一轮又把 GPU
+    指标行合成一行后要腾出那一行的宽度，而且它们是"读"的信息。后来又把 GPU
     设备行也搬过来，插在版本左边。
 
-    钉住：父级 = status bar、常驻项排在消息右侧且**GPU 信息 → 版本**在前（第七轮
-    定下版本组，第十一轮用户：“把这个信息也放到状态栏上，放在版本号左边”）、
+    钉住：父级 = status bar、常驻项排在消息右侧且**GPU 信息 → 版本**在前（后来
+    定下版本组，后来要求：“把这个信息也放到状态栏上，放在版本号左边”）、
     控制栏里不再有我。"""
     from PyQt6.QtCore import QPoint
     app = _qapp()
@@ -145,7 +145,7 @@ def test_run_state_and_version_live_in_the_status_bar(temp_settings):
                            w.btn_webui, w.live_metrics]
         w.show()
         _settle(app, w, 1360, 860)
-        # 从左到右（第七轮：“版本号移到首位…” + 第十一轮：“把这个信息也放到
+        # 从左到右（后来的要求：“版本号移到首位…” + 后来：“把这个信息也放到
         # 状态栏上，放在版本号左边”）：临时消息 → GPU 信息 → 版本 → ⚠️ → 状态点
         # → 状态 → 时长
         msg = sb.findChild(type(w.status_indicator), "statusMsg")
@@ -176,9 +176,9 @@ def test_run_state_and_version_live_in_the_status_bar(temp_settings):
 
 
 def test_tab_bar_and_control_buttons_share_one_height(temp_settings):
-    """右栏三个 tab 的高度 = 合一行四个按钮的高度（2026-11 第八轮）。
+    """右栏三个 tab 的高度 = 合一行四个按钮的高度（2026-11 改版）。
 
-    用户：“3 个 tab 高度比按钮都高一些，看着不太协调，改为一致” —— 按钮是
+    要求：“3 个 tab 高度比按钮都高一些，看着不太协调，改为一致” —— 按钮是
     setFixedHeight(28)，tab 原先 `padding: 8px 16px` 量到 ~34px，同一列里两种
     控件高度自然显得不协调。
 
@@ -207,10 +207,10 @@ def test_tab_bar_and_control_buttons_share_one_height(temp_settings):
 
 
 def test_only_the_value_is_boxed(temp_settings):
-    """只给数值加框（第十轮："这个框太小了，看起来不自然，且不用给label加框，只给
+    """只给数值加框（后来的要求："这个框太小了，看起来不自然，且不用给label加框，只给
     要显示数值的地方加框；上下文那个数值直接写在进度条里面，也不用加框"）。
 
-    第九轮把整格（标签 + 数字）框成芯片 → 用户嫌小、不自然。现在：
+    后来把整格（标签 + 数字）框成芯片 → 被嫌小、不自然。现在：
     * `#metricCell` 透明无边框（标签就是普通文字）；
     * `#metricValueBox` 是读数窗：`field_bg` 底 + 1px `border` 边框 + 圆角；
     * 条带自身透明无边框；计量条不加框，但轨道必须是 `border` 色（它直接坐在
@@ -239,7 +239,7 @@ def test_only_the_value_is_boxed(temp_settings):
             assert pal["border"] in box, (theme, pal["border"], box)
             assert pal["field_bg"] in box, (theme, pal["field_bg"], box)
             assert "border-radius" in box, box
-            # 竖向 padding 必须为 0（第十一轮）：高度由代码 `setFixedHeight(_FIELD_H)`
+            # 竖向 padding 必须为 0（后来的定案）：高度由代码 `setFixedHeight(_FIELD_H)`
             # 钉，Qt 把样式表 padding 当 contentsMargins → 竖向写了数字就会把 20px
             # 扣到装不下 13px 高的数字，字溢出到边框上。
             decl = box[box.index("padding:"):]
@@ -255,7 +255,7 @@ def test_only_the_value_is_boxed(temp_settings):
 
 
 def test_status_dot_tracks_run_and_endpoint_state(temp_settings):
-    """运行状态的**唯一**指示：状态栏那个画出来的 8px 点 + 状态文字（第五轮从指标
+    """运行状态的**唯一**指示：状态栏那个画出来的 8px 点 + 状态文字（后来从指标
     行搬来）。四态染色：灰=未启动 / 琥珀=启动中（或运行中但两端都不应答）/
     绿=运行中 / 红=异常退出；点与文字同色，tooltip 给完整解释。"""
     _qapp()
@@ -310,7 +310,7 @@ def test_status_bar_right_items_stay_on_the_card_face(temp_settings):
 
 
 def test_control_bar_and_metrics_live_outside_tabs(temp_settings):
-    """2026-11 第五轮：启动按钮与实时指标带**合成一行**（“按钮与 metric 两行合并
+    """2026-11 改版：启动按钮与实时指标带**合成一行**（“按钮与 metric 两行合并
     一行，按钮在左，metrics 在右侧，中间 stretch 隔开”），这一行是右栏在标签页
     **下方**的最后一个条目 → 切到任何 tab 都看得到、点得到。
 
@@ -359,7 +359,7 @@ def test_control_bar_and_metrics_live_outside_tabs(temp_settings):
 
 
 def test_control_buttons_wear_the_accent_style(temp_settings):
-    """2026-11 第五轮最终定案（用户：“这几个按钮不要做成白底的，彩色底，白字体，
+    """2026-11 改版最终定案（要求：“这几个按钮不要做成白底的，彩色底，白字体，
     因为这个需要很醒目，跟一般的按钮不一样，现在这种效果让人忽略了重点”）：
     形状继承通用 QPushButton（**不写** border-radius / padding / font-size →
     与 ↩ 撤销 那排同族），配色走强调色（彩色渐变底 + 白字 + 粗体），图标保留
@@ -400,7 +400,7 @@ def test_control_buttons_wear_the_accent_style(temp_settings):
         # 强调按钮的禁用底色 / 文字色必须两主题都有定义
         for obj in ("start", "stop", "copy", "webui"):
             assert pal["%s_dis_bg" % obj] in qss and pal["%s_dis_fg" % obj] in qss
-    # 图标 + 两字文案（上一轮用户“要带图标”仍然生效），全称仍在 tooltip
+    # 图标 + 两字文案（上一版用户“要带图标”仍然生效），全称仍在 tooltip
     w = _window(temp_settings)
     try:
         assert w.btn_start.text() == "▶ 启动"

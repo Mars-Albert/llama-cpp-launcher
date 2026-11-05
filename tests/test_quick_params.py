@@ -462,7 +462,7 @@ def test_restore_quick_chips_keep_unified_field_height(app, lang, temp_settings)
     """Restored quick chips are rebuilt by _restore_ui_state (AFTER
     init_ui's _apply_field_heights pass) — the rebuild must re-pin the
     field dimensions, or the restored spin renders ~6px shorter than its
-    quick combo (user screenshot 2026-10: 草稿Token数 spin next to the
+    quick combo (field screenshot 2026-10: 草稿Token数 spin next to the
     KV Cache K类型 combo)."""
     from core.defaults import _FALLBACK_DEFAULTS
     from PyQt6.QtWidgets import QSpinBox, QDoubleSpinBox, QComboBox

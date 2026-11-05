@@ -72,7 +72,7 @@ except ImportError:
 
 
 class _ParamScrollArea(QScrollArea):
-    """E15 follow-up (user request 2026-10): the 参数配置 column's extra
+    """E15 follow-up (requested change 2026-10): the 参数配置 column's extra
     vertical space belongs to the command preview, not the parameter
     panel. A plain QScrollArea re-derives its size policy from its
     content during layout passes (Qt's calcScrollBars), which wipes any
@@ -130,7 +130,7 @@ class _ThemedStatusBar(QStatusBar):
         # (2026-11, _create_run_status_items).
         self._band = CARD_CONTENT_INSET
         self._band_labels = []
-        # 2026-11 第五轮：阴影带内缩 + 右端安全距离放在**状态栏自己的 contents
+        # 2026-11 改版：阴影带内缩 + 右端安全距离放在**状态栏自己的 contents
         # margins** 上（它的内部 QHBoxLayout 会把全部条目一起往里推）。之前是每个
         # 条目各自 contentsMargins —— 普通 QLabel 把文字画在 contentsRect 里所以
         # 有效，但版本信息是 ElidingLabel：它的 paintEvent 直接用 self.rect()，
@@ -257,7 +257,7 @@ _active_startup_workers: set = set()
 
 
 class _StartupInfoWorker(QThread):
-    """Fetch llama-server version and --help off the main thread (plan A10).
+    """Fetch llama-server version and --help off the main thread.
 
     The window is shown immediately with fallback defaults; when this worker
     finishes, the live-parsed defaults / chat templates are merged into the
@@ -596,7 +596,7 @@ class MainWindow(QMainWindow):
         restore button's ``showNormal`` / a taskbar click — no follow-up
         WindowStateChange clears the flag). The flag then keeps
         ``paintEvent`` on the band-less square card and the margins at 0
-        for a normal-sized window (user report 2026-10: restored window
+        for a normal-sized window (field report 2026-10: restored window
         rendered as a plain square rectangle — no rounding, no shadow).
         Trusting the flag only while the window really covers its screen
         makes every consumer geometry-robust; the Resize handler
@@ -805,9 +805,9 @@ class MainWindow(QMainWindow):
         follows the page's hard minimum (see _sync_panel_min). The
         control bar (start/stop/copy/WebUI + version + drift + the run-state
         indicator/runtime at its tail) and the live-metrics strip live
-        *below* the tab widget (2026-11 user request), so both stay visible
+        *below* the tab widget (2026-11 requested change), so both stay visible
         and usable on all three tabs; the old status-bar placement of the
-        run-state labels was reverted per user report and they still trail
+        run-state labels was reverted per field report and they still trail
         the control bar.
         """
         widget = QWidget()
@@ -846,7 +846,7 @@ class MainWindow(QMainWindow):
         self.mode_combo.currentIndexChanged.connect(self._on_mode_changed)
         mode_bar.addWidget(self.mode_label)
         mode_bar.addWidget(self.mode_combo)
-        # E8 的 GPU 设备行不再在这里（2026-11 第十一轮：“把这个信息也放到状态
+        # E8 的 GPU 设备行不再在这里（2026-11 改版：“把这个信息也放到状态
         # 栏上，放在版本号左边”）—— 它属于“读”的信息不是“点”的控件，而且模式行
         # 只在「参数配置」页看得到，状态栏三个 tab 常驻。见 _create_run_status_items。
         mode_bar.addStretch()
@@ -905,7 +905,7 @@ class MainWindow(QMainWindow):
         self.panel_scroll.setFrameShape(QFrame.Shape.NoFrame)
         self.panel_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.panel_scroll.setWidget(self.stacked)
-        # E15 follow-up (user request 2026-10): a draggable divider between
+        # E15 follow-up (requested change 2026-10): a draggable divider between
         # the parameter area and the command preview — a vertical
         # QSplitter, like the left/right panel's (same 3px line style —
         # the QSS QSplitter::handle rule carries both width and height). The top side keeps the
@@ -938,7 +938,7 @@ class MainWindow(QMainWindow):
         self.cmd_label.setStyleSheet("font-weight: bold; color: #7aa2f7; font-size: 13px;")
         self.cmd_box_layout.addWidget(self.cmd_label)
 
-        # Stretchable (user request 2026-10): the preview absorbs the
+        # Stretchable (requested change 2026-10): the preview absorbs the
         # column's extra vertical space instead of a dead gap; the 80px
         # floor keeps the minimum-height layout unchanged.
         self.cmd_preview = QPlainTextEdit()
@@ -959,8 +959,8 @@ class MainWindow(QMainWindow):
         self.cmd_split.setStretchFactor(1, 1)
         ptab.addWidget(self.cmd_split)
 
-        # ---- 控制行（2026-11 第五轮：控制栏 + 实时指标行**合成一行**）----
-        # 按钮靠左、指标带靠右、中间一条 stretch（用户："按钮与 metric 两行合并
+        # ---- 控制行（2026-11 改版：控制栏 + 实时指标行**合成一行**）----
+        # 按钮靠左、指标带靠右、中间一条 stretch（要求：“按钮与 metric 两行合并
         # 一行，按钮在左，metrics 在右侧，中间 stretch 隔开"）。行高 = 指标带的
         # 固定 34px（按钮 28px 垂直居中）→ 比原来两行（46 + 6 + 34 = 86）省
         # 52px 窗口最小高度。版本信息 / 运行状态 / 运行时长搬去状态栏右侧
@@ -973,7 +973,7 @@ class MainWindow(QMainWindow):
         control_bar.setContentsMargins(0, 0, 0, 0)
         control_bar.setSpacing(6)
 
-        # 第五轮后半（用户：“这几个按钮还是保持与其他按钮的视觉一致性，要带图标，
+        # 后来后半（要求：“这几个按钮还是保持与其他按钮的视觉一致性，要带图标，
         # 样式也要一致，否则看起来很奇怪” + “不要做成白底的，彩色底，白字体，
         # 因为这个需要很醒目”）：**形状**走通用 QPushButton 规则（圆角 / padding /
         # 字号都不写 → 与同页的 ↩ 撤销 / 🔄 恢复默认 / ⬇️ 加载 同族），**配色**
@@ -983,7 +983,7 @@ class MainWindow(QMainWindow):
         # 图标回来但
         # 启停改用普通几何字符 ▶ ■（跟着文字染色；emoji 自带颜色就没法跟着主题
         # 与语义走），📋 🌐 与参数页 ⬇️ 💾 🗑️ 是同一套 emoji 约定。
-        # 第五轮的压缩保留：文案两字（全称进 tooltip）、h40→28、fs14→12
+        # 后来的压缩保留：文案两字（全称进 tooltip）、h40→28、fs14→12
         # —— 按钮整块 451px → ~200px，这是与指标带合成一行放得下的前提。
         self.btn_start = QPushButton(t("▶ 启动"))
         self.btn_start.setFixedHeight(28)
@@ -1021,7 +1021,7 @@ class MainWindow(QMainWindow):
 
         # 实时指标带（本行最右）：Maximum 策略 → 只占内容宽，富余宽度全归上面
         # 那条 stretch。它的固定 34px 就是本行高度。行最小宽 = 按钮 ~200 +
-        # 条带 ~559 ≈ 760 → 窗口最小宽度 947 → ~990（第五轮实测告知过用户的
+        # 条带 ~559 ≈ 760 → 窗口最小宽度 947 → ~990（改版后实测告知过用户的
         # 代价，换来省 52px 高度 + 少一行）。
         self.live_metrics = LiveMetricsBar()
         _lpal = self._THEME_PALETTES[self.theme]
@@ -1030,14 +1030,14 @@ class MainWindow(QMainWindow):
                                            _lpal["phase_prefill"],
                                            _lpal["phase_decode"])
         self._live_worker = None
-        # **不要给这一项加对齐标志**（第五轮找了很久的根因）：带 AlignVCenter 时
+        # **不要给这一项加对齐标志**（后来找了很久的根因）：带 AlignVCenter 时
         # QLayout 按 sizeHint 供给、并允许把部件压到它自己的布局最小宽度以下 ——
         # 实测指标态需要 559px 却只拿到 446px，七个数值列被压成 30px，数字直接
         # 看不见。条带本身就是这一行的高度来源（定高 34px），不需要对齐；要垂直
         # 居中的是 28px 高的按钮。
         control_bar.addWidget(self.live_metrics, 0)
         # 合一行的地板（按钮 sizeHint + 条带 min_content_width）是
-        # `_sync_panel_min` 手算窗口最小宽度的一部分。条带只有一种排版（第七轮：
+        # `_sync_panel_min` 手算窗口最小宽度的一部分。条带只有一种排版（后来的要求：
         # 未运行也是七格）→ 地板与运行状态无关；polish 之后那一次重同步由
         # `_resync_minimum_after_show` / 顶层 Resize 兜底（写死的 setMinimumSize
         # 会关掉 Qt 自己那层“布局最小宽度”保护，地板算少了行就会被压扁）。
@@ -1154,7 +1154,7 @@ class MainWindow(QMainWindow):
         self.tab_widget.addTab(self.info_display, t("📊 运行信息"))
         layout.addWidget(self.tab_widget)
 
-        # 合一行（启动按钮 + 实时指标带）贴在右栏标签页**下方**（第五轮：两行
+        # 合一行（启动按钮 + 实时指标带）贴在右栏标签页**下方**（后来的要求：两行
         # 合成一行；它原本在 tab 1 页内，切到日志/运行信息就整块消失）。行高 =
         # 指标带的固定 34px，计入 _sync_panel_min 读的
         # self._right_panel.layout().minimumSize() → 窗口最小高度比原来两行
@@ -1164,7 +1164,7 @@ class MainWindow(QMainWindow):
         return widget
 
     def _apply_field_heights(self):
-        """Unify the single-line field heights (user request 2026-10: the
+        """Unify the single-line field heights (requested change 2026-10: the
         spinbox and combo heights no longer matched — the QSS-styled combo
         was ~6px taller than the now-unstyled spinbox, breaking the row's
         harmony in the ngl combo+spin composite row).
@@ -1340,7 +1340,7 @@ class MainWindow(QMainWindow):
         # 34px 控制行（按钮 + 指标带）+ 布局 margins）
         #
         right_min = self._right_panel.layout().minimumSize()
-        # 2026-11 第五轮：合一行（按钮 + 指标带）的贡献**按部件算**，不读布局缓存。
+        # 2026-11 改版：合一行（按钮 + 指标带）的贡献**按部件算**，不读布局缓存。
         # 两个原因：
         # ① 不可靠 —— `control_bar.minimumSizeHint()` / 右栏 `layout().minimumSize()`
         #    在不同时刻给出 719 / 825 / 1063 三个值（E11 的"晚一个事件循环"缓存
@@ -1882,7 +1882,7 @@ class MainWindow(QMainWindow):
 
     def _on_state_changed(self, state):
         self._current_state = state
-        # 状态点与文字只由 _update_run_indicator 画（2026-11 第五轮：状态点从
+        # 状态点与文字只由 _update_run_indicator 画（2026-11 改版：状态点从
         # 指标行搬进状态栏，这里不再各自 setText/setStyleSheet）
         self._update_run_indicator()
         if state == "starting":
@@ -2463,7 +2463,7 @@ class MainWindow(QMainWindow):
                 self.config.preset_stored_keys(name) or set())
             self._set_current_values(params)
             # Re-baseline BEFORE the preview tick so the restored preset is
-            # the starting state, not an undoable step (plan A4 semantics)
+            # the starting state, not an undoable step (re-baselined semantics)
             self.params_history[0] = dict(self.params)
             self._last_saved = dict(self.params)
             self._pending_snapshot = False
@@ -2756,7 +2756,7 @@ class MainWindow(QMainWindow):
             # set_quick_params rebuilds the quick chips (new widgets) when
             # the saved set differs from the built-in default — re-pin the
             # field dimensions, or the restored chips miss the unified
-            # height (user report 2026-10: restored quick spin rendered ~6px
+            # height (field report 2026-10: restored quick spin rendered ~6px
             # shorter than its quick combo).
             self._apply_field_heights()
         # 显式输出 (2026-10): global mode + per-row checked keys. Keys are
@@ -3344,7 +3344,7 @@ class MainWindow(QMainWindow):
         label.setVisible(True)
 
     def _on_startup_defaults(self, defaults, chat_templates):
-        """Live-parsed defaults arrive from the startup worker (plan A10)."""
+        """Live-parsed defaults arrive from the startup worker."""
         self._apply_startup_defaults(defaults, chat_templates)
         if self._version_checked:
             # Version is already known: refresh the drift tooltip against the
@@ -3352,12 +3352,12 @@ class MainWindow(QMainWindow):
             self._validate_params()
 
     def _apply_startup_defaults(self, defaults, chat_templates):
-        """Merge live startup defaults into the window (plan A10).
+        """Merge live startup defaults into the window.
 
         Params the user has not changed adopt the live default value; values the
         user already edited are preserved. When no user-change snapshot has
         landed yet, the initial history entry and _last_saved are re-baselined
-        so the sync itself does not show up as an undoable step (plan A4).
+        so the sync itself does not show up as an undoable step.
         """
         from core.config import refresh_defaults
         orig_defaults = self.defaults
@@ -3528,7 +3528,7 @@ class MainWindow(QMainWindow):
         self.btn_explicit_mode.setText(t("⚡ 显式输出"))
         self.btn_explicit_mode.setToolTip(
             t("开启后每个参数行显示显式输出开关，勾选的参数无论是否等于默认值都写入启动命令"))
-        # 按钮短词 + 图标（全称在 tooltip，第五轮压缩）：两者都要跟着语言切换
+        # 按钮短词 + 图标（全称在 tooltip，后来压缩）：两者都要跟着语言切换
         self.btn_start.setText(t("▶ 启动"))
         self.btn_start.setToolTip(t("启动服务"))
         self.btn_stop.setText(t("■ 停止"))
@@ -3595,9 +3595,9 @@ class MainWindow(QMainWindow):
         # layout-managed label (contents-margins keep the text on the card
         # face: left fixed, bottom synced to the shadow band by
         # _set_card_inset) and drops the native size grip.
-        # 2026-11 第五轮：右侧常驻「● 运行状态 · 运行时长 · 版本 · ⚠️」
+        # 2026-11 改版：右侧常驻「● 运行状态 · 运行时长 · 版本 · ⚠️」
         # （控制栏与指标行合成一行后这里才是它们该待的地方）。
-        # ⚠️ 历史：E15 也把这些标签放进过状态栏又按用户反馈回退了 —— 当时
+        # ⚠️ 历史：E15 也把这些标签放进过状态栏又因反馈回退了 —— 当时
         # 用户机器上"状态栏区域画成一块错的白框"。那次的根因是 QStatusBar
         # 自身的底色方块压在透明圆角带上；E13 之后 QStatusBar 与 #statusMsg
         # 都是 background: transparent，普通 QLabel 默认也不画底色，所以这次
@@ -3612,7 +3612,7 @@ class MainWindow(QMainWindow):
     def _create_run_status_items(self, sb):
         """状态栏右侧常驻项：GPU 信息 · 版本号 · ⚠️ · ● 运行状态 · 运行时长。
 
-        顺序（第七轮定下版本组，第十一轮把 GPU 信息插到最左，用户：“把这个信息
+        顺序（后来定下版本组，后来把 GPU 信息插到最左，要求：“把这个信息
         也放到状态栏上，放在版本号左边”）：GPU → 版本 → ⚠️（⚠️ 说的就是“参数与
         刚检测到的版本有差异”，跟自已在行的右侧会让两者相隔整个运行状态组）。
 
@@ -3677,9 +3677,9 @@ class MainWindow(QMainWindow):
         sb.addPermanentWidget(self.drift_button)
 
         # 运行状态点：画出来的 8px 圆角块，不是字符 —— 旧的 🟢/🔴/🔄 是彩色
-        # emoji（在单色 UI 里最跳、Windows 下尺寸还不一致，正是用户嫌"不协调"
-        # 的那类东西）。2026-11 第五轮从指标行搬来：全应用只有这一个运行状态
-        # 指示，位置就在运行时长前面（用户：“那个绿色小圆点…移动到运行时间那”）。
+        # emoji（在单色 UI 里最跳、Windows 下尺寸还不一致，正是被嫌"不协调"
+        # 的那类东西）。2026-11 改版从指标行搬来：全应用只有这一个运行状态
+        # 指示，位置就在运行时长前面（要求：“那个绿色小圆点…移动到运行时间那”）。
         self.run_dot = QWidget()
         self.run_dot.setObjectName("runDot")
         self.run_dot.setFixedSize(8, 8)
@@ -3904,7 +3904,7 @@ class MainWindow(QMainWindow):
                visible. 2026-11 redesign: the inner cell widgets are forced
                transparent — a plain QWidget inside the bar otherwise paints
                the generic QWidget win_bg rect over the bar's own tint, which
-               read as patchwork squares (user report). Symbol icons were
+               read as patchwork squares (field report). Symbol icons were
                dropped (they fell back to a different font/size/baseline per
                glyph inside Consolas); grouping is the 实时/累计 captions plus
                whitespace, so only the one between-group rule remains, and the
@@ -3913,9 +3913,9 @@ class MainWindow(QMainWindow):
                ElidingLabel palettes via set_theme_colors). The inline ctx
                meter track is the border colour (hover_bg was invisible on the
                hover_bg bar). */
-            /* 第八轮“加外边框线方便视觉分隔”→ 整条带一个 1px 外框，用户“看不出来，
-               做成一个指标一个框的”；第九轮整格芯片，又“太小、不自然，别给 label
-               加框”；第十轮定案：**框只框数值**（下面 #metricValueBox）。1px 的
+            /* 后来“加外边框线方便视觉分隔”→ 整条带一个 1px 外框，用户“看不出来，
+               做成一个指标一个框的”；后来整格芯片，又“太小、不自然，别给 label
+               加框”；后来定案：**框只框数值**（下面 #metricValueBox）。1px 的
                border 色画在 hover_bg 淡底上几乎与底色糊在一起（明暗两套都是），
                所以整条带一个框根本读不出边界。
                条带自己**必须**透明无边框：否则框里有框（当初"7 个独立描边格"被
@@ -3926,7 +3926,7 @@ class MainWindow(QMainWindow):
                 border: none;
             }
             /* 标签就是普通文字（#metricCell 透明容器）；#metricValueBox 是"读数窗"：
-               field_bg 底 + 1px 边框 + 圆角。第十一轮（用户：“这些框看起来比文字矮，
+               field_bg 底 + 1px 边框 + 圆角。后来（要求：“这些框看起来比文字矮，
                视觉不统一，起码跟进度条一样高吧”）：**高度不在这里写**，代码里
                `box.setFixedHeight(_FIELD_H)` 与计量条共用一个常量 → 两者永远齐平；
                靠 padding 撑高则实得高 = padding + 标签行高（字体一变就漂）。
@@ -3966,7 +3966,7 @@ class MainWindow(QMainWindow):
             }
             /* 上下文计量条：不加框（用户明确“也不用加框”），但**轨道必须用 border
                色**：它现在直接坐在 win_bg 面上，而 hover_bg 与 win_bg 几乎同色
-               → 轨道看不见，绿块像凭空飘着。第十一轮：与读数框等高（_FIELD_H）且
+               → 轨道看不见，绿块像凭空飘着。后来：与读数框等高（_FIELD_H）且
                圆角同档（6px），chunk 少 1px → 填满时不碰圆角；百分比写在条里面。 */
             QProgressBar#metricMiniBar {
                 border: none;
@@ -3976,10 +3976,10 @@ class MainWindow(QMainWindow):
             QProgressBar#metricMiniBar::chunk {
                 border-radius: 5px;
             }
-            /* 控制行四个按钮（第五轮最终定案，见 _create_right_panel 的注释）：
+            /* 控制行四个按钮（后来最终定案，见 _create_right_panel 的注释）：
                **形状**继承通用 QPushButton（圆角 / padding / 字号一个都不写 →
                与 ↩ 撤销 那排同族），**配色**用强调色（彩色底 + 白字 + 粗体）
-               —— 它们是启停服务的主操作，必须比一般按钮醒目（用户：“不要做成
+               —— 它们是启停服务的主操作，必须比一般按钮醒目（要求：“不要做成
                白底的，彩色底，白字体，因为这个需要很醒目，跟一般的按钮不一样，
                现在这种效果让人忽略了重点”）。渐变是本项目强调按钮的既有语言
                （serverPathOk / msgBoxBtnAccept / tab 下划线同款）。
@@ -4249,7 +4249,7 @@ class MainWindow(QMainWindow):
                 border-radius: 8px;
                 background-color: @@field_bg@@;
             }
-            /* Tab 高度与合一行的四个按钮一致（都是 28px）—— 2026-11 第八轮用户：
+            /* Tab 高度与合一行的四个按钮一致（都是 28px）—— 2026-11 改版要求：
                "3 个 tab 高度比按钮都高一些，看着不太协调，改为一致"。按钮是
                setFixedHeight(28)，所以 tab 的高度要**写死成内容高**而不是靠
                padding 顶：`height: 18px`（内容盒）+ 2×4 padding + 2×1 边框 = 28。
@@ -4475,7 +4475,7 @@ class MainWindow(QMainWindow):
                 color: @@muted@@;
                 font-size: 12px;
             }
-            /* 2026-11 第五轮：状态栏右侧常驻项（● 运行状态 · 运行时长
+            /* 2026-11 改版：状态栏右侧常驻项（● 运行状态 · 运行时长
                · 版本 · ⚠️）。全部透明无边框 —— 状态栏横跨整条底边，任何
                底色都会在透明圆角带上画出一块方块（E15 那次"状态栏白框"
                事故就是这个形状）。文字颜色由代码给：inline sheet + palette

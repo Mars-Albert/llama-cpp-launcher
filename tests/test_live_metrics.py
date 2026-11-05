@@ -92,14 +92,14 @@ def test_diff_slots_sums_multiple_slots():
 
 
 def test_diff_slots_ctx_keeps_the_occupancy_when_the_slot_goes_idle():
-    """回归（用户报的 bug）：“不活动时 context 怎么还是 0？”
+    """回归（报告的 bug）：“不活动时 context 怎么还是 0？”
 
     任务结束那一刻 `server_slot::release()` → `reset()` 就 `stats = {}`（普通 slot
     的 prompt **不**清，只有 child/stateless/tts 才 `prompt_clear()`）：于是
     `n_prompt_tokens_processed` / `_cache` / `n_decoded` 全归零，而
     `n_prompt_tokens` 仍是整段对话的长度（`ptask = task ? task : task_prev` →
     这几个字段任务后依旧发布）。只按任务账本算 ⇒ 一空闲就显示 0%，而 KV 里
-    几万 token 还占着（prompt cache 复用的整个意义）—— 上一轮为修“投机解码
+    几万 token 还占着（prompt cache 复用的整个意义）—— 上一版为修“投机解码
     双计”换成纯任务账本，把这个暴露出来了。现在取两本账的较大值。
     """
     gen = 15364
@@ -163,7 +163,7 @@ def test_diff_slots_ctx_uses_busiest_slot():
 
 
 def test_diff_slots_ctx_is_not_double_counted_while_spec_decoding():
-    """回归（用户报的 bug）：开投机解码（`--spec-type draft-mtp`）时上下文条偏大，
+    """回归（报告的 bug）：开投机解码（`--spec-type draft-mtp`）时上下文条偏大，
     下一个请求 prefill 一开始又“变准”。
 
     投机解码每验收到一批 token 就把它们追进到 slot 的 prompt 历史（llama.cpp
@@ -334,7 +334,7 @@ def test_worker_emits_slot_stats_and_merges_metrics(monkeypatch):
     def fake_fetch(host, port, path, timeout=1.0):
         if path == "/slots":
             calls["i"] += 1
-            # 第二轮 decode 多 5 个 token
+            # 后来 decode 多 5 个 token
             return json.dumps(
                 [_slot(decoded=100 if calls["i"] == 1 else 105)]), None
         if path == "/metrics":
@@ -373,7 +373,7 @@ def test_live_metrics_key_tables_translated():
     import core.i18n as I
     from ui.live_metrics import LiveMetricsBar
     # 格标签与 tooltip 的全名都是经变量喂给 t() 的（AST 扫不到；组标题
-    # 「实时 / 累计」第八轮删除，不再有这一项）
+    # 「实时 / 累计」后来删除，不再有这一项）
     missing = [s for s in LiveMetricsBar._LABELS.values()
                if s not in I._EN]
     missing += [s for s in LiveMetricsBar._FULL_NAMES.values()
@@ -407,7 +407,7 @@ def _pt(label):
 def _val(bar, key):
     """一个指标数值的可见文本：定宽左填充折叠成普通空格，便于直接断言。
 
-    ctx 的"数值"是计量条里画的那串（第十轮），`_CtxMeter.text()` 就是它。
+    ctx 的"数值"是计量条里画的那串（后来的定案），`_CtxMeter.text()` 就是它。
     """
     return _pt(bar._tiles[key][1]).replace("\u00a0", " ").strip()
 
@@ -444,7 +444,7 @@ def _live(bar, **over):
 
 
 def test_fmt_tokens_rolls_tiers_before_1000():
-    """`_fmt_tokens` 的输出宽度有上限（第十一轮：“数字多一些就显示不全了”）。
+    """`_fmt_tokens` 的输出宽度有上限（后来的要求：“数字多一些就显示不全了”）。
 
     旧版先选档再除：999_999 → "1000.0K"（7 字）把列宽撑穿 → 数字被裁。现在舍入后
     ≥ 1000 就进上一档（顺便也不再说"1000.0K"这种没人想读的话）。
@@ -469,7 +469,7 @@ def test_fmt_tokens_rolls_tiers_before_1000():
 def test_value_columns_have_headroom_for_wide_numbers():
     """读数框装得下**格式化函数自己能吐出的最宽文本**，还留有余量。
 
-    第十一轮（用户：“输入 缓存 输出 这个框子有点短啊，数字多一些就显示不全了”）。
+    后来（要求：“输入 缓存 输出 这个框子有点短啊，数字多一些就显示不全了”）。
     不手写样本（写样本的人与写格式化的人不是同一个人时，样本永远是“对的那个”），
     而是把各档边界值交给 `_fmt_tokens` / `_fmt_speed`，再用同一个排版引擎量宽：
     数值标签的 sizeHint 必须 ≤ 列宽（列宽由 strut 钉），并且最大的那个还要留得出
@@ -513,7 +513,7 @@ def test_value_columns_have_headroom_for_wide_numbers():
 
 
 def test_metrics_tooltip_uses_the_real_navigation_path():
-    """“怎么开启 --metrics”用**准确的导航语言**（用户：“这个表述不正确，用准确的
+    """“怎么开启 --metrics”用**准确的导航语言**（要求：“这个表述不正确，用准确的
     导航语言来说 请在“服务”→“xxx” 用这种语言说”）。
 
     旧写法“在服务页勾选「Prometheus 指标」”三处都不准：没有“服务页”这个说法（它是
@@ -536,7 +536,7 @@ def test_metrics_tooltip_uses_the_real_navigation_path():
     label = PARAMS_BY_KEY["metrics"].label.rstrip(":")
     assert tab in nav and label in nav, nav
     assert "服务页" not in tip and "Prometheus 指标" not in tip, tip
-    # 未启动时**不再**写这段引导（用户：“tooltip 里不要刻意地写”）：没启动
+    # 未启动时**不再**写这段引导（要求：“tooltip 里不要刻意地写”）：没启动
     # 时行动点还不是“勾选项”，而是“先把服务跑起来”；启动后累计格自己会说
     bar.set_running(False)
     assert nav not in _tip(bar, "total_in"), _tip(bar, "total_in")
@@ -557,9 +557,9 @@ def test_bar_structure_grouped_strip():
     from PyQt6.QtWidgets import QWidget
     _qapp()
     bar = _bar()
-    # 条带透明无边框 + **只有数值带框**（第十轮）：#metricCell 是透明容器，
+    # 条带透明无边框 + **只有数值带框**（后来的定案）：#metricCell 是透明容器，
     # #metricValueBox 才是读数窗；ctx 连框都不要，数值画在计量条里面
-    # 组标题「实时 / 累计」于第八轮删除（用户："live 和 session 这两个 label
+    # 组标题「实时 / 累计」于后来删除（要求：“live 和 session 这两个 label
     # 不需要，光占地方"）→ 断言它们**不存在**，别悄悄长回来。
     assert bar.objectName() == "liveMetricsBar"
     assert len(bar.findChildren(QWidget, "metricCell")) == 7
@@ -576,7 +576,7 @@ def test_bar_structure_grouped_strip():
     # 组内竖分隔线全部删除（旧版 5 条：1px 线 + 7px 间距贴着下一个字）
     assert bar.findChildren(QWidget, "metricSep") == []
     # 旧的两组之间那条 1px 竖线（#metricGroupSep）删除：芯片自己就把每个指标框
-    # 住了，竖线夹在芯片之间像一根没对齐的杂线（第九轮）
+    # 住了，竖线夹在芯片之间像一根没对齐的杂线（后来的定案）
     assert bar.findChildren(QWidget, "metricGroupSep") == []
     assert bar.minimumHeight() == 34
     # 符号图标取消：数值里不再出现 ≫/▸/◔/Σ/⊙（它们在 Consolas 里逐个回退
@@ -602,7 +602,7 @@ def test_bar_cell_labels_survive_language_switch():
         bar.retranslate_ui()
         assert _cap(bar, "total_in") == "In"
         assert _cap(bar, "hit_rate") == "Hit"
-        # 语言切换不引入组标题（第八轮删除）
+        # 语言切换不引入组标题（后来删除）
         assert bar.findChildren(QWidget, "metricCaption") == []
     finally:
         set_language("zh")
@@ -614,7 +614,7 @@ def test_bar_minimum_holds_the_numbers_not_just_the_labels():
 
     旧口径（"这一行绝不能成为窗口最小宽度的约束"）把最小宽度只算到标签：窗口
     停在最小尺寸时 QLayout 就把七个数值列从 88px 压到 30px，**数字直接看不见**。
-    2026-11 第五轮反过来定：数值列的最小宽度 = strut（该指标最宽取值）宽度，
+    2026-11 改版反过来定：数值列的最小宽度 = strut（该指标最宽取值）宽度，
     条带最小宽度 = 数值 + 计量条 + 固定间距，`MainWindow._sync_panel_min` 把它算进
     窗口最小宽度 → 这一行现在**就是**窗口宽度的约束之一（合一行 = 按钮 + 条带，
     实测 ~890px 内容宽，窗口最小宽度 ~1108px；另一侧的取舍见
@@ -622,7 +622,7 @@ def test_bar_minimum_holds_the_numbers_not_just_the_labels():
 
     钉住：① 最小宽度 ≥ 七个数值列之和 + 上下文计量条；② 条带自己不写死
     setMinimumWidth（宽度由内容量出来，Qt 钉的 minimumSize 不算）；③ 地板与模式
-    无关（服务启停不改变窗口最小宽度）；④ 地板与运行状态无关（第七轮删掉
+    无关（服务启停不改变窗口最小宽度）；④ 地板与运行状态无关（后来删掉
     提示态之后条带只有一种排版；旧版还得在提示态把 hidden 部件临时显形量一次 ——
     hidden 的 QWidget 一律报无效 sizeHint，不量就只能等服务启动才涨，而 Qt 那层
     布局最小保护又已被写死的 setMinimumSize 关掉）。
@@ -641,7 +641,7 @@ def test_bar_minimum_holds_the_numbers_not_just_the_labels():
     # 条带自己不钉宽度：只允许 Qt 在 activate() 之后钉出来的布局最小值
     assert bar.minimumWidth() <= bar.layout().minimumSize().width() + 1, (
         bar.minimumWidth(), bar.layout().minimumSize().width())
-    # ④ 未运行也是同一副七格（第七轮）→ 地板从构造起就是它，且与运行状态无关
+    # ④ 未运行也是同一副七格（后来的定案）→ 地板从构造起就是它，且与运行状态无关
     bar.set_running(False)
     idle_floor = bar.min_content_width()
     assert idle_floor >= value_floor + _BAR_W, (idle_floor, value_floor)
@@ -652,10 +652,10 @@ def test_bar_minimum_holds_the_numbers_not_just_the_labels():
 
 
 def test_readout_controls_share_one_height():
-    """数值读数框与上下文计量条**等高**（第十一轮：“这些框看起来比文字矮，
+    """数值读数框与上下文计量条**等高**（后来的要求：“这些框看起来比文字矮，
     视觉不统一，起码跟进度条一样高吧，视觉上整体优化下”）。
 
-    上一轮框高是 QSS 竖向 padding + 标签行高撑出来的（Consolas 11px ≈ 13px），
+    上一版框高是 QSS 竖向 padding + 标签行高撑出来的（Consolas 11px ≈ 13px），
     比计量条矮一截，一排里高高低低。现在两者都读代码里的 `_FIELD_H`。
 
     钉住：① 六个读数框 + 计量条高度都 == `_FIELD_H`（同一个常量，不是各自 padding
@@ -739,15 +739,15 @@ def test_bar_value_columns_are_fixed_width():
 def test_bar_layout_follows_content_not_equal_columns():
     """2026-11 用户逐轮反馈钉住（“不要每个指标都均匀排布、prefill 这些就一个数字
     占那么大位置” / “进度条那个显示的特别短，可拉长啊” / “不同的指标间应留有一定
-    的分隔或空白” / “那个进度条的数字从左侧改到右侧” / 第五轮“按钮与 metric 两行
+    的分隔或空白” / “那个进度条的数字从左侧改到右侧” / 后来“按钮与 metric 两行
     合并一行，中间 stretch 隔开”）。
 
     ① 格宽 = 内容宽：标签↔数值固定 4px、格宽 − 内容 ≤ 2px，不随条带宽度长；
     ② 条带横向 Maximum（只长到内容宽）+ 行内无弹性项 → 富余宽度只能归 MainWindow
        合一行里那条 stretch；
     ③ ctx 是「标签 → 计量条 → 数字」，数字在条**右**侧 4px；
-    ④ 计量条定长 _BAR_W = 100（第五轮定案：中间 stretch 吃掉富余后，它不能再靠
-       窗口变长 —— 用户选定固定 100px）。"""
+    ④ 计量条定长 _BAR_W = 100（后来定案：中间 stretch 吃掉富余后，它不能再靠
+       窗口变长 —— 实测后选定固定 100px）。"""
     from PyQt6.QtCore import QPoint
     from ui.live_metrics import _BAR_W
     from PyQt6.QtWidgets import QSizePolicy as SP
@@ -784,7 +784,7 @@ def test_bar_layout_follows_content_not_equal_columns():
                 content = (cap.sizeHint().width() + _VALUE_GAP + value.width()
                            + pad.left() + pad.right())
                 assert cell.width() - content <= 2, (width, key, cell.width())
-            # ③ ctx：标签 → 计量条，**数字画在条里面**（第十轮），所以条外没有
+            # ③ ctx：标签 → 计量条，**数字画在条里面**（后来的定案），所以条外没有
             # 第四个部件，条也仍是定长（不许随窗口拉长）
             ctx_cell, ctx_value, meter = bar._tiles["ctx"]
             ctx_cap = ctx_cell.property("cap")
@@ -826,7 +826,7 @@ def test_bar_layout_follows_content_not_equal_columns():
         assert bar.mapTo(host, QPoint(0, 0)).x() == leftover   # 富余全在它左边
         assert leftover > 0
         host.close()
-        # 标签 / 计量条两处都可悬停（第十轮：ctx 不加框、数值在条内 → 整块就是
+        # 标签 / 计量条两处都可悬停（后来的要求：ctx 不加框、数值在条内 → 整块就是
         # 「标签 + 条」，条既是数值也是计量条）
         ctx_cell, ctx_val, ctx_meter = bar._tiles["ctx"]
         assert ctx_cell.objectName() == "metricCell"
@@ -834,8 +834,8 @@ def test_bar_layout_follows_content_not_equal_columns():
         assert ctx_val is ctx_meter
         assert "上下文占用" in ctx_cell.toolTip()
         assert "上下文占用" in ctx_meter.toolTip()
-        # 第七轮：未运行也是同一副七格 → ctx 的「标签 / 条 / 数字」三处一直在原位、
-        # 一直可悬停；第十二轮：停服后上下文条是 **0.0%**（KV 已空）而不是破折号
+        # 后来：未运行也是同一副七格 → ctx 的「标签 / 条 / 数字」三处一直在原位、
+        # 一直可悬停；后来：停服后上下文条是 **0.0%**（KV 已空）而不是破折号
         bar.set_running(False)
         bar.resize(1100, 34)
         bar.layout().activate()
@@ -850,8 +850,8 @@ def test_bar_ctx_meter_stays_visible_with_zero_when_there_is_no_activity():
     """上下文条常驻：刚开始（还没跑过任何请求）就是 0.0%，停服后回到 0.0%，
     只有**读不到**（/slots 被关 / 无 HTTP 端点）才给破折号。
 
-    用户：“上下文进度条仅在有活动时显示，停止了就不显示了，应该一直显示，
-    哪怕刚开始时也应为 0”。与累计组“开始就是 0”同一套规矩（第八轮）。
+    要求：“上下文进度条仅在有活动时显示，停止了就不显示了，应该一直显示，
+    哪怕刚开始时也应为 0”。与累计组“开始就是 0”同一套规矩（后来的定案）。
     """
     _qapp()
     bar = _bar()
@@ -870,13 +870,13 @@ def test_bar_ctx_meter_stays_visible_with_zero_when_there_is_no_activity():
                 "ctx_frac": 0.25, "ctx_used": 1024, "ctx_total": 4096})
     assert _val(bar, "ctx") == "25.0%"
     # ③b 服务空闲但 KV 里仍占着这段上下文 → 保持真数（不回到 0%）
-    #（用户：“不活动时 context 怎么还是 0？” —— 任务结束后服务端把任务计数器
+    #（要求：“不活动时 context 怎么还是 0？” —— 任务结束后服务端把任务计数器
     # 归零了，但 prompt 缓存故意留着）
     bar.update({"ctx_frac": 0.25, "ctx_used": 1024, "ctx_total": 4096,
                 "active": False})
     assert _val(bar, "ctx") == "25.0%"
     # tooltip 就两行（名称 + 精确值）：不再追写“这段仍在 KV 里”那类解释
-    #（用户：“tooltip 里不要刻意地写，重新整体规划下显示的内容”）
+    #（要求：“tooltip 里不要刻意地写，重新整体规划下显示的内容”）
     assert _tip(bar, "ctx") == "上下文占用\n1,024 / 4,096（25.0%）"
     bar.set_running(False)
     assert _val(bar, "ctx") == "0.0%"
@@ -892,7 +892,7 @@ def test_bar_ctx_meter_stays_visible_with_zero_when_there_is_no_activity():
 
 
 def test_bar_session_counters_read_zero_before_first_poll():
-    """运行中、/metrics 还没回第一批数据：累计组是 0，不是破折号（第八轮）。
+    """运行中、/metrics 还没回第一批数据：累计组是 0，不是破折号（后来的定案）。
 
     与 `/metrics` **明确不可用**（unsupported / error）区分开：那是"读不到" →
     仍走破折号 + 说明 tooltip（见 test_bar_metrics_unavailable_dims_right_group）。
@@ -921,7 +921,7 @@ def test_bar_session_counters_read_zero_before_first_poll():
 
 
 def test_bar_labels_highlight_the_current_phase():
-    """格标签按当前阶段染色（用户：“在不同阶段（prefill/decode）时，它的 label
+    """格标签按当前阶段染色（要求：“在不同阶段（prefill/decode）时，它的 label
     最好能显示个不同颜色，用于指示提醒用户当前在哪个阶段”）。
 
     正在跑的那一格自己亮着，其余保持 info 灰 —— 空闲时两格都灰，一眼就知道没活动；
@@ -979,7 +979,7 @@ def test_bar_phase_colors_do_not_move_the_layout():
 
 
 def test_bar_tooltips_share_one_shape_name_value_optional_identity():
-    """用户（2026-11 尾轮）：“tooltip 里不要刻意地写，重新整体规划下显示的内容”
+    """要求（2026-11 末次改版）：“tooltip 里不要刻意地写，重新整体规划下显示的内容”
     → 七格固定三槽：**名称 / 精确值 /（必要时）一行身份**，缺的不占行。
 
     钉住：① 第一行永远是全名（格标签会被省略号截断，这里不会）；② 当前值
@@ -1140,7 +1140,7 @@ def test_bar_previous_run_average_follows_language():
 
 
 def test_first_task_prefill_average_is_there_during_its_own_decode(temp_settings):
-    """回归（用户报的 bug）：“第一次 prefill 完了到 decode 时 prefill 那里会显示 -，
+    """回归（报告的 bug）：“第一次 prefill 完了到 decode 时 prefill 那里会显示 -，
     第二次就显示出来”。
 
     根因不在指标带，而在数据源：`print_timings()`（`prompt eval time` /
@@ -1213,7 +1213,7 @@ def test_last_task_speeds_come_from_the_log_and_reach_the_row(temp_settings):
 
 
 def test_ctx_percent_is_painted_inside_the_bar():
-    """ctx 的百分比画在**计量条里面**（第十轮），并且绘制路径真的跑得起来。
+    """ctx 的百分比画在**计量条里面**（后来的定案），并且绘制路径真的跑得起来。
 
     这条测试首先是“进程别死”：`_CtxMeter.paintEvent` 是 C++ 绘制路径调的虚函数，
     在里面抛异常不会变成 traceback，而是整个进程静默 fastfail（写错枚举名
@@ -1261,7 +1261,7 @@ def test_bar_ctx_bar_color_tiers():
     for frac, color in ((0.5, "#16a34a"), (0.75, "#d97706"), (0.95, "#dc2626")):
         bar.update({"ctx_frac": frac, "ctx_used": None, "ctx_total": None})
         assert color in bar._tiles["ctx"][2].styleSheet()
-    # 无读数（/slots 还没回数据）→ 计量条为空、写 0.0%（第十二轮：常驻，
+    # 无读数（/slots 还没回数据）→ 计量条为空、写 0.0%（后来的要求：常驻，
     # 不再是破折号；chunk 宽 0 所以什么也不画）
     bar.update({})
     assert bar._tiles["ctx"][2].value() == 0
@@ -1291,7 +1291,7 @@ def test_bar_metrics_unavailable_dims_right_group():
 def test_bar_session_totals_survive_the_metrics_endpoint_dying():
     """端点半路挂了（error）：已经不为 0 的累计值继续显示，不藏成破折号。
 
-    用户：“右边那几个指标，是否也符合这个逻辑：表达这次 session 状态、累积的
+    要求：“右边那几个指标，是否也符合这个逻辑：表达这次 session 状态、累积的
     数值（非瞬时值），只要不为 0，就要保持一直显示” —— 之前唯一违反这条的就是
     `metrics_state` 一变成 error/unsupported 就整组改破折号（把手里已有的数藏了）。
     次要色 + tooltip 把“为什么不再更新”写在最前面；**一个数都没读到过**时仍是
@@ -1342,7 +1342,7 @@ def test_bar_slots_off_dims_left_group_and_row_stays():
 
 
 def test_bar_has_no_status_dot_any_more():
-    """2026-11 第五轮：条带里那个绿色小圆点删掉了（用户：“metric 行那个绿色小圆点
+    """2026-11 改版：条带里那个绿色小圆点删掉了（要求：“metric 行那个绿色小圆点
     删了或者移动到运行时间那”）→ 运行状态由状态栏那一个点表达（见
     tests/test_right_tabs_e15.py::test_status_dot_tracks_run_and_endpoint_state），
     条带变成纯数据。“端点是否应答”仍在这里判定，交给状态栏染色。"""
@@ -1360,9 +1360,9 @@ def test_bar_has_no_status_dot_any_more():
 
 
 def test_bar_idle_shows_the_metric_cells_not_a_hint():
-    """第七轮：未运行时**不再**折叠成一句提示。
+    """后来：未运行时**不再**折叠成一句提示。
 
-    用户指着「服务未启动 · 启动后在这里显示…」那行说："这行文字换成指标值，即
+    意见是：“这行文字换成指标值，即
     不用启动后再显示出来，一直都显示" → 提示语删除，未运行时七格常驻。
 
     钉住：① 未运行时七格都可见：速度格是破折号，**上下文条与累计组是 0**
@@ -1375,11 +1375,11 @@ def test_bar_idle_shows_the_metric_cells_not_a_hint():
     assert bar._tiles["prefill"][0].isVisibleTo(bar)
     # 速度格：未知 → 破折号
     assert all(_val(bar, k).startswith("—") for k in bar._SPEED_KEYS)
-    # 上下文条：0.0%，不是破折号（用户：“停止了就不显示了，应该一直显示，
+    # 上下文条：0.0%，不是破折号（要求：“停止了就不显示了，应该一直显示，
     # 哪怕刚开始时也应为 0”）—— 没启动就是 KV 为空，0 是个值
     assert _val(bar, "ctx") == "0.0%"
     assert bar._tiles["ctx"][2].value() == 0
-    # 累计组：**0**，不是破折号（第八轮："session 里的值开始不应该没有值，
+    # 累计组：**0**，不是破折号（后来的要求："session 里的值开始不应该没有值，
     # 开始就是 0"）—— 计数从 0 起算，一排破折号看着像坏了
     assert _val(bar, "total_in") == "0"
     assert _val(bar, "cached_in") == "0"
@@ -1429,7 +1429,7 @@ def test_bar_no_http_state():
     bar.set_running(True)
     bar.set_no_http(True)
     # 无 HTTP 端点：七格常驻，专门说明在 tooltip（区别于"未启动"）。
-    # 实时组未知 → 破折号；累计组是"启动以来"的计数 → 0（第八轮）
+    # 实时组未知 → 破折号；累计组是"启动以来"的计数 → 0（后来的定案）
     assert bar._tiles["prefill"][0].isVisibleTo(bar)
     assert all(_val(bar, k).startswith("—")
                for k in bar._SPEED_KEYS + ("ctx",))
@@ -1490,7 +1490,7 @@ def _window(temp_settings):
 
 
 def test_metrics_row_floor_keeps_values_visible(temp_settings):
-    """2026-11 第五轮：条带是 Maximum 策略（只长到内容宽），但这**不等于**压不扁它
+    """2026-11 改版：条带是 Maximum 策略（只长到内容宽），但这**不等于**压不扁它
     —— 容器比布局最小值还窄时 QLayout 会把每一项都压到自己的最小值以下。实测窗口
     停在最小宽度、指标态下：条带实得 446px、数值单元从 sizeHint 88px 被压到 30px，
     **数字直接看不见了**，而这行的全部意义就是那几个数字。
@@ -1567,7 +1567,7 @@ def test_live_row_position_and_visible_by_default(temp_settings):
     _qapp()
     w = _window(temp_settings)
     try:
-        # 2026-11 第五轮：指标行与启动按钮**合成一行**（self.control_bar），这一行
+        # 2026-11 改版：指标行与启动按钮**合成一行**（self.control_bar），这一行
         # 贴在右栏 tab widget 下方、是最后一个条目 → 三个 tab 都能看到指标。
         # isHidden() 是自身显式隐藏态 —— isVisible() 要求整条祖先链可见，未
         # show() 的窗口下恒为 False
@@ -1581,7 +1581,7 @@ def test_live_row_position_and_visible_by_default(temp_settings):
         assert widgets[-1] is w.live_metrics
         assert widgets.index(w.btn_start) < widgets.index(w.live_metrics)
         assert not w.live_metrics.isHidden()
-        # 未运行：七格常驻 + 灰破折号（第七轮），行本身也从不隐藏
+        # 未运行：七格常驻 + 灰破折号（后来的定案），行本身也从不隐藏
         assert w.live_metrics._running is False
         assert w.live_metrics._tiles["prefill"][0].isVisibleTo(w.live_metrics)
         assert "服务未启动" in w.live_metrics._tiles["prefill"][0].toolTip()
@@ -1597,7 +1597,7 @@ def _settle(app, win, width, height):
 
 
 def test_live_row_visible_on_every_tab(temp_settings):
-    """用户要求：切到「日志输出」/「运行信息」时这一行也必须在——它现在在
+    """要求是：切到「日志输出」/「运行信息」时这一行也必须在——它现在在
     标签页外面（下方），不再属于 tab 1。"""
     from PyQt6.QtCore import QPoint
     app = _qapp()

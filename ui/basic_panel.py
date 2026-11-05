@@ -76,7 +76,7 @@ class ElidingLabel(QLabel):
 class BasicPanel(QWidget):
     """Basic mode panel. Simplified UI with commonly used parameters only.
 
-    The ⚡ quick-toggles group is user-configurable (plan E10): which
+    The ⚡ quick-toggles group is user-configurable: which
     parameters it shows is chosen from the 设置 menu (自定义快捷开关…)
     and persisted as an ordered key list (ui.quick_params in
     settings.json).
@@ -123,7 +123,7 @@ class BasicPanel(QWidget):
         self.set_values(dict(d))
 
     def set_defaults(self, defaults):
-        """Update the defaults baseline (live-parsed defaults arriving after startup, plan A10)."""
+        """Update the defaults baseline (live-parsed defaults arriving after startup)."""
         self._defaults = dict(defaults)
 
     def _setup_ui(self):

@@ -151,7 +151,7 @@ class TestNegFlags:
 
     @pytest.mark.parametrize("key, neg, pos", NEG_FLAG_PARAMS)
     def test_default_off_user_on_emits_positive(self, key, neg, pos):
-        # Simulate a llama-server version whose default is off (plan A3 scenario)
+        # Simulate a llama-server version whose default is off (the default-off case)
         b = make_builder(key, False)
         args = emit(b, **{key: True})
         assert pos in args

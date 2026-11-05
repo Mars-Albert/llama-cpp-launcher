@@ -7,11 +7,11 @@ window's setMinimumSize (1100x700) was *below* the content's layout minimum
 parameter rows were squashed to a few pixels and controls were drawn on top
 of each other.
 
-The fix (see ui/main_window.py / ui/basic_panel.py, plan E11, option A):
+The fix (see ui/main_window.py / ui/basic_panel.py, option A):
 - the basic parameter panel carries a hard minimum height equal to its
   natural height, and the window minimum follows it — the window can never
   be resized into a state that squashes the rows. The parameter area
-  therefore has no vertical scrollbar at all (per user decision: rows keep
+  therefore has no vertical scrollbar at all (deliberate: rows keep
   full height, the window simply cannot shrink below the content);
 - the window minimum height is computed as the sum of the right column's
   children minimums (+ menu/status bars, central margins): the plain
@@ -101,7 +101,7 @@ def _overlaps(win):
 
     # 指标带的透明 strut 与数值标签**就是**完全重合的：同一个 QGridLayout 单元里
     # 叠两层（strut 撑出"该指标最宽取值"的宽度，value 在上面画字，strut 的
-    # color: transparent）—— 那是定宽数值列的实现方式，不是排版缺陷。第七轮之前
+    # color: transparent）—— 那是定宽数值列的实现方式，不是排版缺陷。后来之前
     # 未运行折叠成提示语、strut 跟着隐藏，所以这个测试从没抓到它。
     _intentional = {"metricStrut", "metricValue"}
 
@@ -201,7 +201,7 @@ def test_no_overlapping_controls_at_small_sizes(temp_settings):
 
 
 def test_panel_never_vertically_squashed(temp_settings):
-    """E11 design (user decision: no vertical scrollbar on the parameter
+    """E11 design (deliberate: no vertical scrollbar on the parameter
     area): the basic panel carries a hard minimum height equal to its
     natural height and the window minimum follows it — so at every legal
     window size the panel keeps its full height and no vertical scrollbar
@@ -232,7 +232,7 @@ def test_panel_never_vertically_squashed(temp_settings):
 
 
 def test_quick_grid_rewrap_never_squashes_groups(temp_settings):
-    """E11 option A regression (user screenshot): with 7 quick toggles the
+    """E11 option A regression (field screenshot): with 7 quick toggles the
     grid wraps 1 -> 2 rows when the window is narrowed; the extra row must
     not 'borrow' height from the 模型设置 group. The window minimum must
     follow the re-wrap (and the window grow) so every group keeps its full

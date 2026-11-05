@@ -106,8 +106,8 @@ def window(tmp_path, monkeypatch):
 
 
 def test_window_gpu_info_dual(window):
-    """E8：双 GPU 行 + tooltip（2026-10 移出参数面板 → 2026-11 第十一轮从模式行
-    再移到**状态栏最左**，用户：“把这个信息也放到状态栏上，放在版本号左边”）。"""
+    """E8：双 GPU 行 + tooltip（2026-10 移出参数面板 → 2026-11 改版从模式行
+    再移到**状态栏最左**，要求：“把这个信息也放到状态栏上，放在版本号左边”）。"""
     window._on_devices_ready(parse_device_list(DUAL_OUTPUT))
     label = window.gpu_info_label
     assert "RTX 5090" in label.text()

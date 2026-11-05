@@ -83,7 +83,7 @@ class AdvancedPanel(QWidget):
         self.set_values(dict(d))
 
     def set_defaults(self, defaults):
-        """Update the defaults baseline (live-parsed defaults arriving after startup, plan A10)."""
+        """Update the defaults baseline (live-parsed defaults arriving after startup)."""
         self._defaults = dict(defaults)
 
     def tab_keys(self):
@@ -115,7 +115,7 @@ class AdvancedPanel(QWidget):
                 btn.blockSignals(False)
 
     def set_chat_templates(self, templates):
-        """Replace the chat-template list, preserving the current selection (plan A10)."""
+        """Replace the chat-template list, preserving the current selection."""
         self._chat_templates = list(templates)
         current = self.adv_chat_template.currentText()
         self.adv_chat_template.blockSignals(True)
@@ -355,7 +355,7 @@ class AdvancedPanel(QWidget):
     def _build_combo_edit_row(self, form, p):
         w = QComboBox()
         if p.key == "chat_template":
-            # Dynamic item list (live-parsed chat templates, plan A10).
+            # Dynamic item list (live-parsed chat templates).
             w.addItems([""] + self._chat_templates)
         elif p.items:
             w.addItems(self._t_items(p.items))

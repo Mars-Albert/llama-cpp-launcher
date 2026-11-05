@@ -5,7 +5,7 @@ The primary base font is the **bundled** assets/fonts/Inter-Regular.ttf
 (OFL, registered at startup via QFontDatabase.addApplicationFont). Its
 family name is the private "LlamaCPPLauncher", not "Inter": a report
 machine's font store carried a third-party "font beautification" file
-registered under common family names (2026-09/10 user reports) with
+registered under common family names (2026-09/10 field reports) with
 scrambled Latin DIGIT glyphs (0→O, 4→×, 5→6, 8→≠, 9→女; letters and CJK
 intact). While that file claimed the name "Inter", Qt resolved the
 ambiguous family per glyph — some digits from our bundled file (healthy),

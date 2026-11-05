@@ -70,7 +70,7 @@ def diff_slots(prev, slots, now):
     套），**slot 账本** = `n_prompt_tokens`（= `slot.prompt.tokens.size()`）。上下文
     占用取两者的 **较大值**，因为任务账本只在任务期间存在：任务一结束
     `server_slot::reset()` 就把 `stats = {}`（而 prompt 缓存故意保留），三个计数器
-    归零但 KV 里整段对话还在 → 只用任务账本会“一空闲就显示 0%”（用户报的 bug，
+    归零但 KV 里整段对话还在 → 只用任务账本会“一空闲就显示 0%”（报告的 bug，
     见 `test_diff_slots_ctx_keeps_the_occupancy_when_the_slot_goes_idle`）。
     **绝不能把两个账本相加**（旧算法 `n_prompt_tokens + n_decoded` 就是把生成
     token 数了两遍，同一个坑见下方注释）。
@@ -148,7 +148,7 @@ def diff_slots(prev, slots, now):
             #    前缀时 `keep_first(n_past)` 会把它砍到前缀长，`prompt_clear()` 清零
             #    —— 不写虚数，也不写陈旧数。
             #
-            # **为何需要两个（尾轮，用户：“不活动时 context 怎么还是 0？”）**：任务
+            # **为何需要两个（末次改版，要求：“不活动时 context 怎么还是 0？”）**：任务
             # 一结束 `server_slot::release()` → `reset()` 就 `stats = {}`（普通 slot 的
             # prompt **不**清，只有 child/stateless/tts 才 `prompt_clear()`），于是
             # `n_prompt_tokens_processed` / `_cache` / `n_decoded` 全变 0，而
@@ -161,7 +161,7 @@ def diff_slots(prev, slots, now):
             # 常用的 draft-mtp 就是）每验收到一批 token 就把它们追进②那段历史，而
             # `n_decoded` 计的正是同一批 —— 旧算法 `n_prompt + decoded` 把生成部分
             # **数了两遍**：decode 期间明显偏大（偏差 = 已生成的全部 token），下一个
-            # 请求一进 prefill（n_decoded 归零）又“莫名变准”（上一轮用户报的 bug，
+            # 请求一进 prefill（n_decoded 归零）又“莫名变准”（上一版报告的 bug，
             # 见 test_diff_slots_ctx_is_not_double_counted_while_spec_decoding）。
             #
             # 老服务端没有①那两个字段时退回 `n_prompt + decoded`（那个年代

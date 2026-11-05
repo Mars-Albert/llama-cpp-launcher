@@ -220,7 +220,7 @@ class CommandBuilder:
 
         No default-equality check, no inactive-value guard — 0, -1,
         'none' and even the empty string are written (the command line
-        is meant to be fully explicit, user decision 2026-10). Booleans
+        is meant to be fully explicit, deliberate 2026-10). Booleans
         still can only be present or absent: a explicit-off positive-only
         flag has no token to write."""
         mode = p.emit
