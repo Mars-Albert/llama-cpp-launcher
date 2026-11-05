@@ -74,8 +74,37 @@ jobs:
           # verbatim. generate_release_notes is not usable here: it only lists
           # merged pull requests, and this repo pushes straight to main, so every
           # release body came out empty except for the compare link.
-          if [ "$(git cat-file -t "refs/tags/$TAG" 2>/dev/null)" = "tag" ]; then
-            git tag -l --format='%(contents)' "$TAG" > RELEASE_NOTES.md
+          #
+          # The tag ref must be re-fetched on purpose. On a tag push checkout fetches
+          # the *peeled commit* (that is what GITHUB_SHA is), and depending on how the
+          # ref arrives locally it can end up pointing straight at the commit — the tag
+          # object is the only place the message lives. This refspec stores the tag
+          # object itself; --force because replacing a peeled ref is not a fast-forward.
+          # (v1.9.1 fell through to the fallback with a perfectly good annotated tag on
+          # the remote; the runner's git state is not readable from outside — job logs
+          # need admin rights — hence the explicit fetch plus the diagnostics below.)
+          git fetch --no-tags --force origin "refs/tags/$TAG:refs/tags/$TAG" \
+            || echo "::warning::could not re-fetch refs/tags/$TAG; trying the local ref"
+
+          # for-each-ref rather than `git tag -l --format`: -l takes a *pattern*, and
+          # %(contents) on a lightweight tag returns the *commit* body, which would
+          # silently ship as release notes. Check the object type instead.
+          OBJTYPE="$(git for-each-ref "refs/tags/$TAG" --format='%(objecttype)')"
+          NOTES=""
+          if [ "$OBJTYPE" = "tag" ]; then
+            NOTES="$(git for-each-ref "refs/tags/$TAG" --format='%(contents)')"
+          fi
+          echo "tag ref type: ${OBJTYPE:-<missing>}"
+          echo "notes bytes : ${#NOTES}"
+
+          if [ -n "$NOTES" ]; then
+            # Drop a leading tag-name subject (GitHub renders the tag name itself, so
+            # repeating it reads like a heading glitch) and the blank line after it.
+            NOTES="$(printf '%s\n' "$NOTES" | awk -v tag="$TAG" '
+              NR == 1 && $0 == tag { skip = 1; next }
+              skip && $0 ~ /^[ \t]*$/ { next }
+              { skip = 0; print }')"
+            printf '%s\n' "$NOTES" > RELEASE_NOTES.md
           fi
 
           if [ ! -s RELEASE_NOTES.md ]; then
@@ -104,5 +133,9 @@ jobs:
           name: "Llama CPP Launcher v${{ steps.version.outputs.VERSION }}"
           files: dist/LlamaCppLauncher.exe
           body_path: RELEASE_NOTES.md
+          # Re-running a tag (fixing the notes, rebuilding the exe) must be
+          # idempotent: without this the upload step fails on the asset name that
+          # the previous run left behind, and the release keeps the stale binary.
+          overwrite_files: true
           draft: false
           prerelease: false
