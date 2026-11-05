@@ -5,10 +5,6 @@ __pycache__/
 .env
 *.bat.bak
 
-# Claude Code
-.claude/
-CLAUDE.md
-
 # Build artifacts
 dist/
 build/
@@ -19,6 +15,3 @@ nul
 # Reference docs
 gguf.md
 verbose.txt
-
-# Local agent session data
-.pi/
